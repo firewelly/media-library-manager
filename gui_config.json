@@ -1,0 +1,59 @@
+{
+  "columns": {
+    "title": {
+      "width": 370,
+      "position": 0,
+      "text": "标题"
+    },
+    "stars": {
+      "width": 73,
+      "position": 1,
+      "text": "星级"
+    },
+    "tags": {
+      "width": 91,
+      "position": 2,
+      "text": "标签"
+    },
+    "size": {
+      "width": 76,
+      "position": 3,
+      "text": "大小"
+    },
+    "status": {
+      "width": 76,
+      "position": 4,
+      "text": "状态"
+    },
+    "duration": {
+      "width": 74,
+      "position": 5,
+      "text": "时长"
+    },
+    "resolution": {
+      "width": 77,
+      "position": 6,
+      "text": "分辨率"
+    },
+    "file_created_time": {
+      "width": 75,
+      "position": 7,
+      "text": "创建时间"
+    },
+    "top_folder": {
+      "width": 74,
+      "position": 8,
+      "text": "顶层文件夹"
+    },
+    "full_path": {
+      "width": 72,
+      "position": 9,
+      "text": "完整路径"
+    },
+    "year": {
+      "width": 73,
+      "position": 10,
+      "text": "年份"
+    }
+  }
+}

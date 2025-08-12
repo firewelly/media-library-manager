@@ -1,0 +1,78 @@
+# MacOS 跨平台视频媒体库管理软件依赖
+# Media Library Management Software Dependencies
+
+# ============ 必需的第三方库 / Required Third-party Libraries ============
+
+# 图像处理库 / Image Processing Library
+# 用于缩略图生成、图像显示和处理 / For thumbnail generation, image display and processing
+Pillow>=10.0.0
+
+# 网络请求库 / HTTP Requests Library  
+# 用于网络相关功能（如果需要） / For network-related features (if needed)
+requests>=2.31.0
+
+# ============ Python内置库 / Built-in Python Libraries ============
+# 以下库为Python标准库，无需单独安装 / The following are Python standard libraries, no separate installation required
+
+# GUI框架 / GUI Framework
+# tkinter - 图形用户界面 / Graphical User Interface
+
+# 数据库 / Database
+# sqlite3 - SQLite数据库接口 / SQLite database interface
+
+# 文件和系统操作 / File and System Operations
+# os - 操作系统接口 / Operating system interface
+# pathlib - 面向对象的文件系统路径 / Object-oriented filesystem paths
+# shutil - 高级文件操作 / High-level file operations
+# tempfile - 临时文件和目录 / Temporary files and directories
+# subprocess - 子进程管理 / Subprocess management
+# platform - 平台信息 / Platform information
+
+# 数据处理 / Data Processing
+# hashlib - 哈希算法 / Hash algorithms
+# json - JSON数据处理 / JSON data processing
+# xml.etree.ElementTree - XML处理 / XML processing
+# base64 - Base64编码解码 / Base64 encoding/decoding
+# io - 核心I/O工具 / Core I/O tools
+
+# 其他工具 / Other Utilities
+# threading - 线程支持 / Threading support
+# re - 正则表达式 / Regular expressions
+# datetime - 日期时间处理 / Date and time handling
+
+# ============ 外部工具依赖 / External Tool Dependencies ============
+
+# FFmpeg - 视频处理工具 / Video Processing Tool
+# 用于视频缩略图生成和元数据提取 / For video thumbnail generation and metadata extraction
+# 
+# 安装方法 / Installation Methods:
+# macOS: brew install ffmpeg
+# Windows: 下载FFmpeg并添加到PATH / Download FFmpeg and add to PATH
+#          https://ffmpeg.org/download.html
+# Linux: 
+#   Ubuntu/Debian: sudo apt-get install ffmpeg
+#   CentOS/RHEL: sudo yum install ffmpeg
+#   Fedora: sudo dnf install ffmpeg
+
+# ============ 开发和调试 / Development and Debugging ============
+# 以下库仅在开发时需要 / The following libraries are only needed during development
+
+# 代码格式化 / Code Formatting (Optional)
+# black>=23.0.0
+
+# 代码检查 / Code Linting (Optional)  
+# flake8>=6.0.0
+
+# 类型检查 / Type Checking (Optional)
+# mypy>=1.0.0
+
+# ============ 版本要求 / Version Requirements ============
+# Python 3.7+ 是最低要求 / Python 3.7+ is the minimum requirement
+# 推荐使用 Python 3.9+ / Python 3.9+ is recommended
+
+# ============ 安装说明 / Installation Instructions ============
+# 1. 确保已安装Python 3.7+ / Ensure Python 3.7+ is installed
+# 2. 运行: pip install -r requirements.txt
+# 3. 安装FFmpeg（见上述说明）/ Install FFmpeg (see instructions above)
+# 4. 运行: python init_database.py (首次使用) / Run: python init_database.py (first time)
+# 5. 运行: python media_library.py 或 ./start_media_library.sh / Run: python media_library.py or ./start_media_library.sh
