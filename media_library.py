@@ -361,7 +361,7 @@ class MediaLibrary:
         sorted_columns = sorted(self.column_config.items(), key=lambda x: x[1]['position'])
         columns = [col[0] for col in sorted_columns]
         
-        self.video_tree = ttk.Treeview(list_frame, columns=columns, show='headings', height=15)
+        self.video_tree = ttk.Treeview(list_frame, columns=columns, show='headings', height=15, selectmode='extended')
         
         # 设置列标题和宽度
         for col_name in columns:
@@ -681,7 +681,7 @@ class MediaLibrary:
         columns = [col[0] for col in sorted_columns]
         
         # 创建Treeview
-        self.video_tree = ttk.Treeview(list_frame, columns=columns, show='headings', height=15)
+        self.video_tree = ttk.Treeview(list_frame, columns=columns, show='headings', height=15, selectmode='extended')
         
         # 设置列标题和宽度，添加排序功能
         for col_name in columns:
@@ -1682,28 +1682,87 @@ class MediaLibrary:
             self.video_tree.delete(item)
             
         try:
+            # 构建查询条件
+            conditions = []
+            params = []
+            
+            # 检查是否在筛选模式，如果是则添加搜索条件
+            if getattr(self, 'is_filtering', False):
+                # 标题搜索条件
+                title_search_text = self.title_search_var.get().strip()
+                if title_search_text:
+                    conditions.append("(title LIKE ? OR file_name LIKE ?)")
+                    title_search_param = f"%{title_search_text}%"
+                    params.extend([title_search_param, title_search_param])
+                    
+                # 标签搜索条件
+                tag_search_text = self.tag_search_var.get().strip()
+                if tag_search_text:
+                    conditions.append("tags LIKE ?")
+                    tag_search_param = f"%{tag_search_text}%"
+                    params.append(tag_search_param)
+                    
+                # 星级筛选
+                star_filter = self.star_filter.get()
+                if star_filter > 0:
+                    conditions.append("stars = ?")
+                    params.append(star_filter)
+                    
+                # 标签筛选
+                selected_tags = [self.tags_listbox.get(i) for i in self.tags_listbox.curselection()]
+                if selected_tags:
+                    tag_conditions = []
+                    for tag in selected_tags:
+                        tag_conditions.append("tags LIKE ?")
+                        params.append(f"%{tag}%")
+                    if tag_conditions:
+                        conditions.append(f"({' OR '.join(tag_conditions)})")
+                        
+                # NAS状态筛选
+                nas_filter = self.nas_filter.get()
+                if nas_filter == "online":
+                    conditions.append("is_nas_online = 1")
+                elif nas_filter == "offline":
+                    conditions.append("is_nas_online = 0")
+                    
+                # 文件夹来源筛选
+                selected_folder_indices = self.folder_listbox.curselection()
+                if selected_folder_indices and hasattr(self, 'folder_path_mapping'):
+                    selected_folder = self.folder_listbox.get(selected_folder_indices[0])
+                    if selected_folder != "全部" and selected_folder in self.folder_path_mapping:
+                        folder_path = self.folder_path_mapping[selected_folder]
+                        if folder_path:  # 确保folder_path不为None
+                            conditions.append("source_folder LIKE ?")
+                            params.append(f"{folder_path}%")
+            
             # 设备和在线筛选逻辑
             current_device = self.get_current_device_name()
             
-            # 检查是否启用了"仅显示在线"筛选
+            # 仅显示在线内容筛选
             if hasattr(self, 'show_online_only') and self.show_online_only.get():
-                # 当勾选"仅显示在线"时，只显示实际存在的文件夹
-                self.cursor.execute("""
-                    SELECT folder_path FROM folders 
-                    WHERE is_active = 1
-                """)
-                all_folders = [row[0] for row in self.cursor.fetchall()]
-                available_folders = []
-                for folder_path in all_folders:
-                    if folder_path and os.path.exists(folder_path):
-                        available_folders.append(folder_path)
+                # 当勾选"仅显示在线"时，使用子查询筛选在线文件夹中的视频
+                online_folder_condition = """
+                    EXISTS (
+                        SELECT 1 FROM folders f
+                        WHERE f.is_active = 1 
+                        AND source_folder LIKE f.folder_path || '%'
+                        AND (
+                            f.folder_type = 'nas' OR 
+                            (f.folder_type = 'local' AND REPLACE(f.device_name, '.local', '') = REPLACE(?, '.local', ''))
+                        )
+                    )
+                """
+                conditions.append(online_folder_condition)
+                params.append(current_device)
             else:
-                # 不勾选时显示所有文件夹
-                self.cursor.execute("""
-                    SELECT folder_path FROM folders 
-                    WHERE is_active = 1
+                # 不勾选时显示所有激活文件夹中的视频
+                conditions.append("""
+                    EXISTS (
+                        SELECT 1 FROM folders f
+                        WHERE f.is_active = 1 
+                        AND source_folder LIKE f.folder_path || '%'
+                    )
                 """)
-                available_folders = [row[0] for row in self.cursor.fetchall()]
             
             # 构建排序查询
             order_clause = "ORDER BY title"  # 默认排序
@@ -1727,32 +1786,14 @@ class MediaLibrary:
                 direction = "DESC" if self.sort_reverse else "ASC"
                 order_clause = f"ORDER BY {db_column} {direction}"
             
-            # 构建查询，只显示可用文件夹中的视频
-            if available_folders:
-                folder_conditions = []
-                params = []
-                for folder_path in available_folders:
-                    folder_conditions.append("source_folder LIKE ?")
-                    params.append(f"{folder_path}%")
-                
-                # 添加在线状态筛选条件
-                if hasattr(self, 'show_online_only') and self.show_online_only.get():
-                    # 通过JOIN folders表来获取设备信息，筛选本地文件或在线NAS文件
-                    where_clause = f"""WHERE ({' OR '.join(folder_conditions)}) AND (
-                        EXISTS (SELECT 1 FROM folders f WHERE videos.source_folder LIKE f.folder_path || '%' 
-                               AND f.device_name = ? AND f.folder_type = 'local') OR
-                        videos.is_nas_online = 1
-                    )"""
-                    params.append(current_device)
-                else:
-                    where_clause = f"WHERE ({' OR '.join(folder_conditions)})"
-                
-                query = f"SELECT * FROM videos {where_clause} {order_clause}"
-                self.cursor.execute(query, params)
+            # 构建最终查询
+            if conditions:
+                where_clause = f"WHERE {' AND '.join(conditions)}"
             else:
-                # 如果没有可用文件夹，不显示任何视频
-                query = f"SELECT * FROM videos WHERE 1 = 0 {order_clause}"
-                self.cursor.execute(query)
+                where_clause = ""
+                
+            query = f"SELECT * FROM videos {where_clause} {order_clause}"
+            self.cursor.execute(query, params)
             
             videos = self.cursor.fetchall()
             
@@ -4724,203 +4765,10 @@ class MediaLibrary:
         
     def filter_videos(self, event=None):
         """筛选视频"""
-        # 清空现有数据
-        for item in self.video_tree.get_children():
-            self.video_tree.delete(item)
-            
-        try:
-            # 构建查询条件
-            conditions = []
-            params = []
-            
-            # 标题搜索条件
-            title_search_text = self.title_search_var.get().strip()
-            if title_search_text:
-                conditions.append("(title LIKE ? OR file_name LIKE ?)")
-                title_search_param = f"%{title_search_text}%"
-                params.extend([title_search_param, title_search_param])
-                
-            # 标签搜索条件
-            tag_search_text = self.tag_search_var.get().strip()
-            if tag_search_text:
-                conditions.append("tags LIKE ?")
-                tag_search_param = f"%{tag_search_text}%"
-                params.append(tag_search_param)
-                
-            # 星级筛选
-            star_filter = self.star_filter.get()
-            if star_filter > 0:
-                conditions.append("stars = ?")
-                params.append(star_filter)
-                
-            # 标签筛选
-            selected_tags = [self.tags_listbox.get(i) for i in self.tags_listbox.curselection()]
-            if selected_tags:
-                tag_conditions = []
-                for tag in selected_tags:
-                    tag_conditions.append("tags LIKE ?")
-                    params.append(f"%{tag}%")
-                if tag_conditions:
-                    conditions.append(f"({' OR '.join(tag_conditions)})")
-                    
-            # NAS状态筛选
-            nas_filter = self.nas_filter.get()
-            if nas_filter == "online":
-                conditions.append("is_nas_online = 1")
-            elif nas_filter == "offline":
-                conditions.append("is_nas_online = 0")
-                
-            # 文件夹来源筛选
-            selected_folder_indices = self.folder_listbox.curselection()
-            if selected_folder_indices and hasattr(self, 'folder_path_mapping'):
-                selected_folder = self.folder_listbox.get(selected_folder_indices[0])
-                if selected_folder != "全部" and selected_folder in self.folder_path_mapping:
-                    folder_path = self.folder_path_mapping[selected_folder]
-                    if folder_path:  # 确保folder_path不为None
-                        conditions.append("source_folder LIKE ?")
-                        params.append(f"{folder_path}%")
-            
-            # 设备和在线筛选逻辑
-            current_device = self.get_current_device_name()
-            
-            # 仅显示在线内容筛选
-            if hasattr(self, 'show_online_only') and self.show_online_only.get():
-                # 当勾选"仅显示在线"时，只显示实际存在的文件夹
-                self.cursor.execute("""
-                    SELECT folder_path FROM folders 
-                    WHERE is_active = 1
-                """)
-                all_folders = [row[0] for row in self.cursor.fetchall()]
-                available_folders = []
-                for folder_path in all_folders:
-                    if folder_path and os.path.exists(folder_path):
-                        available_folders.append(folder_path)
-            else:
-                # 不勾选时显示所有文件夹
-                self.cursor.execute("""
-                    SELECT folder_path FROM folders 
-                    WHERE is_active = 1
-                """)
-                available_folders = [row[0] for row in self.cursor.fetchall()]
-            
-            if available_folders:
-                folder_conditions = []
-                for folder_path in available_folders:
-                    folder_conditions.append("source_folder LIKE ?")
-                    params.append(f"{folder_path}%")
-                if folder_conditions:
-                    conditions.append(f"({' OR '.join(folder_conditions)})")
-            else:
-                # 如果没有可用文件夹，不显示任何视频
-                conditions.append("1 = 0")
-                
-            # 构建最终查询
-            query = "SELECT * FROM videos"
-            if conditions:
-                query += " WHERE " + " AND ".join(conditions)
-            query += " ORDER BY title"
-            
-            self.cursor.execute(query, params)
-            videos = self.cursor.fetchall()
-            
-            # 显示结果
-            for video in videos:
-                # 安全解包，处理可能的字段数量不匹配
-                video_data = list(video)
-                while len(video_data) < 23:  # 确保有足够的字段
-                    video_data.append(None)
-                
-                video_id, file_path, file_name, file_size, file_hash, title, description, genre, year, rating, stars, tags, nas_path, is_nas_online, created_at, updated_at, thumbnail_data, thumbnail_path, duration, resolution, file_created_time, source_folder, md5_hash = video_data[:23]
-                
-                star_display = "★" * stars if stars > 0 else ""
-                size_display = self.format_file_size(file_size) if file_size else ""
-                status_display = "在线" if is_nas_online else "离线"
-                tags_display = tags if tags else ""
-                year_display = str(year) if year else ""
-                
-                # 格式化时长显示
-                duration_display = self.format_duration(duration)
-                
-                # 格式化分辨率显示
-                resolution_display = resolution if resolution else ""
-                
-                # 格式化文件创建时间显示
-                file_created_display = ""
-                if file_created_time:
-                    try:
-                        if isinstance(file_created_time, str):
-                            # 如果是字符串，尝试解析
-                            dt = datetime.fromisoformat(file_created_time.replace('Z', '+00:00'))
-                        else:
-                            # 如果是datetime对象
-                            dt = file_created_time
-                        file_created_display = dt.strftime("%Y-%m-%d")
-                    except:
-                        file_created_display = str(file_created_time)[:10] if file_created_time else ""
-                
-                # 格式化来源文件夹显示
-                source_folder_display = ""
-                if source_folder:
-                    source_folder_display = os.path.basename(source_folder) or source_folder
-                
-                # 获取设备名称
-                device_display = ""
-                if source_folder:
-                    # 从folders表获取设备信息
-                    self.cursor.execute("""
-                        SELECT device_name, folder_type 
-                        FROM folders 
-                        WHERE folder_path = ? OR ? LIKE folder_path || '%'
-                        ORDER BY LENGTH(folder_path) DESC
-                        LIMIT 1
-                    """, (source_folder, source_folder))
-                    folder_info = self.cursor.fetchone()
-                    
-                    if folder_info:
-                        device_name, folder_type = folder_info
-                        if folder_type == 'nas':
-                            # 对于NAS设备，尝试从路径中提取IP或域名
-                            if source_folder.startswith('smb://'):
-                                # 从smb://格式中提取IP或域名
-                                match = re.search(r'smb://([^/]+)', source_folder)
-                                if match:
-                                    device_display = match.group(1)
-                                else:
-                                    device_display = device_name or "NAS"
-                            elif '/Volumes/' in source_folder:
-                                # 从/Volumes/格式中提取卷名
-                                volume_match = re.search(r'/Volumes/([^/]+)', source_folder)
-                                if volume_match:
-                                    device_display = volume_match.group(1)
-                                else:
-                                    device_display = device_name or "NAS"
-                            else:
-                                device_display = device_name or "NAS"
-                        else:
-                            # 本地设备直接使用设备名称
-                            device_display = device_name or "本地"
-                    else:
-                        device_display = "未知"
-                
-                self.video_tree.insert('', 'end', values=(
-                    title or file_name,
-                    star_display,
-                    tags_display,
-                    size_display,
-                    status_display,
-                    duration_display,
-                    resolution_display,
-                    file_created_display,
-                    source_folder_display,
-                    year_display,
-                    device_display
-                ), tags=(video_id,))
-                
-        except Exception as e:
-            import traceback
-            error_details = traceback.format_exc()
-            print(f"筛选错误详情: {error_details}")
-            messagebox.showerror("错误", f"筛选失败: {str(e)}\n\n详细错误信息请查看控制台输出")
+        # 设置筛选标志，然后调用load_videos来正确显示数据
+        self.is_filtering = True
+        self.load_videos()
+
     
     def show_context_menu(self, event):
         """显示右键菜单"""
@@ -4928,53 +4776,98 @@ class MediaLibrary:
         item = self.video_tree.identify_row(event.y)
         if not item:
             return
-            
-        # 选中该项目
-        self.video_tree.selection_set(item)
         
-        # 获取视频信息
-        video_id = self.video_tree.item(item)['tags'][0]
-        self.cursor.execute("SELECT file_path, is_nas_online FROM videos WHERE id = ?", (video_id,))
-        result = self.cursor.fetchone()
+        # 获取当前选中的所有项目
+        selected_items = self.video_tree.selection()
         
-        if not result:
+        # 如果点击的项目不在选中列表中，则只选中点击的项目
+        if item not in selected_items:
+            self.video_tree.selection_set(item)
+            selected_items = [item]
+        
+        # 获取所有选中项目的信息
+        selected_videos = []
+        online_count = 0
+        
+        for selected_item in selected_items:
+            try:
+                video_id = self.video_tree.item(selected_item)['tags'][0]
+                self.cursor.execute("SELECT file_path, is_nas_online FROM videos WHERE id = ?", (video_id,))
+                result = self.cursor.fetchone()
+                
+                if result:
+                    file_path, is_nas_online = result
+                    selected_videos.append({
+                        'id': video_id,
+                        'path': file_path,
+                        'online': is_nas_online
+                    })
+                    if is_nas_online:
+                        online_count += 1
+            except (IndexError, TypeError):
+                continue
+        
+        # 如果没有在线文件，不显示菜单
+        if online_count == 0:
             return
-            
-        file_path, is_nas_online = result
         
-        # 只为在线文件显示右键菜单
-        if not is_nas_online:
-            return
-            
         # 创建右键菜单
         context_menu = tk.Menu(self.root, tearoff=0)
-        # 添加播放选项
-        context_menu.add_command(label="播放", command=lambda: self.play_video_from_context(video_id))
-        context_menu.add_separator()
-        # 添加自动标签功能
-        context_menu.add_command(label="自动标签", command=lambda: self.auto_tag_selected_videos())
-        context_menu.add_separator()
-        # 添加JAVDB信息获取功能
-        context_menu.add_command(label="JAVDB信息获取", command=lambda: self.fetch_javdb_info(video_id))
-        context_menu.add_separator()
-        # 添加更新元数据功能
-        context_menu.add_command(label="更新元数据", command=lambda: self.update_single_file_metadata(video_id))
-        context_menu.add_separator()
-        context_menu.add_command(label="删除文件", command=lambda: self.delete_file_from_context(video_id, file_path))
         
-        # 添加移动到子菜单
-        move_menu = tk.Menu(context_menu, tearoff=0)
-        context_menu.add_cascade(label="移动到", menu=move_menu)
-        
-        # 获取所有在线文件夹
-        self.cursor.execute("SELECT folder_path FROM folders WHERE is_active = 1")
-        online_folders = self.cursor.fetchall()
-        
-        for folder in online_folders:
-            folder_path = folder[0]
-            folder_name = os.path.basename(folder_path)
-            move_menu.add_command(label=folder_name, 
-                                command=lambda fp=folder_path: self.move_file_to_folder(video_id, file_path, fp))
+        # 根据选中文件数量调整菜单
+        if len(selected_videos) == 1:
+            # 单文件菜单
+            video_info = selected_videos[0]
+            context_menu.add_command(label="播放", command=lambda: self.play_video_from_context(video_info['id']))
+            context_menu.add_separator()
+            context_menu.add_command(label="自动标签", command=lambda: self.auto_tag_selected_videos())
+            context_menu.add_separator()
+            context_menu.add_command(label="JAVDB信息获取", command=lambda: self.fetch_javdb_info(video_info['id']))
+            context_menu.add_separator()
+            context_menu.add_command(label="更新元数据", command=lambda: self.update_single_file_metadata(video_info['id']))
+            context_menu.add_separator()
+            context_menu.add_command(label="删除文件", command=lambda: self.delete_file_from_context(video_info['id'], video_info['path']))
+            
+            # 添加移动到子菜单
+            move_menu = tk.Menu(context_menu, tearoff=0)
+            context_menu.add_cascade(label="移动到", menu=move_menu)
+            
+            # 获取所有在线文件夹
+            self.cursor.execute("SELECT folder_path FROM folders WHERE is_active = 1")
+            online_folders = self.cursor.fetchall()
+            
+            for folder in online_folders:
+                folder_path = folder[0]
+                folder_name = os.path.basename(folder_path)
+                move_menu.add_command(label=folder_name, 
+                                    command=lambda fp=folder_path: self.move_file_to_folder(video_info['id'], video_info['path'], fp))
+        else:
+            # 多文件菜单
+            context_menu.add_command(label=f"批量自动标签 ({len(selected_videos)}个文件)", 
+                                   command=lambda: self.batch_auto_tag_selected_videos())
+            context_menu.add_separator()
+            context_menu.add_command(label=f"批量JAVDB信息获取 ({len(selected_videos)}个文件)", 
+                                   command=lambda: self.batch_javdb_info_selected_videos())
+            context_menu.add_separator()
+            context_menu.add_command(label=f"批量更新元数据 ({len(selected_videos)}个文件)", 
+                                   command=lambda: self.batch_update_metadata_selected_videos())
+            context_menu.add_separator()
+            context_menu.add_command(label=f"批量删除文件 ({len(selected_videos)}个文件)", 
+                                   command=lambda: self.batch_delete_selected_videos())
+            
+            # 添加批量移动到子菜单
+            move_menu = tk.Menu(context_menu, tearoff=0)
+            context_menu.add_cascade(label=f"批量移动到 ({len(selected_videos)}个文件)", menu=move_menu)
+            
+            # 获取所有在线文件夹
+            self.cursor.execute("SELECT folder_path FROM folders WHERE is_active = 1")
+            online_folders = self.cursor.fetchall()
+            
+            for folder in online_folders:
+                folder_path = folder[0]
+                folder_name = os.path.basename(folder_path)
+                move_menu.add_command(label=folder_name, 
+                                    command=lambda fp=folder_path: self.batch_move_files_to_folder(fp))
         
         # 显示菜单
         try:
@@ -4982,6 +4875,503 @@ class MediaLibrary:
         finally:
             context_menu.grab_release()
     
+    def batch_auto_tag_selected_videos(self):
+        """批量自动标签选中的视频"""
+        selected_items = self.video_tree.selection()
+        if not selected_items:
+            messagebox.showwarning("警告", "请先选择要处理的视频文件")
+            return
+        
+        # 获取选中的视频ID列表
+        video_ids = []
+        for item in selected_items:
+            try:
+                video_id = self.video_tree.item(item)['tags'][0]
+                # 检查文件是否在线
+                self.cursor.execute("SELECT is_nas_online FROM videos WHERE id = ?", (video_id,))
+                result = self.cursor.fetchone()
+                if result and result[0]:  # 只处理在线文件
+                    video_ids.append(video_id)
+            except (IndexError, TypeError):
+                continue
+        
+        if not video_ids:
+            messagebox.showwarning("警告", "没有找到可处理的在线视频文件")
+            return
+        
+        # 确认操作
+        if not messagebox.askyesno("确认", f"确定要对 {len(video_ids)} 个视频文件进行自动标签吗？"):
+            return
+        
+        # 执行批量自动标签
+        self.batch_process_auto_tag(video_ids)
+    
+    def batch_update_metadata_selected_videos(self):
+        """批量更新选中视频的元数据"""
+        selected_items = self.video_tree.selection()
+        if not selected_items:
+            messagebox.showwarning("警告", "请先选择要处理的视频文件")
+            return
+        
+        # 获取选中的视频ID列表
+        video_ids = []
+        for item in selected_items:
+            try:
+                video_id = self.video_tree.item(item)['tags'][0]
+                # 检查文件是否在线
+                self.cursor.execute("SELECT is_nas_online FROM videos WHERE id = ?", (video_id,))
+                result = self.cursor.fetchone()
+                if result and result[0]:  # 只处理在线文件
+                    video_ids.append(video_id)
+            except (IndexError, TypeError):
+                continue
+        
+        if not video_ids:
+            messagebox.showwarning("警告", "没有找到可处理的在线视频文件")
+            return
+        
+        # 确认操作
+        if not messagebox.askyesno("确认", f"确定要更新 {len(video_ids)} 个视频文件的元数据吗？"):
+            return
+        
+        # 执行批量更新元数据
+        self.batch_process_metadata_update(video_ids)
+    
+    def batch_delete_selected_videos(self):
+        """批量删除选中的视频文件"""
+        selected_items = self.video_tree.selection()
+        if not selected_items:
+            messagebox.showwarning("警告", "请先选择要删除的视频文件")
+            return
+        
+        # 获取选中的视频信息
+        videos_to_delete = []
+        for item in selected_items:
+            try:
+                video_id = self.video_tree.item(item)['tags'][0]
+                self.cursor.execute("SELECT file_path, file_name, is_nas_online FROM videos WHERE id = ?", (video_id,))
+                result = self.cursor.fetchone()
+                if result and result[2]:  # 只处理在线文件
+                    videos_to_delete.append({
+                        'id': video_id,
+                        'path': result[0],
+                        'name': result[1]
+                    })
+            except (IndexError, TypeError):
+                continue
+        
+        if not videos_to_delete:
+            messagebox.showwarning("警告", "没有找到可删除的在线视频文件")
+            return
+        
+        # 确认删除
+        file_list = "\n".join([f"• {video['name']}" for video in videos_to_delete[:10]])
+        if len(videos_to_delete) > 10:
+            file_list += f"\n... 还有 {len(videos_to_delete) - 10} 个文件"
+        
+        if not messagebox.askyesno("确认删除", f"确定要删除以下 {len(videos_to_delete)} 个视频文件吗？\n\n{file_list}\n\n注意：此操作不可撤销！"):
+            return
+        
+        # 执行批量删除
+        self.batch_process_delete(videos_to_delete)
+    
+    def batch_move_files_to_folder(self, target_folder):
+        """批量移动选中的文件到指定文件夹"""
+        selected_items = self.video_tree.selection()
+        if not selected_items:
+            messagebox.showwarning("警告", "请先选择要移动的视频文件")
+            return
+        
+        # 获取选中的视频信息
+        videos_to_move = []
+        for item in selected_items:
+            try:
+                video_id = self.video_tree.item(item)['tags'][0]
+                self.cursor.execute("SELECT file_path, file_name, is_nas_online FROM videos WHERE id = ?", (video_id,))
+                result = self.cursor.fetchone()
+                if result and result[2]:  # 只处理在线文件
+                    videos_to_move.append({
+                        'id': video_id,
+                        'path': result[0],
+                        'name': result[1]
+                    })
+            except (IndexError, TypeError):
+                continue
+        
+        if not videos_to_move:
+            messagebox.showwarning("警告", "没有找到可移动的在线视频文件")
+            return
+        
+        # 确认移动
+        target_name = os.path.basename(target_folder)
+        if not messagebox.askyesno("确认移动", f"确定要将 {len(videos_to_move)} 个视频文件移动到 '{target_name}' 文件夹吗？"):
+            return
+        
+        # 执行批量移动
+        self.batch_process_move(videos_to_move, target_folder)
+    
+    def batch_javdb_info_selected_videos(self):
+        """批量获取选中视频的JAVDB信息"""
+        selected_items = self.video_tree.selection()
+        if not selected_items:
+            messagebox.showwarning("警告", "请先选择要获取JAVDB信息的视频文件")
+            return
+        
+        # 获取选中视频的信息
+        selected_video_ids = []
+        for item in selected_items:
+            values = self.video_tree.item(item, 'values')
+            if values:
+                video_id = values[0]  # ID在第一列
+                selected_video_ids.append(video_id)
+        
+        if not selected_video_ids:
+            messagebox.showwarning("警告", "没有选中任何视频文件")
+            return
+        
+        # 获取当前设备名称
+        current_device = self.get_current_device_name()
+        
+        # 查询选中视频所属的文件夹信息，并判断文件夹是否在线
+        placeholders = ','.join(['?' for _ in selected_video_ids])
+        self.cursor.execute(f"""
+            SELECT DISTINCT v.id, f.folder_type, f.device_name, f.is_active
+            FROM videos v 
+            LEFT JOIN folders f ON v.folder_id = f.id 
+            WHERE v.id IN ({placeholders})
+        """, selected_video_ids)
+        
+        video_folder_info = self.cursor.fetchall()
+        
+        # 筛选在线文件夹中的视频
+        video_ids = []
+        for video_id, folder_type, device_name, is_active in video_folder_info:
+            # 判断文件夹是否在线
+            folder_online = False
+            if folder_type == 'nas':
+                # NAS文件夹：检查is_active状态（NAS在线状态通过文件夹级别的is_active判断）
+                folder_online = bool(is_active)
+            else:
+                # 本地文件夹：检查设备名称是否匹配且文件夹激活（处理.local后缀）
+                device_name_clean = device_name.replace('.local', '') if device_name else ''
+                current_device_clean = current_device.replace('.local', '') if current_device else ''
+                folder_online = (device_name_clean == current_device_clean and bool(is_active))
+            
+            if folder_online:
+                video_ids.append(video_id)
+        
+        if not video_ids:
+            messagebox.showwarning("警告", "没有选中在线的视频文件")
+            return
+        
+        # 确认对话框
+        if not messagebox.askyesno("确认", f"确定要获取 {len(video_ids)} 个视频的JAVDB信息吗？\n\n注意：这可能需要较长时间，请耐心等待。"):
+            return
+        
+        # 执行批量JAVDB信息获取
+        self.batch_process_javdb_info(video_ids)
+    
+    def batch_process_auto_tag(self, video_ids):
+        """批量处理自动标签"""
+        try:
+            # 获取视频文件路径
+            video_paths = []
+            for video_id in video_ids:
+                self.cursor.execute("SELECT file_path FROM videos WHERE id = ?", (video_id,))
+                result = self.cursor.fetchone()
+                if result:
+                    video_paths.append(result[0])
+            
+            if video_paths:
+                # 调用现有的视频内容分析器
+                self.run_video_content_analyzer(video_paths)
+            
+        except Exception as e:
+            messagebox.showerror("错误", f"批量自动标签失败: {str(e)}")
+    
+    def batch_process_metadata_update(self, video_ids):
+        """批量处理元数据更新"""
+        try:
+            # 创建进度窗口
+            progress_window = ProgressWindow(self.root, "批量更新元数据", len(video_ids))
+            
+            def update_metadata():
+                try:
+                    success_count = 0
+                    for i, video_id in enumerate(video_ids):
+                        # 更新进度
+                        self.cursor.execute("SELECT file_name FROM videos WHERE id = ?", (video_id,))
+                        result = self.cursor.fetchone()
+                        file_name = result[0] if result else f"ID: {video_id}"
+                        
+                        progress_window.update_progress(i + 1, f"正在更新: {file_name}")
+                        
+                        # 调用现有的单文件元数据更新函数
+                        self.update_single_file_metadata(video_id)
+                        success_count += 1
+                        
+                        # 检查是否取消
+                        if progress_window.cancelled:
+                            break
+                    
+                    progress_window.close()
+                    if not progress_window.cancelled:
+                        messagebox.showinfo("完成", f"批量更新元数据完成！\n成功处理: {success_count} 个文件")
+                    
+                except Exception as e:
+                    progress_window.close()
+                    messagebox.showerror("错误", f"批量更新元数据失败: {str(e)}")
+            
+            # 在新线程中执行
+            import threading
+            thread = threading.Thread(target=update_metadata)
+            thread.daemon = True
+            thread.start()
+            
+        except Exception as e:
+            messagebox.showerror("错误", f"批量更新元数据失败: {str(e)}")
+    
+    def batch_process_delete(self, videos_to_delete):
+        """批量处理删除文件"""
+        try:
+            # 创建进度窗口
+            progress_window = ProgressWindow(self.root, "批量删除文件", len(videos_to_delete))
+            
+            def delete_files():
+                try:
+                    success_count = 0
+                    failed_files = []
+                    
+                    for i, video_info in enumerate(videos_to_delete):
+                        # 更新进度
+                        progress_window.update_progress(i + 1, f"正在删除: {video_info['name']}")
+                        
+                        try:
+                            # 删除物理文件
+                            if os.path.exists(video_info['path']):
+                                os.remove(video_info['path'])
+                            
+                            # 删除数据库记录
+                            self.cursor.execute("DELETE FROM videos WHERE id = ?", (video_info['id'],))
+                            success_count += 1
+                            
+                        except Exception as e:
+                            failed_files.append(f"{video_info['name']}: {str(e)}")
+                        
+                        # 检查是否取消
+                        if progress_window.cancelled:
+                            break
+                    
+                    # 提交数据库更改
+                    if not progress_window.cancelled:
+                        self.conn.commit()
+                        # 刷新列表
+                        self.filter_videos()
+                    
+                    progress_window.close()
+                    
+                    if not progress_window.cancelled:
+                        result_msg = f"批量删除完成！\n成功删除: {success_count} 个文件"
+                        if failed_files:
+                            result_msg += f"\n失败: {len(failed_files)} 个文件\n\n失败详情:\n" + "\n".join(failed_files[:5])
+                            if len(failed_files) > 5:
+                                result_msg += f"\n... 还有 {len(failed_files) - 5} 个失败文件"
+                        messagebox.showinfo("完成", result_msg)
+                    
+                except Exception as e:
+                    progress_window.close()
+                    messagebox.showerror("错误", f"批量删除失败: {str(e)}")
+            
+            # 在新线程中执行
+            import threading
+            thread = threading.Thread(target=delete_files)
+            thread.daemon = True
+            thread.start()
+            
+        except Exception as e:
+            messagebox.showerror("错误", f"批量删除失败: {str(e)}")
+    
+    def batch_process_move(self, videos_to_move, target_folder):
+        """批量处理移动文件"""
+        try:
+            # 创建进度窗口
+            progress_window = ProgressWindow(self.root, "批量移动文件", len(videos_to_move))
+            
+            def move_files():
+                try:
+                    success_count = 0
+                    failed_files = []
+                    
+                    for i, video_info in enumerate(videos_to_move):
+                        # 更新进度
+                        progress_window.update_progress(i + 1, f"正在移动: {video_info['name']}")
+                        
+                        try:
+                            # 构建新文件路径
+                            file_name = os.path.basename(video_info['path'])
+                            new_file_path = os.path.join(target_folder, file_name)
+                            
+                            # 检查目标文件是否已存在
+                            if os.path.exists(new_file_path):
+                                # 生成新的文件名
+                                base_name, ext = os.path.splitext(file_name)
+                                counter = 1
+                                while os.path.exists(new_file_path):
+                                    new_file_name = f"{base_name}_{counter}{ext}"
+                                    new_file_path = os.path.join(target_folder, new_file_name)
+                                    counter += 1
+                            
+                            # 移动文件
+                            shutil.move(video_info['path'], new_file_path)
+                            
+                            # 更新数据库记录
+                            self.cursor.execute(
+                                "UPDATE videos SET file_path = ?, source_folder = ? WHERE id = ?",
+                                (new_file_path, target_folder, video_info['id'])
+                            )
+                            success_count += 1
+                            
+                        except Exception as e:
+                            failed_files.append(f"{video_info['name']}: {str(e)}")
+                        
+                        # 检查是否取消
+                        if progress_window.cancelled:
+                            break
+                    
+                    # 提交数据库更改
+                    if not progress_window.cancelled:
+                        self.conn.commit()
+                        # 刷新列表
+                        self.filter_videos()
+                    
+                    progress_window.close()
+                    
+                    if not progress_window.cancelled:
+                        result_msg = f"批量移动完成！\n成功移动: {success_count} 个文件"
+                        if failed_files:
+                            result_msg += f"\n失败: {len(failed_files)} 个文件\n\n失败详情:\n" + "\n".join(failed_files[:5])
+                            if len(failed_files) > 5:
+                                result_msg += f"\n... 还有 {len(failed_files) - 5} 个失败文件"
+                        messagebox.showinfo("完成", result_msg)
+                    
+                except Exception as e:
+                    progress_window.close()
+                    messagebox.showerror("错误", f"批量移动失败: {str(e)}")
+            
+            # 在新线程中执行
+            import threading
+            thread = threading.Thread(target=move_files)
+            thread.daemon = True
+            thread.start()
+            
+        except Exception as e:
+            messagebox.showerror("错误", f"批量移动失败: {str(e)}")
+    
+    def batch_process_javdb_info(self, video_ids):
+        """批量处理JAVDB信息获取"""
+        try:
+            # 创建进度窗口
+            progress_window = ProgressWindow(self.root, "批量JAVDB信息获取", len(video_ids))
+            
+            def fetch_javdb_info():
+                try:
+                    success_count = 0
+                    failed_files = []
+                    
+                    for i, video_id in enumerate(video_ids):
+                        # 获取视频信息
+                        self.cursor.execute("SELECT file_name, file_path FROM videos WHERE id = ?", (video_id,))
+                        result = self.cursor.fetchone()
+                        if not result:
+                            failed_files.append(f"ID {video_id}: 未找到视频记录")
+                            continue
+                        
+                        file_name, file_path = result
+                        
+                        # 更新进度
+                        progress_window.update_progress(i + 1, f"正在获取: {file_name}")
+                        
+                        try:
+                            # 导入番号提取器
+                            from code_extractor import CodeExtractor
+                            
+                            # 提取番号
+                            extractor = CodeExtractor()
+                            av_code = extractor.extract_code_from_filename(file_name)
+                            
+                            if not av_code:
+                                failed_files.append(f"{file_name}: 无法提取番号")
+                                continue
+                            
+                            # 调用javdb_crawler_single.py获取信息
+                            import subprocess
+                            import json
+                            
+                            # 执行javdb_crawler_single.py
+                            cmd = ["python", "javdb_crawler_single.py", av_code]
+                            process = subprocess.run(cmd, capture_output=True, text=True, 
+                                                   cwd=os.path.dirname(os.path.abspath(__file__)), 
+                                                   timeout=60)  # 设置60秒超时
+                            
+                            if process.returncode == 0 and process.stdout:
+                                try:
+                                    javdb_result = json.loads(process.stdout)
+                                    # 检查是否有错误
+                                    if "error" in javdb_result:
+                                        failed_files.append(f"{file_name}: {javdb_result['error']}")
+                                        continue
+                                except json.JSONDecodeError:
+                                    failed_files.append(f"{file_name}: 解析JAVDB返回数据失败")
+                                    continue
+                            else:
+                                failed_files.append(f"{file_name}: JAVDB爬取失败")
+                                continue
+                            
+                            # 保存JAVDB信息到数据库
+                            self.save_javdb_info_to_db(video_id, javdb_result)
+                            success_count += 1
+                            
+                        except subprocess.TimeoutExpired:
+                            failed_files.append(f"{file_name}: 获取超时")
+                        except ImportError:
+                            failed_files.append(f"{file_name}: 无法导入番号提取器")
+                        except Exception as e:
+                            failed_files.append(f"{file_name}: {str(e)}")
+                        
+                        # 检查是否取消
+                        if progress_window.cancelled:
+                            break
+                        
+                        # 添加延迟避免请求过于频繁
+                        import time
+                        time.sleep(1)
+                    
+                    progress_window.close()
+                    
+                    if not progress_window.cancelled:
+                        # 刷新视频列表
+                        self.root.after(100, self.load_videos)
+                        
+                        result_msg = f"批量JAVDB信息获取完成！\n成功获取: {success_count} 个文件"
+                        if failed_files:
+                            result_msg += f"\n失败: {len(failed_files)} 个文件\n\n失败详情:\n" + "\n".join(failed_files[:5])
+                            if len(failed_files) > 5:
+                                result_msg += f"\n... 还有 {len(failed_files) - 5} 个失败文件"
+                        messagebox.showinfo("完成", result_msg)
+                    
+                except Exception as e:
+                    progress_window.close()
+                    messagebox.showerror("错误", f"批量JAVDB信息获取失败: {str(e)}")
+            
+            # 在新线程中执行
+            import threading
+            thread = threading.Thread(target=fetch_javdb_info)
+            thread.daemon = True
+            thread.start()
+            
+        except Exception as e:
+            messagebox.showerror("错误", f"批量JAVDB信息获取失败: {str(e)}")
+     
     def play_video_from_context(self, video_id):
         """从右键菜单播放视频"""
         try:
