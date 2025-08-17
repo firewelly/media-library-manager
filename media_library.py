@@ -27,10 +27,10 @@ import time
 
 class ProgressWindow:
     """进度显示窗口"""
-    def __init__(self, parent, title="处理进度"):
+    def __init__(self, parent, title="处理进度", total_items=0):
         self.window = tk.Toplevel(parent)
         self.window.title(title)
-        self.window.geometry("500x200")
+        self.window.geometry("600x280")
         self.window.resizable(False, False)
         
         # 居中显示
@@ -41,9 +41,9 @@ class ProgressWindow:
         main_frame = ttk.Frame(self.window, padding="20")
         main_frame.pack(fill=tk.BOTH, expand=True)
         
-        # 状态标签
-        self.status_label = ttk.Label(main_frame, text="准备开始...", font=('Arial', 10))
-        self.status_label.pack(pady=(0, 10))
+        # 当前处理文件标签
+        self.current_file_label = ttk.Label(main_frame, text="准备开始...", font=('Arial', 10))
+        self.current_file_label.pack(pady=(0, 10))
         
         # 进度条
         self.progress_var = tk.DoubleVar()
@@ -51,14 +51,22 @@ class ProgressWindow:
             main_frame, 
             variable=self.progress_var, 
             maximum=100, 
-            length=400,
+            length=500,
             mode='determinate'
         )
         self.progress_bar.pack(pady=(0, 10))
         
         # 进度文本
-        self.progress_text = ttk.Label(main_frame, text="0/0 (0%)", font=('Arial', 9))
-        self.progress_text.pack(pady=(0, 10))
+        self.progress_text = ttk.Label(main_frame, text=f"0/{total_items} (0%)", font=('Arial', 9))
+        self.progress_text.pack(pady=(0, 5))
+        
+        # 统计信息
+        self.stats_label = ttk.Label(main_frame, text="成功: 0 | 失败: 0", font=('Arial', 9), foreground="blue")
+        self.stats_label.pack(pady=(0, 10))
+        
+        # 状态信息
+        self.status_label = ttk.Label(main_frame, text="", font=('Arial', 9), foreground="green")
+        self.status_label.pack(pady=(0, 10))
         
         # 取消按钮
         self.cancel_button = ttk.Button(main_frame, text="取消", command=self.cancel)
@@ -66,32 +74,61 @@ class ProgressWindow:
         
         self.cancelled = False
         self.completed = False
+        self.total_items = total_items
+        self.success_count = 0
+        self.failed_count = 0
         
-    def update_progress(self, current, total, message=""):
+    def update_progress(self, current, message="", success=None):
         """更新进度"""
         if self.cancelled:
             return
             
         try:
-            if total > 0:
-                percentage = (current / total) * 100
+            # 更新成功/失败计数
+            if success is True:
+                self.success_count += 1
+            elif success is False:
+                self.failed_count += 1
+            
+            # 更新进度条和文本
+            if self.total_items > 0:
+                # 修复进度显示逻辑：处理过程中显示(current-1)/total，完成时显示100%
+                if current >= self.total_items:
+                    percentage = 100.0
+                    display_current = self.total_items
+                else:
+                    percentage = ((current - 1) / self.total_items) * 100 if current > 0 else 0
+                    display_current = current
                 self.progress_var.set(percentage)
-                self.progress_text.config(text=f"{current}/{total} ({percentage:.1f}%)")
+                self.progress_text.config(text=f"{display_current}/{self.total_items} ({percentage:.1f}%)")
             else:
                 self.progress_var.set(0)
                 self.progress_text.config(text="0/0 (0%)")
+            
+            # 更新统计信息
+            self.stats_label.config(text=f"成功: {self.success_count} | 失败: {self.failed_count}")
                 
+            # 更新当前处理文件
             if message:
-                self.status_label.config(text=message)
+                self.current_file_label.config(text=f"正在处理: {message}")
                 
-            # 如果是错误消息（current=-1）或完成
-            if current == -1 or (total > 0 and current >= total):
+            # 如果完成
+            if self.total_items > 0 and current >= self.total_items:
                 self.completed = True
                 self.cancel_button.config(text="关闭")
+                self.current_file_label.config(text="处理完成！")
                 
             self.window.update()
         except tk.TclError:
             # 窗口已关闭
+            pass
+    
+    def update_status(self, status_message, color="green"):
+        """更新状态信息"""
+        try:
+            self.status_label.config(text=status_message, foreground=color)
+            self.window.update()
+        except tk.TclError:
             pass
             
     def cancel(self):
@@ -1354,6 +1391,48 @@ class MediaLibrary:
         except:
             return "Unknown Device"
     
+    def is_video_online(self, video_id):
+        """判断视频是否在线（基于文件夹状态）"""
+        try:
+            # 获取当前设备名称
+            current_device = self.get_current_device_name()
+            
+            # 首先获取视频的source_folder
+            self.cursor.execute("SELECT source_folder FROM videos WHERE id = ?", (video_id,))
+            video_result = self.cursor.fetchone()
+            if not video_result or not video_result[0]:
+                return False
+            
+            video_source_folder = video_result[0]
+            
+            # 查询包含该视频路径的文件夹信息（使用LIKE匹配父文件夹）
+            self.cursor.execute("""
+                SELECT folder_type, device_name, is_active
+                FROM folders 
+                WHERE ? LIKE folder_path || '%' AND is_active = 1
+                ORDER BY LENGTH(folder_path) DESC
+                LIMIT 1
+            """, (video_source_folder,))
+            
+            result = self.cursor.fetchone()
+            if not result:
+                return False
+            
+            folder_type, device_name, is_active = result
+            
+            # 判断文件夹是否在线
+            if folder_type == 'nas':
+                # NAS文件夹：检查is_active状态
+                return bool(is_active)
+            else:
+                # 本地文件夹：检查设备名称是否匹配且文件夹激活（处理.local后缀）
+                device_name_clean = device_name.replace('.local', '') if device_name else ''
+                current_device_clean = current_device.replace('.local', '') if current_device else ''
+                return (device_name_clean == current_device_clean and bool(is_active))
+        except Exception as e:
+            print(f"检查视频在线状态时出错: {e}")
+            return False
+    
     def check_nas_status(self, file_path):
         """检查NAS状态"""
         try:
@@ -2583,12 +2662,13 @@ class MediaLibrary:
                 
                 # 从数据库获取视频信息
                 try:
-                    self.cursor.execute("SELECT file_path, is_nas_online FROM videos WHERE id = ?", (video_id,))
+                    self.cursor.execute("SELECT file_path FROM videos WHERE id = ?", (video_id,))
                     result = self.cursor.fetchone()
                     if not result:
                         messagebox.showerror("错误", "找不到视频信息")
                         return
-                    file_path, is_nas_online = result
+                    file_path = result[0]
+                    is_nas_online = self.is_video_online(video_id)
                 except Exception as e:
                     messagebox.showerror("错误", f"获取视频信息失败: {str(e)}")
                     return
@@ -4031,7 +4111,12 @@ class MediaLibrary:
             def update_stats(total, processed, success, failed, skipped):
                 stats_text.delete(1.0, tk.END)
                 stats_text.insert(tk.END, f"总数: {total}  已处理: {processed}  成功: {success}  失败: {failed}  跳过: {skipped}\n")
-                stats_text.insert(tk.END, f"进度: {processed}/{total} ({processed/total*100:.1f}%)\n")
+                # 修复进度显示逻辑：避免在处理过程中显示100%
+                if processed >= total:
+                    progress_percentage = 100.0
+                else:
+                    progress_percentage = ((processed - 1) / total * 100) if processed > 0 else 0
+                stats_text.insert(tk.END, f"进度: {processed}/{total} ({progress_percentage:.1f}%)\n")
                 if processed > 0:
                     success_rate = success / processed * 100
                     stats_text.insert(tk.END, f"成功率: {success_rate:.1f}%")
@@ -4780,10 +4865,16 @@ class MediaLibrary:
         # 获取当前选中的所有项目
         selected_items = self.video_tree.selection()
         
-        # 如果点击的项目不在选中列表中，则只选中点击的项目
+        # 如果点击的项目不在选中列表中，且当前没有多选，则只选中点击的项目
         if item not in selected_items:
-            self.video_tree.selection_set(item)
-            selected_items = [item]
+            # 如果当前没有选中任何项目，或者只选中了一个项目，则选中点击的项目
+            if len(selected_items) <= 1:
+                self.video_tree.selection_set(item)
+                selected_items = [item]
+            else:
+                # 如果已经选中了多个项目，则将点击的项目添加到选择中
+                self.video_tree.selection_add(item)
+                selected_items = list(selected_items) + [item]
         
         # 获取所有选中项目的信息
         selected_videos = []
@@ -4792,11 +4883,13 @@ class MediaLibrary:
         for selected_item in selected_items:
             try:
                 video_id = self.video_tree.item(selected_item)['tags'][0]
-                self.cursor.execute("SELECT file_path, is_nas_online FROM videos WHERE id = ?", (video_id,))
+                self.cursor.execute("SELECT file_path FROM videos WHERE id = ?", (video_id,))
                 result = self.cursor.fetchone()
                 
                 if result:
-                    file_path, is_nas_online = result
+                    file_path = result[0]
+                    is_nas_online = self.is_video_online(video_id)
+                    # print(f"Debug: Video ID {video_id}, Online status: {is_nas_online}")
                     selected_videos.append({
                         'id': video_id,
                         'path': file_path,
@@ -4807,8 +4900,8 @@ class MediaLibrary:
             except (IndexError, TypeError):
                 continue
         
-        # 如果没有在线文件，不显示菜单
-        if online_count == 0:
+        # 如果没有选中的文件，不显示菜单
+        if len(selected_videos) == 0:
             return
         
         # 创建右键菜单
@@ -4818,7 +4911,11 @@ class MediaLibrary:
         if len(selected_videos) == 1:
             # 单文件菜单
             video_info = selected_videos[0]
-            context_menu.add_command(label="播放", command=lambda: self.play_video_from_context(video_info['id']))
+            # 播放选项 - 根据在线状态决定是否启用
+            if video_info['online']:
+                context_menu.add_command(label="播放", command=lambda: self.play_video_from_context(video_info['id']))
+            else:
+                context_menu.add_command(label="播放 (离线)", state="disabled")
             context_menu.add_separator()
             context_menu.add_command(label="自动标签", command=lambda: self.auto_tag_selected_videos())
             context_menu.add_separator()
@@ -4888,9 +4985,7 @@ class MediaLibrary:
             try:
                 video_id = self.video_tree.item(item)['tags'][0]
                 # 检查文件是否在线
-                self.cursor.execute("SELECT is_nas_online FROM videos WHERE id = ?", (video_id,))
-                result = self.cursor.fetchone()
-                if result and result[0]:  # 只处理在线文件
+                if self.is_video_online(video_id):  # 只处理在线文件
                     video_ids.append(video_id)
             except (IndexError, TypeError):
                 continue
@@ -4919,9 +5014,7 @@ class MediaLibrary:
             try:
                 video_id = self.video_tree.item(item)['tags'][0]
                 # 检查文件是否在线
-                self.cursor.execute("SELECT is_nas_online FROM videos WHERE id = ?", (video_id,))
-                result = self.cursor.fetchone()
-                if result and result[0]:  # 只处理在线文件
+                if self.is_video_online(video_id):  # 只处理在线文件
                     video_ids.append(video_id)
             except (IndexError, TypeError):
                 continue
@@ -4949,9 +5042,9 @@ class MediaLibrary:
         for item in selected_items:
             try:
                 video_id = self.video_tree.item(item)['tags'][0]
-                self.cursor.execute("SELECT file_path, file_name, is_nas_online FROM videos WHERE id = ?", (video_id,))
+                self.cursor.execute("SELECT file_path, file_name FROM videos WHERE id = ?", (video_id,))
                 result = self.cursor.fetchone()
-                if result and result[2]:  # 只处理在线文件
+                if result and self.is_video_online(video_id):  # 只处理在线文件
                     videos_to_delete.append({
                         'id': video_id,
                         'path': result[0],
@@ -4987,9 +5080,9 @@ class MediaLibrary:
         for item in selected_items:
             try:
                 video_id = self.video_tree.item(item)['tags'][0]
-                self.cursor.execute("SELECT file_path, file_name, is_nas_online FROM videos WHERE id = ?", (video_id,))
+                self.cursor.execute("SELECT file_path, file_name FROM videos WHERE id = ?", (video_id,))
                 result = self.cursor.fetchone()
-                if result and result[2]:  # 只处理在线文件
+                if result and self.is_video_online(video_id):  # 只处理在线文件
                     videos_to_move.append({
                         'id': video_id,
                         'path': result[0],
@@ -5012,64 +5105,49 @@ class MediaLibrary:
     
     def batch_javdb_info_selected_videos(self):
         """批量获取选中视频的JAVDB信息"""
-        selected_items = self.video_tree.selection()
-        if not selected_items:
-            messagebox.showwarning("警告", "请先选择要获取JAVDB信息的视频文件")
-            return
-        
-        # 获取选中视频的信息
-        selected_video_ids = []
-        for item in selected_items:
-            values = self.video_tree.item(item, 'values')
-            if values:
-                video_id = values[0]  # ID在第一列
-                selected_video_ids.append(video_id)
-        
-        if not selected_video_ids:
-            messagebox.showwarning("警告", "没有选中任何视频文件")
-            return
-        
-        # 获取当前设备名称
-        current_device = self.get_current_device_name()
-        
-        # 查询选中视频所属的文件夹信息，并判断文件夹是否在线
-        placeholders = ','.join(['?' for _ in selected_video_ids])
-        self.cursor.execute(f"""
-            SELECT DISTINCT v.id, f.folder_type, f.device_name, f.is_active
-            FROM videos v 
-            LEFT JOIN folders f ON v.folder_id = f.id 
-            WHERE v.id IN ({placeholders})
-        """, selected_video_ids)
-        
-        video_folder_info = self.cursor.fetchall()
-        
-        # 筛选在线文件夹中的视频
-        video_ids = []
-        for video_id, folder_type, device_name, is_active in video_folder_info:
-            # 判断文件夹是否在线
-            folder_online = False
-            if folder_type == 'nas':
-                # NAS文件夹：检查is_active状态（NAS在线状态通过文件夹级别的is_active判断）
-                folder_online = bool(is_active)
-            else:
-                # 本地文件夹：检查设备名称是否匹配且文件夹激活（处理.local后缀）
-                device_name_clean = device_name.replace('.local', '') if device_name else ''
-                current_device_clean = current_device.replace('.local', '') if current_device else ''
-                folder_online = (device_name_clean == current_device_clean and bool(is_active))
+        try:
+            selected_items = self.video_tree.selection()
+            if not selected_items:
+                messagebox.showwarning("警告", "请先选择要获取JAVDB信息的视频文件")
+                return
             
-            if folder_online:
-                video_ids.append(video_id)
-        
-        if not video_ids:
-            messagebox.showwarning("警告", "没有选中在线的视频文件")
-            return
-        
-        # 确认对话框
-        if not messagebox.askyesno("确认", f"确定要获取 {len(video_ids)} 个视频的JAVDB信息吗？\n\n注意：这可能需要较长时间，请耐心等待。"):
-            return
-        
-        # 执行批量JAVDB信息获取
-        self.batch_process_javdb_info(video_ids)
+            # 获取选中视频的数字ID
+            video_ids = []
+            for item in selected_items:
+                try:
+                    # 从tags中获取数字ID
+                    tags = self.video_tree.item(item, 'tags')
+                    if tags:
+                        video_id = int(tags[0])  # 数字ID存储在tags中
+                        # 获取视频文件路径
+                        self.cursor.execute("SELECT file_path FROM videos WHERE id = ?", (video_id,))
+                        result = self.cursor.fetchone()
+                        if result:
+                            file_path = result[0]
+                            # 使用统一的is_video_online函数判断视频是否在线
+                            is_online = self.is_video_online(video_id)
+                            print(f"批量JAVDB调试 - 数字ID: {video_id}, 在线状态: {is_online}")
+                            if is_online:
+                                video_ids.append(video_id)
+                except Exception as e:
+                    print(f"获取视频ID时出错: {e}")
+                    continue
+            
+            if not video_ids:
+                messagebox.showwarning("警告", "没有选中在线的视频文件")
+                return
+            
+            # 确认对话框
+            if not messagebox.askyesno("确认", f"确定要获取 {len(video_ids)} 个视频的JAVDB信息吗？\n\n注意：这可能需要较长时间，请耐心等待。"):
+                return
+            
+            # 执行批量JAVDB信息获取
+            self.batch_process_javdb_info(video_ids)
+            
+        except Exception as e:
+            error_msg = f"批量JAVDB信息获取启动失败: {str(e)}"
+            print(error_msg)
+            messagebox.showerror("错误", error_msg)
     
     def batch_process_auto_tag(self, video_ids):
         """批量处理自动标签"""
@@ -5270,26 +5348,36 @@ class MediaLibrary:
     def batch_process_javdb_info(self, video_ids):
         """批量处理JAVDB信息获取"""
         try:
+            print(f"开始批量处理JAVDB信息，视频数量: {len(video_ids)}")
+            
             # 创建进度窗口
+            print("正在创建进度窗口...")
             progress_window = ProgressWindow(self.root, "批量JAVDB信息获取", len(video_ids))
+            print("进度窗口创建成功")
             
             def fetch_javdb_info():
                 try:
-                    success_count = 0
+                    print("fetch_javdb_info线程开始执行")
                     failed_files = []
                     
                     for i, video_id in enumerate(video_ids):
+                        # 检查是否取消
+                        if progress_window.cancelled:
+                            break
+                        
                         # 获取视频信息
                         self.cursor.execute("SELECT file_name, file_path FROM videos WHERE id = ?", (video_id,))
                         result = self.cursor.fetchone()
                         if not result:
                             failed_files.append(f"ID {video_id}: 未找到视频记录")
+                            progress_window.update_progress(i + 1, f"ID {video_id}", success=False)
                             continue
                         
                         file_name, file_path = result
                         
-                        # 更新进度
-                        progress_window.update_progress(i + 1, f"正在获取: {file_name}")
+                        # 更新进度 - 开始处理
+                        progress_window.update_progress(i + 1, file_name)
+                        progress_window.update_status(f"正在提取番号: {file_name}")
                         
                         try:
                             # 导入番号提取器
@@ -5301,7 +5389,12 @@ class MediaLibrary:
                             
                             if not av_code:
                                 failed_files.append(f"{file_name}: 无法提取番号")
+                                progress_window.update_progress(i + 1, file_name, success=False)
+                                progress_window.update_status(f"失败: 无法提取番号", "red")
                                 continue
+                            
+                            # 更新状态 - 开始爬取
+                            progress_window.update_status(f"正在爬取JAVDB信息: {av_code}")
                             
                             # 调用javdb_crawler_single.py获取信息
                             import subprocess
@@ -5319,55 +5412,88 @@ class MediaLibrary:
                                     # 检查是否有错误
                                     if "error" in javdb_result:
                                         failed_files.append(f"{file_name}: {javdb_result['error']}")
+                                        progress_window.update_progress(i + 1, file_name, success=False)
+                                        progress_window.update_status(f"失败: {javdb_result['error']}", "red")
                                         continue
                                 except json.JSONDecodeError:
                                     failed_files.append(f"{file_name}: 解析JAVDB返回数据失败")
+                                    progress_window.update_progress(i + 1, file_name, success=False)
+                                    progress_window.update_status("失败: 解析返回数据失败", "red")
                                     continue
                             else:
                                 failed_files.append(f"{file_name}: JAVDB爬取失败")
+                                progress_window.update_progress(i + 1, file_name, success=False)
+                                progress_window.update_status("失败: JAVDB爬取失败", "red")
                                 continue
                             
-                            # 保存JAVDB信息到数据库
+                            # 更新状态 - 保存到数据库
+                            progress_window.update_status(f"正在保存到数据库: {av_code}")
+                            
+                            # 立即保存JAVDB信息到数据库
                             self.save_javdb_info_to_db(video_id, javdb_result)
-                            success_count += 1
+                            
+                            # 立即提交数据库事务
+                            self.conn.commit()
+                            
+                            # 更新成功状态
+                            progress_window.update_progress(i + 1, file_name, success=True)
+                            progress_window.update_status(f"成功保存: {av_code}", "green")
                             
                         except subprocess.TimeoutExpired:
                             failed_files.append(f"{file_name}: 获取超时")
+                            progress_window.update_progress(i + 1, file_name, success=False)
+                            progress_window.update_status("失败: 获取超时", "red")
                         except ImportError:
                             failed_files.append(f"{file_name}: 无法导入番号提取器")
+                            progress_window.update_progress(i + 1, file_name, success=False)
+                            progress_window.update_status("失败: 无法导入番号提取器", "red")
                         except Exception as e:
                             failed_files.append(f"{file_name}: {str(e)}")
-                        
-                        # 检查是否取消
-                        if progress_window.cancelled:
-                            break
+                            progress_window.update_progress(i + 1, file_name, success=False)
+                            progress_window.update_status(f"失败: {str(e)}", "red")
                         
                         # 添加延迟避免请求过于频繁
                         import time
                         time.sleep(1)
                     
-                    progress_window.close()
-                    
+                    # 处理完成
                     if not progress_window.cancelled:
+                        progress_window.update_status("批量处理完成！", "blue")
+                        
                         # 刷新视频列表
                         self.root.after(100, self.load_videos)
                         
-                        result_msg = f"批量JAVDB信息获取完成！\n成功获取: {success_count} 个文件"
+                        # 显示结果
+                        success_count = progress_window.success_count
+                        failed_count = progress_window.failed_count
+                        
+                        result_msg = f"批量JAVDB信息获取完成！\n成功获取: {success_count} 个文件\n失败: {failed_count} 个文件"
                         if failed_files:
-                            result_msg += f"\n失败: {len(failed_files)} 个文件\n\n失败详情:\n" + "\n".join(failed_files[:5])
-                            if len(failed_files) > 5:
-                                result_msg += f"\n... 还有 {len(failed_files) - 5} 个失败文件"
-                        messagebox.showinfo("完成", result_msg)
+                            result_msg += "\n\n失败详情:\n" + "\n".join(failed_files[:10])
+                            if len(failed_files) > 10:
+                                result_msg += f"\n... 还有 {len(failed_files) - 10} 个失败文件"
+                        
+                        # 延迟显示结果对话框，让用户看到最终状态
+                        self.root.after(2000, lambda: messagebox.showinfo("完成", result_msg))
+                        self.root.after(2000, lambda: progress_window.close())
+                    else:
+                        # 用户取消了操作
+                        progress_window.update_status("操作已取消", "orange")
+                        success_count = progress_window.success_count
+                        self.root.after(1000, lambda: messagebox.showinfo("取消", f"操作已取消\n已成功处理: {success_count} 个文件"))
+                        self.root.after(1000, lambda: progress_window.close())
                     
                 except Exception as e:
                     progress_window.close()
                     messagebox.showerror("错误", f"批量JAVDB信息获取失败: {str(e)}")
             
             # 在新线程中执行
+            print("正在启动处理线程...")
             import threading
             thread = threading.Thread(target=fetch_javdb_info)
             thread.daemon = True
             thread.start()
+            print("处理线程已启动")
             
         except Exception as e:
             messagebox.showerror("错误", f"批量JAVDB信息获取失败: {str(e)}")
@@ -5376,16 +5502,17 @@ class MediaLibrary:
         """从右键菜单播放视频"""
         try:
             # 从数据库获取视频信息
-            self.cursor.execute("SELECT file_path, is_nas_online FROM videos WHERE id = ?", (video_id,))
+            self.cursor.execute("SELECT file_path FROM videos WHERE id = ?", (video_id,))
             result = self.cursor.fetchone()
             if not result:
                 messagebox.showerror("错误", "找不到视频信息")
                 return
             
-            file_path, is_nas_online = result
+            file_path = result[0]
+            is_nas_online = self.is_video_online(video_id)
             
             if not is_nas_online:
-                messagebox.showwarning("警告", "NAS离线，无法播放视频")
+                messagebox.showwarning("警告", "文件离线，无法播放视频")
                 return
                 
             if not os.path.exists(file_path):
@@ -5808,9 +5935,9 @@ class MediaLibrary:
         video_paths = []
         for item in selected_items:
             video_id = self.video_tree.item(item)['tags'][0]
-            self.cursor.execute("SELECT file_path, is_nas_online FROM videos WHERE id = ?", (video_id,))
+            self.cursor.execute("SELECT file_path FROM videos WHERE id = ?", (video_id,))
             result = self.cursor.fetchone()
-            if result and result[1]:  # 只处理在线文件
+            if result and self.is_video_online(video_id):  # 只处理在线文件
                 video_paths.append(result[0])
         
         if not video_paths:
@@ -6050,29 +6177,63 @@ class MediaLibrary:
                 except Exception as e:
                     print(f"Failed to read image file {local_image_path}: {e}")
             
-            # 保存JAVDB信息
-            self.cursor.execute("""
-                INSERT OR REPLACE INTO javdb_info 
-                (video_id, javdb_code, javdb_url, javdb_title, release_date, duration, 
-                 studio, score, cover_url, local_cover_path, cover_image_data, magnet_links, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))
-            """, (
-                video_id,
-                javdb_info.get('video_id', ''),
-                javdb_info.get('detail_url', ''),
-                javdb_info.get('title', ''),
-                javdb_info.get('release_date', ''),
-                javdb_info.get('duration', ''),
-                javdb_info.get('studio', ''),
-                float(javdb_info.get('rating', 0)) if javdb_info.get('rating') else None,
-                javdb_info.get('cover_image_url', ''),
-                javdb_info.get('local_image_path', ''),
-                cover_image_data,
-                json.dumps(javdb_info.get('magnet_links', []), ensure_ascii=False)
-            ))
+            # 检查是否已存在该video_id的JAVDB信息
+            self.cursor.execute("SELECT id FROM javdb_info WHERE video_id = ?", (video_id,))
+            existing_record = self.cursor.fetchone()
             
-            # 获取刚插入的javdb_info记录的ID
-            javdb_info_id = self.cursor.lastrowid
+            if existing_record:
+                # 更新已有记录
+                javdb_info_id = existing_record[0]
+                self.cursor.execute("""
+                    UPDATE javdb_info SET 
+                    javdb_code = ?, javdb_url = ?, javdb_title = ?, release_date = ?, duration = ?,
+                    studio = ?, score = ?, cover_url = ?, local_cover_path = ?, cover_image_data = ?,
+                    magnet_links = ?, updated_at = datetime('now')
+                    WHERE video_id = ?
+                """, (
+                    javdb_info.get('video_id', ''),
+                    javdb_info.get('detail_url', ''),
+                    javdb_info.get('title', ''),
+                    javdb_info.get('release_date', ''),
+                    javdb_info.get('duration', ''),
+                    javdb_info.get('studio', ''),
+                    float(javdb_info.get('rating', 0)) if javdb_info.get('rating') else None,
+                    javdb_info.get('cover_image_url', ''),
+                    javdb_info.get('local_image_path', ''),
+                    cover_image_data,
+                    json.dumps(javdb_info.get('magnet_links', []), ensure_ascii=False),
+                    video_id
+                ))
+                
+                # 清除旧的标签和演员关联
+                self.cursor.execute("DELETE FROM javdb_info_tags WHERE javdb_info_id = ?", (javdb_info_id,))
+                self.cursor.execute("DELETE FROM video_actors WHERE video_id = ?", (video_id,))
+                print(f"Updated existing JAVDB record for video_id: {video_id}")
+            else:
+                # 插入新记录
+                self.cursor.execute("""
+                    INSERT INTO javdb_info 
+                    (video_id, javdb_code, javdb_url, javdb_title, release_date, duration, 
+                     studio, score, cover_url, local_cover_path, cover_image_data, magnet_links, created_at, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))
+                """, (
+                    video_id,
+                    javdb_info.get('video_id', ''),
+                    javdb_info.get('detail_url', ''),
+                    javdb_info.get('title', ''),
+                    javdb_info.get('release_date', ''),
+                    javdb_info.get('duration', ''),
+                    javdb_info.get('studio', ''),
+                    float(javdb_info.get('rating', 0)) if javdb_info.get('rating') else None,
+                    javdb_info.get('cover_image_url', ''),
+                    javdb_info.get('local_image_path', ''),
+                    cover_image_data,
+                    json.dumps(javdb_info.get('magnet_links', []), ensure_ascii=False)
+                ))
+                javdb_info_id = self.cursor.lastrowid
+                print(f"Inserted new JAVDB record for video_id: {video_id}")
+            
+            # 获取javdb_info记录的ID
             
             # 保存标签信息
             tags = javdb_info.get('tags', [])
