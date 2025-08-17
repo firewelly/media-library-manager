@@ -1,59 +1,94 @@
 {
   "columns": {
     "title": {
-      "width": 370,
+      "width": 400,
       "position": 0,
       "text": "标题"
     },
-    "stars": {
-      "width": 73,
+    "actors": {
+      "width": 150,
       "position": 1,
+      "text": "演员"
+    },
+    "stars": {
+      "width": 60,
+      "position": 2,
       "text": "星级"
     },
     "tags": {
-      "width": 91,
-      "position": 2,
+      "width": 120,
+      "position": 3,
       "text": "标签"
     },
     "size": {
-      "width": 76,
-      "position": 3,
+      "width": 80,
+      "position": 4,
       "text": "大小"
     },
     "status": {
-      "width": 76,
-      "position": 4,
+      "width": 60,
+      "position": 5,
       "text": "状态"
     },
+    "device": {
+      "width": 120,
+      "position": 6,
+      "text": "设备"
+    },
     "duration": {
-      "width": 74,
-      "position": 5,
+      "width": 120,
+      "position": 7,
       "text": "时长"
     },
     "resolution": {
-      "width": 77,
-      "position": 6,
+      "width": 150,
+      "position": 8,
       "text": "分辨率"
     },
     "file_created_time": {
-      "width": 75,
-      "position": 7,
+      "width": 120,
+      "position": 9,
       "text": "创建时间"
     },
     "top_folder": {
-      "width": 74,
-      "position": 8,
+      "width": 120,
+      "position": 10,
       "text": "顶层文件夹"
     },
     "full_path": {
-      "width": 72,
-      "position": 9,
+      "width": 200,
+      "position": 11,
       "text": "完整路径"
     },
     "year": {
-      "width": 73,
-      "position": 10,
+      "width": 60,
+      "position": 12,
       "text": "年份"
+    },
+    "javdb_code": {
+      "width": 100,
+      "position": 13,
+      "text": "番号"
+    },
+    "javdb_title": {
+      "width": 300,
+      "position": 14,
+      "text": "JAVDB标题"
+    },
+    "release_date": {
+      "width": 100,
+      "position": 15,
+      "text": "发行日期"
+    },
+    "javdb_rating": {
+      "width": 80,
+      "position": 16,
+      "text": "JAVDB评分"
+    },
+    "javdb_tags": {
+      "width": 200,
+      "position": 17,
+      "text": "JAVDB标签"
     }
   }
 }

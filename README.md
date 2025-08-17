@@ -114,8 +114,11 @@ python media_library.py
 3. 点击"保存修改"按钮 / Click "Save Changes" button
 
 ### 播放视频 / Play Video
-- 双击列表中的文件 / Double-click file in the list
-- 或在详情面板中点击"播放视频"按钮 / Or click "Play Video" button in detail panel
+- **双击播放 / Double-click Play**：双击列表中的文件名即可播放视频 / Double-click filename in the list to play video
+- **右键播放 / Right-click Play**：右键点击文件，选择"播放"选项 / Right-click file and select "Play" option
+- **按钮播放 / Button Play**：在详情面板中点击"播放视频"按钮 / Click "Play Video" button in detail panel
+- **智能检测 / Smart Detection**：自动检测NAS在线状态和文件存在性 / Automatically detect NAS online status and file existence
+- **跨平台支持 / Cross-platform Support**：支持macOS、Windows、Linux系统 / Support macOS, Windows, Linux systems
 
 ### 智能功能 / Smart Features
 
@@ -192,6 +195,12 @@ A: 检查gui_config.json配置文件格式是否正确 / Check if gui_config.jso
 **Q: MD5计算失败 / MD5 calculation failed**
 A: 检查文件是否存在且可读，或文件是否被其他程序占用 / Check if file exists and is readable, or if file is being used by other programs
 
+**Q: 双击播放无响应 / Double-click play not responding**
+A: 确保没有同时进行拖拽操作，避免在表头区域双击。如果问题持续，请重启应用 / Ensure no dragging operation is in progress, avoid double-clicking in header area. If problem persists, restart the application
+
+**Q: 右键菜单没有播放选项 / Right-click menu missing play option**
+A: 确保右键点击的是数据行而不是表头，播放选项只在选中有效视频文件时显示 / Ensure right-clicking on data row not header, play option only shows when valid video file is selected
+
 ### 日志查看 / Log Viewing
 应用运行时会在界面底部显示日志信息，包括 / Application displays log information at the bottom of the interface during runtime, including：
 - 文件扫描进度 / File scanning progress
@@ -237,7 +246,23 @@ Welcome to submit Issues and Pull Requests to improve this project!
 
 ## 更新日志 / Changelog
 
-### v3.0.0 (Latest / 最新版本)
+### v3.1.0 (Latest / 最新版本)
+- 🎯 **重大修复：双击播放功能 / Major Fix: Double-click Play Feature**
+  - 🔧 彻底重构事件处理机制 / Completely refactored event handling mechanism
+  - 🎮 新增统一事件处理器 / Added unified event handlers
+  - 🚫 解决事件冲突问题 / Resolved event conflict issues
+  - ⚡ 优化事件响应性能 / Optimized event response performance
+- 🖱️ **增强右键菜单 / Enhanced Right-click Menu**
+  - ▶️ 新增右键播放选项 / Added right-click play option
+  - 🎯 智能区域检测 / Smart region detection
+  - 🔄 事件阻断机制 / Event blocking mechanism
+- 🎬 **播放功能优化 / Play Feature Optimization**
+  - 🌐 跨平台播放支持 / Cross-platform play support
+  - 📡 NAS在线状态检测 / NAS online status detection
+  - 📁 文件存在性验证 / File existence verification
+  - ⚠️ 完善错误处理 / Improved error handling
+
+### v3.0.0
 - ✨ 新增智能媒体库更新功能 / Added smart media library update feature
 - 🔐 新增MD5哈希计算和文件移动检测 / Added MD5 hash calculation and file move detection
 - 🔍 新增智能去重功能 / Added smart deduplication feature
