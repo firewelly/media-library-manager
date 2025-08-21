@@ -163,7 +163,7 @@ class MediaLibrary:
         self.default_columns = {
             'title': {'width': 400, 'position': 0, 'text': '标题'},
             'actors': {'width': 150, 'position': 1, 'text': '演员'},
-            'stars': {'width': 60, 'position': 2, 'text': '星级'},
+            'stars': {'width': 75, 'position': 2, 'text': '星级'},
             'tags': {'width': 120, 'position': 3, 'text': '标签'},
             'size': {'width': 80, 'position': 4, 'text': '大小'},
             'status': {'width': 60, 'position': 5, 'text': '状态'},
@@ -224,7 +224,11 @@ class MediaLibrary:
             if hasattr(self, 'video_tree'):
                 for col in self.video_tree['columns']:
                     if col in self.column_config:
-                        self.column_config[col]['width'] = self.video_tree.column(col, 'width')
+                        current_width = self.video_tree.column(col, 'width')
+                        # 防止列宽变得过小，设置最小宽度为50
+                        if current_width < 50:
+                            current_width = self.column_config[col]['width']  # 保持原有宽度
+                        self.column_config[col]['width'] = current_width
             
             config = {'columns': self.column_config}
             with open(self.config_path, 'w', encoding='utf-8') as f:
@@ -404,7 +408,9 @@ class MediaLibrary:
         for col_name in columns:
             config = self.column_config[col_name]
             self.video_tree.heading(col_name, text=config['text'])
-            self.video_tree.column(col_name, width=config['width'], minwidth=50)
+            # 确保列宽不会过小，最小宽度为50
+            width = max(config['width'], 50)
+            self.video_tree.column(col_name, width=width, minwidth=50)
         
         # 初始化排序状态
         self.sort_column_name = None
@@ -725,7 +731,9 @@ class MediaLibrary:
             config = self.column_config[col_name]
             self.video_tree.heading(col_name, text=config['text'], 
                                   command=lambda c=col_name: self.sort_column(c))
-            self.video_tree.column(col_name, width=config['width'], minwidth=50)
+            # 确保列宽不会过小，最小宽度为50
+            width = max(config['width'], 50)
+            self.video_tree.column(col_name, width=width, minwidth=50)
         
         # 绑定列拖拽事件
         self.setup_column_drag()
@@ -5161,8 +5169,8 @@ class MediaLibrary:
                     video_paths.append(result[0])
             
             if video_paths:
-                # 调用现有的视频内容分析器
-                self.run_video_content_analyzer(video_paths)
+                # 调用带进度条的视频内容分析器
+                self.run_video_content_analyzer_with_progress(video_paths)
             
         except Exception as e:
             messagebox.showerror("错误", f"批量自动标签失败: {str(e)}")
@@ -5862,10 +5870,18 @@ class MediaLibrary:
                         # 获取视频时长和分辨率信息
                         duration, resolution = self.get_video_info(file_path)
                         
+                        # 获取文件创建时间
+                        file_created_time = None
+                        try:
+                            stat = os.stat(file_path)
+                            file_created_time = datetime.fromtimestamp(stat.st_birthtime if hasattr(stat, 'st_birthtime') else stat.st_ctime)
+                        except:
+                            pass
+                        
                         # 插入数据库
                         self.cursor.execute("""
-                            INSERT INTO videos (file_path, file_name, title, stars, file_size, source_folder, md5_hash, duration, resolution)
-                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                            INSERT INTO videos (file_path, file_name, title, stars, file_size, source_folder, md5_hash, duration, resolution, file_created_time, created_at)
+                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                         """, (
                             file_path, 
                             file_info['filename'], 
@@ -5875,7 +5891,9 @@ class MediaLibrary:
                             file_info['source_folder'], 
                             file_info['md5'],
                             duration,
-                            resolution
+                            resolution,
+                            file_created_time,
+                            datetime.now()
                         ))
                         
                         new_files_count += 1
@@ -6037,6 +6055,113 @@ class MediaLibrary:
                     self.root.after(0, lambda: messagebox.showinfo("完成", result_msg))
                     
                 except Exception as e:
+                    error_msg = str(e)
+                    self.root.after(0, lambda: messagebox.showerror("错误", f"视频分析时出错: {error_msg}"))
+            
+            # 在新线程中运行分析
+            threading.Thread(target=analyze_videos, daemon=True).start()
+            
+        except ImportError:
+            messagebox.showerror("错误", "无法导入视频内容分析器模块")
+        except Exception as e:
+            messagebox.showerror("错误", f"启动视频分析时出错: {str(e)}")
+    
+    def run_video_content_analyzer_with_progress(self, video_paths):
+        """运行视频内容分析器处理指定文件（带进度条）"""
+        try:
+            # 导入视频内容分析器
+            import video_content_analyzer
+            
+            # 创建进度窗口
+            progress_window = ProgressWindow(self.root, "批量自动标签", len(video_paths))
+            
+            # 创建分析器实例，使用相同的数据库路径
+            analyzer = video_content_analyzer.VideoContentAnalyzer(db_path="media_library.db")
+            
+            def analyze_videos():
+                try:
+                    processed = 0
+                    failed = 0
+                    
+                    for i, video_path in enumerate(video_paths):
+                        # 检查是否取消
+                        if progress_window.cancelled:
+                            break
+                        
+                        try:
+                            # 更新进度（在GUI线程中安全更新）
+                            file_name = os.path.basename(video_path)
+                            progress_num = i + 1
+                            def update_progress(p=progress_num, f=file_name):
+                                progress_window.update_progress(p, f"正在分析: {f}")
+                            self.root.after(0, update_progress)
+                            
+                            if not os.path.exists(video_path):
+                                print(f"[{i+1}/{len(video_paths)}] ✗ 文件不存在，跳过: {file_name}")
+                                failed += 1
+                                continue
+                            
+                            print(f"[{i+1}/{len(video_paths)}] 分析视频: {file_name}")
+                            
+                            # 分析视频内容
+                            analysis_result = analyzer.analyze_video_content(video_path, min_frames=100, max_interval=10, max_frames=300)
+                            
+                            if 'error' in analysis_result:
+                                print(f"   ✗ 分析失败: {analysis_result['error']}")
+                                failed += 1
+                                continue
+                            
+                            generated_tags = analysis_result['generated_tags']
+                            print(f"   ✓ 分析完成")
+                            print(f"   生成标签：{', '.join(generated_tags) if generated_tags else '无'}")
+                            
+                            # 查找视频记录
+                            self.cursor.execute("SELECT id, tags FROM videos WHERE file_path = ?", (video_path,))
+                            video_record = self.cursor.fetchone()
+                            
+                            if not video_record:
+                                print(f"   ⚠ 该视频不在数据库中，无法更新标签")
+                                continue
+                            
+                            video_id, existing_tags = video_record
+                            print(f"   现有标签：{existing_tags or '无'}")
+                            
+                            # 更新标签
+                            if generated_tags:
+                                # 获取现有标签
+                                existing_set = set([tag.strip() for tag in (existing_tags or '').split(',') if tag.strip()])
+                                new_set = set(generated_tags)
+                                all_tags = existing_set.union(new_set)
+                                
+                                # 更新数据库
+                                final_tags = ', '.join(sorted(all_tags))
+                                self.cursor.execute(
+                                    "UPDATE videos SET tags = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                                    (final_tags, video_id)
+                                )
+                                self.conn.commit()
+                                
+                                print(f"   ✓ 标签已更新: {final_tags}")
+                                processed += 1
+                            else:
+                                print(f"   - 未生成新标签")
+                                
+                        except Exception as e:
+                            print(f"   ✗ 处理失败: {str(e)}")
+                            failed += 1
+                    
+                    # 关闭进度窗口（在GUI线程中安全关闭）
+                    self.root.after(0, progress_window.close)
+                    
+                    # 刷新界面和显示结果（在GUI线程中安全执行）
+                    if not progress_window.cancelled:
+                        self.root.after(0, self.load_videos)
+                        result_msg = f"视频标签分析完成！\n\n成功处理: {processed} 个\n失败: {failed} 个"
+                        self.root.after(0, lambda: messagebox.showinfo("完成", result_msg))
+                    
+                except Exception as e:
+                    # 关闭进度窗口并显示错误（在GUI线程中安全执行）
+                    self.root.after(0, progress_window.close)
                     error_msg = str(e)
                     self.root.after(0, lambda: messagebox.showerror("错误", f"视频分析时出错: {error_msg}"))
             
