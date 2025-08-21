@@ -24,6 +24,11 @@ import io
 import tempfile
 import json
 import time
+import cv2
+from send2trash import send2trash
+import threading
+import shutil
+import re
 
 class ProgressWindow:
     """进度显示窗口"""
@@ -225,9 +230,7 @@ class MediaLibrary:
                 for col in self.video_tree['columns']:
                     if col in self.column_config:
                         current_width = self.video_tree.column(col, 'width')
-                        # 防止列宽变得过小，设置最小宽度为50
-                        if current_width < 50:
-                            current_width = self.column_config[col]['width']  # 保持原有宽度
+                        # 直接保存用户调整的列宽，不做任何限制
                         self.column_config[col]['width'] = current_width
             
             config = {'columns': self.column_config}
@@ -390,13 +393,24 @@ class MediaLibrary:
         # 保存滚动位置
         scroll_top = self.video_tree.yview()[0]
         
-        # 销毁当前表格
+        # 销毁当前表格和控制栏
         list_frame = self.video_tree.master
-        self.video_tree.destroy()
         
-        # 清理滚动条
+        # 清理所有子控件
         for widget in list_frame.winfo_children():
             widget.destroy()
+        
+        # 重新创建顶部控制栏
+        control_frame = ttk.Frame(list_frame)
+        control_frame.pack(fill=tk.X, padx=5, pady=5)
+        
+        # 重新创建"仅显示在线"复选框
+        if not hasattr(self, 'show_online_only'):
+            self.show_online_only = tk.BooleanVar(value=False)
+        online_checkbox = ttk.Checkbutton(control_frame, text="仅显示在线", 
+                                         variable=self.show_online_only,
+                                         command=self.filter_videos)
+        online_checkbox.pack(side=tk.RIGHT)
         
         # 重新创建表格
         sorted_columns = sorted(self.column_config.items(), key=lambda x: x[1]['position'])
@@ -407,14 +421,17 @@ class MediaLibrary:
         # 设置列标题和宽度
         for col_name in columns:
             config = self.column_config[col_name]
-            self.video_tree.heading(col_name, text=config['text'])
+            self.video_tree.heading(col_name, text=config['text'], 
+                                  command=lambda c=col_name: self.sort_column(c))
             # 确保列宽不会过小，最小宽度为50
             width = max(config['width'], 50)
             self.video_tree.column(col_name, width=width, minwidth=50)
         
         # 初始化排序状态
-        self.sort_column_name = None
-        self.sort_reverse = False
+        if not hasattr(self, 'sort_column_name'):
+            self.sort_column_name = None
+        if not hasattr(self, 'sort_reverse'):
+            self.sort_reverse = False
         
         # 重新设置滚动条
         v_scrollbar = ttk.Scrollbar(list_frame, orient=tk.VERTICAL, command=self.video_tree.yview)
@@ -432,15 +449,19 @@ class MediaLibrary:
         self.setup_column_drag()
         self.video_tree.bind('<<TreeviewSelect>>', self.on_video_select)
         
+        # 绑定列宽调整事件
+        self.video_tree.bind('<ButtonRelease-1>', self.on_column_resize_end)
+        # 初始化列宽记录
+        self._last_column_widths = {}
+        self._is_dragging_column = False
+        for col in columns:
+            self._last_column_widths[col] = self.video_tree.column(col, 'width')
+        
         # 绑定双击事件（使用专门的处理方法）
         self.video_tree.bind('<Double-1>', self.handle_double_click)
         
         # 绑定单击事件
         self.video_tree.bind('<Button-1>', self.handle_single_click)
-        
-        # 绑定拖拽事件
-        self.video_tree.bind('<B1-Motion>', self.on_drag_motion)
-        self.video_tree.bind('<ButtonRelease-1>', self.on_drag_end)
         
         # 右键菜单绑定 - 支持不同平台，统一处理
         if platform.system() == "Darwin":  # macOS
@@ -455,12 +476,78 @@ class MediaLibrary:
         # 恢复滚动位置
         self.root.after(100, lambda: self.video_tree.yview_moveto(scroll_top))
     
-    def on_column_resize(self, event):
-        """列宽度变化时保存配置"""
-        # 延迟保存，避免频繁写入
-        if hasattr(self, '_resize_timer'):
-            self.root.after_cancel(self._resize_timer)
-        self._resize_timer = self.root.after(1000, self.save_column_config)
+    def on_column_resize_end(self, event):
+        """列宽调整结束后保存配置"""
+        try:
+            region = self.video_tree.identify_region(event.x, event.y)
+            if region == "separator":
+                # 延迟保存以确保获取最新宽度
+                if hasattr(self, '_resize_after_id'):
+                    self.root.after_cancel(self._resize_after_id)
+                self._resize_after_id = self.root.after(100, self.save_column_config_after_resize)
+        except Exception as e:
+            print(f"Error in on_column_resize_end: {e}")
+
+    def save_column_config_after_resize(self):
+        """延迟保存以确保获取最新宽度"""
+        try:
+            current_widths = {col: self.video_tree.column(col, 'width') for col in self.video_tree['columns']}
+            
+            # 更新配置中的列宽
+            for col, width in current_widths.items():
+                if col in self.column_config:
+                    self.column_config[col]['width'] = width
+            
+            # 保存配置
+            self.save_column_config()
+            
+            # 更新记录的宽度
+            self._last_column_widths = current_widths.copy()
+            
+        except Exception as e:
+            print(f"Error saving column config: {e}")
+
+    def sort_column(self, col):
+        """排序列"""
+        try:
+            # 确定排序方向
+            if self.sort_column_name == col:
+                self.sort_reverse = not self.sort_reverse
+            else:
+                self.sort_column_name = col
+                self.sort_reverse = False
+            
+            # 获取数据
+            data = [(self.video_tree.set(item, col), item) for item in self.video_tree.get_children('')]
+            
+            def sort_key(t):
+                val = t[0]
+                if isinstance(val, str):
+                    # 尝试转换为数字
+                    if val.replace('.', '', 1).replace('-', '', 1).isdigit():
+                        return float(val)
+                    # 处理星级
+                    if '★' in val:
+                        return len(val)
+                return val or ''
+
+            data.sort(key=sort_key, reverse=self.sort_reverse)
+
+            # 重新排列项目
+            for index, (val, item) in enumerate(data):
+                self.video_tree.move(item, '', index)
+
+            # 更新列标题显示排序方向
+            for column in self.video_tree['columns']:
+                if column == col:
+                    direction = ' ↓' if self.sort_reverse else ' ↑'
+                    text = self.column_config[column]['text'] + direction
+                else:
+                    text = self.column_config[column]['text']
+                self.video_tree.heading(column, text=text)
+                
+        except Exception as e:
+            print(f"Error in sort_column for column {col}: {e}")
     
     def reset_gui_layout(self):
         """重置界面布局"""
@@ -596,6 +683,7 @@ class MediaLibrary:
         file_menu.add_command(label="智能媒体库更新", command=self.comprehensive_media_update)
         file_menu.add_separator()
         file_menu.add_command(label="导入NFO文件", command=self.import_nfo)
+        file_menu.add_command(label="导入视频文件", command=self.import_videos)
         file_menu.add_command(label="去重复", command=self.remove_duplicates)
         
         # 工具菜单
@@ -750,6 +838,14 @@ class MediaLibrary:
         self.video_tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         v_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
         h_scrollbar.pack(side=tk.BOTTOM, fill=tk.X, before=self.video_tree)
+        
+        # 绑定列宽调整事件
+        self.video_tree.bind('<ButtonRelease-1>', self.on_column_resize_end)
+        # 初始化列宽记录
+        self._last_column_widths = {}
+        self._is_dragging_column = False
+        for col in columns:
+            self._last_column_widths[col] = self.video_tree.column(col, 'width')
         
         # 绑定选择事件
         self.video_tree.bind('<<TreeviewSelect>>', self.on_video_select)
@@ -1255,7 +1351,8 @@ class MediaLibrary:
             
             # NAS路径处理
             nas_path = file_path if folder_type == "nas" else None
-            is_nas_online = self.check_nas_status(file_path) if folder_type == "nas" else True
+            # 统一使用文件路径存在性判断在线状态
+            is_nas_online = os.path.exists(file_path) and os.path.isfile(file_path)
             
             self.cursor.execute(
                 """INSERT INTO videos 
@@ -1334,7 +1431,8 @@ class MediaLibrary:
             
             # NAS路径处理
             nas_path = file_path if folder_type == "nas" else None
-            is_nas_online = self.check_nas_status(file_path) if folder_type == "nas" else True
+            # 统一使用文件路径存在性判断在线状态
+            is_nas_online = os.path.exists(file_path) and os.path.isfile(file_path)
             
             self.cursor.execute(
                 """INSERT INTO videos 
@@ -1400,43 +1498,18 @@ class MediaLibrary:
             return "Unknown Device"
     
     def is_video_online(self, video_id):
-        """判断视频是否在线（基于文件夹状态）"""
+        """判断视频是否在线（基于文件路径存在性）"""
         try:
-            # 获取当前设备名称
-            current_device = self.get_current_device_name()
-            
-            # 首先获取视频的source_folder
-            self.cursor.execute("SELECT source_folder FROM videos WHERE id = ?", (video_id,))
+            # 获取视频的文件路径
+            self.cursor.execute("SELECT file_path FROM videos WHERE id = ?", (video_id,))
             video_result = self.cursor.fetchone()
             if not video_result or not video_result[0]:
                 return False
             
-            video_source_folder = video_result[0]
+            file_path = video_result[0]
             
-            # 查询包含该视频路径的文件夹信息（使用LIKE匹配父文件夹）
-            self.cursor.execute("""
-                SELECT folder_type, device_name, is_active
-                FROM folders 
-                WHERE ? LIKE folder_path || '%' AND is_active = 1
-                ORDER BY LENGTH(folder_path) DESC
-                LIMIT 1
-            """, (video_source_folder,))
-            
-            result = self.cursor.fetchone()
-            if not result:
-                return False
-            
-            folder_type, device_name, is_active = result
-            
-            # 判断文件夹是否在线
-            if folder_type == 'nas':
-                # NAS文件夹：检查is_active状态
-                return bool(is_active)
-            else:
-                # 本地文件夹：检查设备名称是否匹配且文件夹激活（处理.local后缀）
-                device_name_clean = device_name.replace('.local', '') if device_name else ''
-                current_device_clean = current_device.replace('.local', '') if current_device else ''
-                return (device_name_clean == current_device_clean and bool(is_active))
+            # 直接检查文件是否存在
+            return os.path.exists(file_path) and os.path.isfile(file_path)
         except Exception as e:
             print(f"检查视频在线状态时出错: {e}")
             return False
@@ -1805,12 +1878,46 @@ class MediaLibrary:
                     if tag_conditions:
                         conditions.append(f"({' OR '.join(tag_conditions)})")
                         
-                # NAS状态筛选
+                # NAS状态筛选 - 基于路径存在性判断
                 nas_filter = self.nas_filter.get()
                 if nas_filter == "online":
-                    conditions.append("is_nas_online = 1")
+                    # 获取所有视频的路径并检查是否存在
+                    self.cursor.execute("SELECT DISTINCT source_folder FROM videos WHERE source_folder IS NOT NULL")
+                    all_video_folders = [row[0] for row in self.cursor.fetchall()]
+                    
+                    online_video_folders = []
+                    for folder_path in all_video_folders:
+                        if os.path.exists(folder_path) and os.path.isdir(folder_path):
+                            online_video_folders.append(folder_path)
+                    
+                    if online_video_folders:
+                        folder_conditions = []
+                        for folder_path in online_video_folders:
+                            folder_conditions.append("source_folder LIKE ?")
+                            params.append(f"{folder_path}%")
+                        conditions.append(f"({' OR '.join(folder_conditions)})")
+                    else:
+                        # 如果没有在线文件夹，不显示任何视频
+                        conditions.append("1 = 0")
                 elif nas_filter == "offline":
-                    conditions.append("is_nas_online = 0")
+                    # 获取所有视频的路径并检查是否不存在
+                    self.cursor.execute("SELECT DISTINCT source_folder FROM videos WHERE source_folder IS NOT NULL")
+                    all_video_folders = [row[0] for row in self.cursor.fetchall()]
+                    
+                    offline_video_folders = []
+                    for folder_path in all_video_folders:
+                        if not (os.path.exists(folder_path) and os.path.isdir(folder_path)):
+                            offline_video_folders.append(folder_path)
+                    
+                    if offline_video_folders:
+                        folder_conditions = []
+                        for folder_path in offline_video_folders:
+                            folder_conditions.append("source_folder LIKE ?")
+                            params.append(f"{folder_path}%")
+                        conditions.append(f"({' OR '.join(folder_conditions)})")
+                    else:
+                        # 如果没有离线文件夹，不显示任何视频
+                        conditions.append("1 = 0")
                     
                 # 文件夹来源筛选
                 selected_folder_indices = self.folder_listbox.curselection()
@@ -1827,20 +1934,27 @@ class MediaLibrary:
             
             # 仅显示在线内容筛选
             if hasattr(self, 'show_online_only') and self.show_online_only.get():
-                # 当勾选"仅显示在线"时，使用子查询筛选在线文件夹中的视频
-                online_folder_condition = """
-                    EXISTS (
-                        SELECT 1 FROM folders f
-                        WHERE f.is_active = 1 
-                        AND source_folder LIKE f.folder_path || '%'
-                        AND (
-                            f.folder_type = 'nas' OR 
-                            (f.folder_type = 'local' AND REPLACE(f.device_name, '.local', '') = REPLACE(?, '.local', ''))
-                        )
-                    )
-                """
-                conditions.append(online_folder_condition)
-                params.append(current_device)
+                # 当勾选"仅显示在线"时，只显示路径存在的文件夹中的视频
+                # 获取所有激活的文件夹
+                self.cursor.execute("SELECT folder_path FROM folders WHERE is_active = 1")
+                all_folders = [row[0] for row in self.cursor.fetchall()]
+                
+                # 检查哪些文件夹路径实际存在
+                online_folders = []
+                for folder_path in all_folders:
+                    if os.path.exists(folder_path) and os.path.isdir(folder_path):
+                        online_folders.append(folder_path)
+                
+                if online_folders:
+                    # 构建文件夹条件
+                    folder_conditions = []
+                    for folder_path in online_folders:
+                        folder_conditions.append("source_folder LIKE ?")
+                        params.append(f"{folder_path}%")
+                    conditions.append(f"({' OR '.join(folder_conditions)})")
+                else:
+                    # 如果没有在线文件夹，不显示任何视频
+                    conditions.append("1 = 0")
             else:
                 # 不勾选时显示所有激活文件夹中的视频
                 conditions.append("""
@@ -4138,7 +4252,7 @@ class MediaLibrary:
                         query = """
                             SELECT id, file_path, file_name, is_nas_online, thumbnail_data 
                             FROM videos 
-                            WHERE is_nas_online = 1 AND (thumbnail_data IS NULL OR thumbnail_data = '')
+                            WHERE (thumbnail_data IS NULL OR thumbnail_data = '')
                             ORDER BY file_name
                         """
                         log_message("模式：仅生成缺失封面")
@@ -4146,7 +4260,6 @@ class MediaLibrary:
                         query = """
                             SELECT id, file_path, file_name, is_nas_online, thumbnail_data 
                             FROM videos 
-                            WHERE is_nas_online = 1
                             ORDER BY file_name
                         """
                         log_message("模式：重新生成所有封面")
@@ -4309,6 +4422,7 @@ class MediaLibrary:
             "✓ 检查所有有星级评分的视频文件\n" +
             "✓ 为文件名添加对应数量的叹号前缀\n" +
             "✓ 2星=1个叹号(!)，3星=2个叹号(!!)，以此类推\n" +
+            "✓ 如果演员信息不为空，则不添加叹号（如已有叹号则删除）\n" +
             "✓ 如果文件名重复会自动添加数字后缀\n" +
             "✓ 同步更新数据库中的文件路径\n\n" +
             "⚠️ 此操作会重命名文件，请确保已备份重要数据\n\n" +
@@ -4376,13 +4490,17 @@ class MediaLibrary:
             def sync_thread():
                 """同步线程"""
                 try:
-                    # 获取所有有星级评分的视频
+                    # 获取所有有星级评分的视频，同时查询演员信息
                     cursor = self.conn.cursor()
                     cursor.execute("""
-                         SELECT id, file_path, stars, title 
-                         FROM videos 
-                         WHERE stars > 0 AND file_path IS NOT NULL AND file_path != ''
-                         ORDER BY stars DESC, title
+                         SELECT v.id, v.file_path, v.stars, v.title,
+                                GROUP_CONCAT(a.name) as actors
+                         FROM videos v
+                         LEFT JOIN video_actors va ON v.id = va.video_id
+                         LEFT JOIN actors a ON va.actor_id = a.id
+                         WHERE v.stars > 0 AND v.file_path IS NOT NULL AND v.file_path != ''
+                         GROUP BY v.id, v.file_path, v.stars, v.title
+                         ORDER BY v.stars DESC, v.title
                      """)
                     videos = cursor.fetchall()
                     
@@ -4402,7 +4520,7 @@ class MediaLibrary:
                     skipped_count = 0
                     error_count = 0
                     
-                    for video_id, file_path, stars, title in videos:
+                    for video_id, file_path, stars, title, actors in videos:
                         if self.cancel_sync:
                             break
                             
@@ -4422,8 +4540,17 @@ class MediaLibrary:
                             filename = os.path.basename(file_path)
                             name, ext = os.path.splitext(filename)
                             
-                            # 计算需要的叹号数量 (stars - 1，因为1星不加叹号)
-                            required_exclamations = max(0, stars - 1)
+                            # 检查演员字段是否为空
+                            has_actors = actors is not None and actors.strip() != ''
+                            
+                            # 如果有演员信息，则不添加叹号（required_exclamations = 0）
+                            # 如果没有演员信息，则按原逻辑添加叹号
+                            if has_actors:
+                                required_exclamations = 0
+                                log_message(f"检测到演员信息，不添加叹号: {filename} (演员: {actors})")
+                            else:
+                                # 计算需要的叹号数量 (stars - 1，因为1星不加叹号)
+                                required_exclamations = max(0, stars - 1)
                             
                             # 检查当前文件名的叹号数量
                             current_exclamations = 0
@@ -4770,10 +4897,8 @@ class MediaLibrary:
                     # 本地设备：显示设备名称
                     device_display = device_name if device_name and device_name != "Unknown" else "Unknown"
                 
-                # 判断状态：如果是其他设备的文件夹，显示为离线
-                if device_name != current_device and device_name != "Unknown":
-                    status = "离线(其他设备)"
-                elif not is_active:
+                # 判断状态：仅基于路径存在性和is_active状态
+                if not is_active:
                     status = "禁用"
                 else:
                     # 检查路径是否存在来判断在线状态
@@ -6201,12 +6326,18 @@ class MediaLibrary:
                 try:
                     if mode == "full_update":
                         # 获取所有视频
-                        self.cursor.execute("SELECT id, file_path, title, tags FROM videos WHERE is_nas_online = 1")
-                        videos = self.cursor.fetchall()
+                        self.cursor.execute("SELECT id, file_path, title, tags FROM videos")
+                        all_videos = self.cursor.fetchall()
+                        # 过滤出文件存在的视频
+                        videos = [(vid, path, title, tags) for vid, path, title, tags in all_videos 
+                                if os.path.exists(path) and os.path.isfile(path)]
                     elif mode == "no_tags_update":
                         # 获取没有标签的视频
-                        self.cursor.execute("SELECT id, file_path, title, tags FROM videos WHERE (tags IS NULL OR tags = '') AND is_nas_online = 1")
-                        videos = self.cursor.fetchall()
+                        self.cursor.execute("SELECT id, file_path, title, tags FROM videos WHERE (tags IS NULL OR tags = '')")
+                        all_videos = self.cursor.fetchall()
+                        # 过滤出文件存在的视频
+                        videos = [(vid, path, title, tags) for vid, path, title, tags in all_videos 
+                                if os.path.exists(path) and os.path.isfile(path)]
                     else:
                         videos = []
                     
@@ -6531,10 +6662,817 @@ class MediaLibrary:
         except Exception as e:
             messagebox.showerror("错误", f"获取JAVDB信息失败: {str(e)}")
 
+    def import_videos(self):
+        """导入视频文件功能"""
+        try:
+            # 创建导入对话框
+            import_window = tk.Toplevel(self.root)
+            import_window.title("导入视频文件")
+            import_window.resizable(True, True)
+            import_window.transient(self.root)
+            import_window.grab_set()
+            
+            # 调整窗口大小以适应所有内容
+            import_window.update_idletasks()
+            x = (import_window.winfo_screenwidth() // 2) - (650 // 2)
+            y = (import_window.winfo_screenheight() // 2) - (650 // 2)
+            import_window.geometry(f"650x650+{x}+{y}")
+            
+            # 创建主框架和滚动条
+            main_frame = ttk.Frame(import_window)
+            main_frame.pack(fill="both", expand=True, padx=10, pady=10)
+            
+            # 源文件选择区域
+            source_frame = ttk.LabelFrame(main_frame, text="选择源文件", padding=10)
+            source_frame.pack(fill="both", expand=True, pady=(0, 10))
+            
+            self.selected_files = []
+            self.selected_folders = []
+            
+            # 文件列表显示
+            files_frame = ttk.Frame(source_frame)
+            files_frame.pack(fill="both", expand=True)
+            
+            files_listbox = tk.Listbox(files_frame, height=8)
+            files_scrollbar = ttk.Scrollbar(files_frame, orient="vertical", command=files_listbox.yview)
+            files_listbox.configure(yscrollcommand=files_scrollbar.set)
+            
+            files_listbox.pack(side="left", fill="both", expand=True)
+            files_scrollbar.pack(side="right", fill="y")
+            
+            # 按钮区域
+            buttons_frame = ttk.Frame(source_frame)
+            buttons_frame.pack(fill="x", pady=(10, 0))
+            
+            def add_files():
+                files = filedialog.askopenfilenames(
+                    title="选择视频文件",
+                    filetypes=[("视频文件", "*.mp4 *.avi *.mkv *.mov *.wmv *.flv *.webm *.m4v"), ("所有文件", "*.*")]
+                )
+                for file in files:
+                    if file not in self.selected_files and os.path.exists(file):
+                        self.selected_files.append(file)
+                        files_listbox.insert(tk.END, f"文件: {os.path.basename(file)}")
+            
+            def add_folders():
+                folder = filedialog.askdirectory(title="选择文件夹")
+                if folder and folder not in self.selected_folders and os.path.exists(folder):
+                    self.selected_folders.append(folder)
+                    files_listbox.insert(tk.END, f"文件夹: {os.path.basename(folder)}")
+            
+            def clear_selection():
+                self.selected_files.clear()
+                self.selected_folders.clear()
+                files_listbox.delete(0, tk.END)
+            
+            ttk.Button(buttons_frame, text="添加文件", command=add_files).pack(side="left", padx=(0, 5))
+            ttk.Button(buttons_frame, text="添加文件夹", command=add_folders).pack(side="left", padx=5)
+            ttk.Button(buttons_frame, text="清空", command=clear_selection).pack(side="left", padx=5)
+            
+            # 目标文件夹选择 - 改为下拉菜单
+            dest_frame = ttk.LabelFrame(main_frame, text="选择目标文件夹", padding=10)
+            dest_frame.pack(fill="x", pady=(0, 10))
+            
+            # 获取媒体库文件夹列表
+            self.cursor.execute("SELECT DISTINCT folder_path FROM folders WHERE is_active = 1 ORDER BY folder_path")
+            available_folders = [row[0] for row in self.cursor.fetchall()]
+            
+            self.target_folder = tk.StringVar()
+            
+            # 如果有可用文件夹，设置默认值为第一个
+            if available_folders:
+                self.target_folder.set(available_folders[0])
+            
+            dest_combobox = ttk.Combobox(dest_frame, textvariable=self.target_folder, values=available_folders, state="readonly")
+            dest_combobox.pack(side="left", fill="x", expand=True, padx=(0, 5))
+            
+            def browse_custom_folder():
+                folder = filedialog.askdirectory(title="选择自定义目标文件夹")
+                if folder:
+                    # 将自定义文件夹添加到下拉列表
+                    current_values = list(dest_combobox['values'])
+                    if folder not in current_values:
+                        current_values.append(folder)
+                        dest_combobox['values'] = current_values
+                    self.target_folder.set(folder)
+            
+            ttk.Button(dest_frame, text="自定义", command=browse_custom_folder).pack(side="right")
+            
+            # 选项设置
+            options_frame = ttk.LabelFrame(main_frame, text="导入选项", padding=10)
+            options_frame.pack(fill="x", pady=(0, 10))
+            
+            self.check_playable = tk.BooleanVar(value=True)
+            self.check_md5 = tk.BooleanVar(value=True)
+            self.rename_files = tk.BooleanVar(value=True)
+            
+            ttk.Checkbutton(options_frame, text="检查视频完整性", variable=self.check_playable).pack(anchor="w")
+            ttk.Checkbutton(options_frame, text="检查MD5冲突", variable=self.check_md5).pack(anchor="w")
+            ttk.Checkbutton(options_frame, text="自动重命名文件", variable=self.rename_files).pack(anchor="w")
+            
+            # 操作按钮 - 调整布局，放在选项下方
+            action_frame = ttk.Frame(main_frame)
+            action_frame.pack(fill="x", pady=(10, 0))
+            
+            def start_import():
+                if not (self.selected_files or self.selected_folders):
+                    messagebox.showwarning("警告", "请选择要导入的文件或文件夹")
+                    return
+                
+                if not self.target_folder.get():
+                    messagebox.showwarning("警告", "请选择目标文件夹")
+                    return
+                
+                import_window.destroy()
+                self.process_video_import()
+            
+            # 按钮居中排列
+            button_container = ttk.Frame(action_frame)
+            button_container.pack(expand=True)
+            
+            ttk.Button(button_container, text="开始导入", command=start_import).pack(side="left", padx=5)
+            ttk.Button(button_container, text="取消", command=import_window.destroy).pack(side="left", padx=5)
+            
+        except Exception as e:
+            messagebox.showerror("错误", f"打开导入对话框失败: {str(e)}")
+    
+    def process_video_import(self):
+        """处理视频导入"""
+        try:
+            # 收集所有要处理的视频文件
+            all_video_files = []
+            video_extensions = {'.mp4', '.avi', '.mkv', '.mov', '.wmv', '.flv', '.webm', '.m4v'}
+            
+            # 添加直接选择的文件
+            for file_path in self.selected_files:
+                if os.path.splitext(file_path.lower())[1] in video_extensions:
+                    all_video_files.append(file_path)
+            
+            # 扫描选择的文件夹
+            for folder_path in self.selected_folders:
+                for root, dirs, files in os.walk(folder_path):
+                    for file in files:
+                        file_path = os.path.join(root, file)
+                        if os.path.splitext(file.lower())[1] in video_extensions:
+                            all_video_files.append(file_path)
+            
+            if not all_video_files:
+                messagebox.showinfo("信息", "没有找到视频文件")
+                return
+            
+            # 创建进度窗口
+            progress_window = ProgressWindow(self.root, "导入视频文件", len(all_video_files))
+            
+            def import_thread():
+                try:
+                    imported_count = 0
+                    skipped_count = 0
+                    error_count = 0
+                    
+                    for i, file_path in enumerate(all_video_files):
+                        if progress_window.is_cancelled():
+                            break
+                        
+                        self.root.after(0, lambda f=file_path: progress_window.update_status(f"正在处理: {os.path.basename(f)}"))
+                        
+                        try:
+                            # 检查视频完整性
+                            if self.check_playable.get():
+                                if not self.can_play_video(file_path):
+                                    self.root.after(0, lambda f=file_path: progress_window.update_status(f"跳过不可播放文件: {os.path.basename(f)}"))
+                                    skipped_count += 1
+                                    continue
+                            
+                            # 计算MD5并检查冲突
+                            if self.check_md5.get():
+                                file_hash = self.calculate_file_hash(file_path)
+                                if self.check_md5_conflict(file_hash):
+                                    self.root.after(0, lambda f=file_path: progress_window.update_status(f"跳过MD5冲突文件: {os.path.basename(f)}"))
+                                    skipped_count += 1
+                                    continue
+                            
+                            # 处理文件名
+                            filename = os.path.basename(file_path)
+                            if self.rename_files.get():
+                                filename = self.process_filename(filename)
+                            
+                            # 移动文件到目标位置
+                            target_path = os.path.join(self.target_folder.get(), filename)
+                            
+                            # 如果目标文件已存在，添加序号
+                            counter = 1
+                            base_name, ext = os.path.splitext(filename)
+                            while os.path.exists(target_path):
+                                new_filename = f"{base_name}_{counter}{ext}"
+                                target_path = os.path.join(self.target_folder.get(), new_filename)
+                                counter += 1
+                            
+                            # 复制文件
+                            shutil.copy2(file_path, target_path)
+                            imported_count += 1
+                            
+                            self.root.after(0, lambda f=filename: progress_window.update_status(f"已导入: {f}"))
+                            
+                        except Exception as ex:
+                            error_count += 1
+                            self.root.after(0, lambda f=file_path, err=str(ex): progress_window.update_status(f"处理失败: {os.path.basename(f)} - {err}"))
+                        
+                        self.root.after(0, lambda: progress_window.update_progress(i + 1))
+                        time.sleep(0.1)  # 避免界面卡顿
+                    
+                    # 显示结果
+                    result_msg = f"导入完成\n\n成功导入: {imported_count} 个文件\n跳过文件: {skipped_count} 个\n错误文件: {error_count} 个"
+                    self.root.after(0, progress_window.close)
+                    self.root.after(100, lambda: messagebox.showinfo("导入完成", result_msg))
+                    
+                    # 刷新媒体库
+                    if imported_count > 0:
+                        self.root.after(200, self.load_videos)
+                    
+                except Exception as import_error:
+                    error_msg = str(import_error)
+                    self.root.after(0, progress_window.close)
+                    self.root.after(100, lambda: messagebox.showerror("错误", f"导入过程中发生错误: {error_msg}"))
+            
+            # 在后台线程中执行导入
+            thread = threading.Thread(target=import_thread, daemon=True)
+            thread.start()
+            
+        except Exception as e:
+            messagebox.showerror("错误", f"启动导入过程失败: {str(e)}")
+    
+    def can_play_video(self, file_path):
+        """检查视频文件是否可以播放（从cfn4.py移植）"""
+        try:
+            import cv2
+            cap = cv2.VideoCapture(file_path)
+            if not cap.isOpened():
+                return False
+            
+            frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+            cap.release()
+            
+            return frame_count > 0
+        except Exception as e:
+             return False
+    
+    def check_md5_conflict(self, file_hash):
+        """检查MD5是否与数据库中的文件冲突"""
+        try:
+            cursor = self.conn.cursor()
+            cursor.execute("SELECT COUNT(*) FROM videos WHERE md5_hash = ?", (file_hash,))
+            count = cursor.fetchone()[0]
+            return count > 0
+        except Exception as e:
+             return False
+    
+    def process_filename(self, filename):
+        """处理文件名（从cfn4.py移植）"""
+        try:
+            # 分离文件名和扩展名
+            name, ext = os.path.splitext(filename)
+            
+            # 转换为大写，扩展名转为小写
+            name = name.upper()
+            ext = ext.lower()
+            
+            # 去除空格
+            name = name.replace(' ', '')
+            
+            # 去除特定字符串
+            name = name.replace('CHINESEHOMEMADEVIDEO', '')
+            
+            # 去除其他不需要的字符串（可以根据需要扩展）
+            unwanted_strings = ['HD', 'UNCENSORED', 'LEAKED']
+            for unwanted in unwanted_strings:
+                name = name.replace(unwanted, '')
+            
+            return name + ext
+        except Exception as e:
+             return filename
+
     def run(self):
         """运行应用程序"""
         self.root.mainloop()
         
+    def import_videos(self):
+        """导入视频文件功能"""
+        import_window = tk.Toplevel(self.root)
+        import_window.title("导入视频文件")
+        import_window.geometry("800x700")
+        import_window.transient(self.root)
+        import_window.grab_set()
+        
+        # 主框架
+        main_frame = ttk.Frame(import_window)
+        main_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+        
+        # 源选择框架
+        source_frame = ttk.LabelFrame(main_frame, text="选择导入源")
+        source_frame.pack(fill=tk.X, pady=(0, 10))
+        
+        # 源路径列表
+        source_listbox = tk.Listbox(source_frame, height=6)
+        source_listbox.pack(fill=tk.X, padx=5, pady=5)
+        
+        # 源选择按钮
+        source_button_frame = ttk.Frame(source_frame)
+        source_button_frame.pack(fill=tk.X, padx=5, pady=(0, 5))
+        
+        def add_folders():
+            folders = filedialog.askdirectory(title="选择文件夹", mustexist=True)
+            if folders:
+                source_listbox.insert(tk.END, f"[文件夹] {folders}")
+        
+        def add_files():
+            files = filedialog.askopenfilenames(
+                title="选择视频文件",
+                filetypes=[("视频文件", "*.mp4 *.avi *.mkv *.mov *.wmv *.flv *.webm *.m4v *.3gp *.ts *.mts *.m2ts")]
+            )
+            for file in files:
+                if os.path.exists(file):
+                    source_listbox.insert(tk.END, f"[文件] {file}")
+                else:
+                    log_message(f"文件不存在，跳过: {file}")
+        
+        def remove_selected():
+            selection = source_listbox.curselection()
+            for index in reversed(selection):
+                source_listbox.delete(index)
+        
+        ttk.Button(source_button_frame, text="添加文件夹", command=add_folders).pack(side=tk.LEFT, padx=(0, 5))
+        ttk.Button(source_button_frame, text="添加文件", command=add_files).pack(side=tk.LEFT, padx=(0, 5))
+        ttk.Button(source_button_frame, text="移除选中", command=remove_selected).pack(side=tk.LEFT)
+        
+        # 目标文件夹选择 - 改为下拉菜单
+        target_frame = ttk.LabelFrame(main_frame, text="选择目标文件夹")
+        target_frame.pack(fill=tk.X, pady=(0, 10))
+        
+        # 获取媒体库文件夹列表
+        self.cursor.execute("SELECT DISTINCT folder_path FROM folders WHERE is_active = 1 ORDER BY folder_path")
+        available_folders = [row[0] for row in self.cursor.fetchall()]
+        
+        target_var = tk.StringVar()
+        
+        # 如果有可用文件夹，设置默认值为第一个
+        if available_folders:
+            target_var.set(available_folders[0])
+        
+        target_combobox = ttk.Combobox(target_frame, textvariable=target_var, values=available_folders, state="readonly")
+        target_combobox.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=5, pady=5)
+        
+        def browse_custom_folder():
+            folder = filedialog.askdirectory(title="选择自定义目标文件夹")
+            if folder:
+                # 将自定义文件夹添加到下拉列表
+                current_values = list(target_combobox['values'])
+                if folder not in current_values:
+                    current_values.append(folder)
+                    target_combobox['values'] = current_values
+                target_var.set(folder)
+        
+        ttk.Button(target_frame, text="自定义", command=browse_custom_folder).pack(side=tk.RIGHT, padx=5, pady=5)
+        
+        # 选项框架
+        options_frame = ttk.LabelFrame(main_frame, text="导入选项")
+        options_frame.pack(fill=tk.X, pady=(0, 10))
+        
+        delete_invalid_var = tk.BooleanVar(value=True)
+        delete_duplicate_var = tk.BooleanVar(value=True)
+        rename_files_var = tk.BooleanVar(value=True)
+        
+        ttk.Checkbutton(options_frame, text="删除无法播放的文件", variable=delete_invalid_var).pack(anchor=tk.W, padx=5, pady=2)
+        ttk.Checkbutton(options_frame, text="删除重复文件（基于MD5）", variable=delete_duplicate_var).pack(anchor=tk.W, padx=5, pady=2)
+        ttk.Checkbutton(options_frame, text="自动重命名文件", variable=rename_files_var).pack(anchor=tk.W, padx=5, pady=2)
+        
+        # 按钮框架 - 移到进度上方
+        button_frame = ttk.Frame(main_frame)
+        button_frame.pack(fill=tk.X, pady=(10, 10))
+        
+        import_button = ttk.Button(button_frame, text="开始导入", command=lambda: self.start_import_process(
+            source_listbox, target_var.get(), delete_invalid_var.get(), delete_duplicate_var.get(), 
+            rename_files_var.get(), progress_var, status_var, log_message, import_button
+        ))
+        import_button.pack(side=tk.LEFT, padx=(0, 5))
+        
+        ttk.Button(button_frame, text="关闭", command=import_window.destroy).pack(side=tk.RIGHT)
+        
+        # 进度显示
+        progress_frame = ttk.LabelFrame(main_frame, text="导入进度")
+        progress_frame.pack(fill=tk.BOTH, expand=True)
+        
+        # 进度条
+        progress_var = tk.DoubleVar()
+        progress_bar = ttk.Progressbar(progress_frame, variable=progress_var, maximum=100)
+        progress_bar.pack(fill=tk.X, padx=5, pady=5)
+        
+        # 状态标签
+        status_var = tk.StringVar(value="准备就绪")
+        status_label = ttk.Label(progress_frame, textvariable=status_var)
+        status_label.pack(padx=5, pady=2)
+        
+        # 日志文本框
+        log_text = tk.Text(progress_frame, height=10, wrap=tk.WORD)
+        log_scrollbar = ttk.Scrollbar(progress_frame, orient=tk.VERTICAL, command=log_text.yview)
+        log_text.configure(yscrollcommand=log_scrollbar.set)
+        log_text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(5, 0), pady=5)
+        log_scrollbar.pack(side=tk.RIGHT, fill=tk.Y, padx=(0, 5), pady=5)
+        
+        def log_message(message):
+            timestamp = datetime.now().strftime("%H:%M:%S")
+            log_text.insert(tk.END, f"[{timestamp}] {message}\n")
+            log_text.see(tk.END)
+            import_window.update_idletasks()
+    
+    def start_import_process(self, source_listbox, target_folder, delete_invalid, delete_duplicate, 
+                           rename_files, progress_var, status_var, log_message, import_button):
+        """开始导入处理过程"""
+        if not target_folder:
+            messagebox.showerror("错误", "请选择目标文件夹")
+            return
+        
+        if source_listbox.size() == 0:
+            messagebox.showerror("错误", "请添加要导入的文件或文件夹")
+            return
+        
+        # 禁用导入按钮
+        import_button.config(state="disabled")
+        
+        def import_worker():
+            try:
+                # 收集所有视频文件
+                all_files = []
+                log_message("正在收集视频文件...")
+                
+                for i in range(source_listbox.size()):
+                    item = source_listbox.get(i)
+                    if item.startswith("[文件夹] "):
+                        folder_path = item[5:].strip()  # 移除"[文件夹] "前缀并去除空格
+                        files = self.collect_video_files_from_folder(folder_path)
+                        all_files.extend(files)
+                        log_message(f"从文件夹 {folder_path} 收集到 {len(files)} 个视频文件")
+                    elif item.startswith("[文件] "):
+                        file_path = item[4:].strip()  # 移除"[文件] "前缀并去除空格
+                        log_message(f"检查文件路径: '{file_path}' (长度: {len(file_path)})")
+                        
+                        # 使用pathlib进行路径处理
+                        try:
+                            path_obj = Path(file_path)
+                            normalized_path = str(path_obj.resolve())
+                            log_message(f"标准化路径: '{normalized_path}'")
+                            
+                            if path_obj.exists():
+                                all_files.append(str(path_obj))
+                                log_message(f"文件存在，已添加: {str(path_obj)}")
+                            else:
+                                log_message(f"文件不存在: {file_path}")
+                                # 尝试检查父目录是否存在
+                                if path_obj.parent.exists():
+                                    log_message(f"父目录存在: {path_obj.parent}")
+                                    # 列出父目录中的文件
+                                    try:
+                                        files_in_dir = list(path_obj.parent.glob('*'))
+                                        log_message(f"父目录中的文件数量: {len(files_in_dir)}")
+                                        if len(files_in_dir) <= 10:  # 只显示少量文件
+                                            for f in files_in_dir:
+                                                log_message(f"  - {f.name}")
+                                    except Exception as e:
+                                        log_message(f"无法列出父目录文件: {e}")
+                                else:
+                                    log_message(f"父目录不存在: {path_obj.parent}")
+                        except Exception as e:
+                            log_message(f"路径处理错误: {e}")
+                            # 回退到原始检查
+                            if os.path.exists(file_path):
+                                all_files.append(file_path)
+                            else:
+                                log_message(f"原始路径检查也失败: {file_path}")
+                
+                if not all_files:
+                    log_message("没有找到视频文件")
+                    self.root.after(0, lambda: messagebox.showinfo("信息", "没有找到视频文件"))
+                    return
+                
+                log_message(f"总共找到 {len(all_files)} 个视频文件")
+                
+                # 第一阶段：预处理所有文件，计算MD5并进行去重
+                log_message("开始预处理文件，计算MD5并检查重复...")
+                
+                # 存储文件信息的字典：{file_path: {hash, size, created_time, stars, valid}}
+                file_info_map = {}
+                
+                # 计算所有文件的MD5
+                for i, file_path in enumerate(all_files):
+                    try:
+                        progress = (i / len(all_files)) * 50  # 预处理占50%进度
+                        progress_var.set(progress)
+                        status_var.set(f"预处理文件 {i+1}/{len(all_files)}: {os.path.basename(file_path)}")
+                        
+                        # 检查视频是否可播放
+                        if not self.can_play_video(file_path):
+                            log_message(f"无法播放，标记为无效: {os.path.basename(file_path)}")
+                            file_info_map[file_path] = {'valid': False}
+                            continue
+                        
+                        # 计算MD5
+                        file_hash = self.calculate_file_hash(file_path)
+                        if not file_hash:
+                            log_message(f"MD5计算失败，跳过: {os.path.basename(file_path)}")
+                            file_info_map[file_path] = {'valid': False}
+                            continue
+                        
+                        # 获取文件信息
+                        file_stat = os.stat(file_path)
+                        file_size = file_stat.st_size
+                        created_time = datetime.fromtimestamp(file_stat.st_ctime)
+                        
+                        # 从文件名解析星级（叹号数量）
+                        filename = os.path.basename(file_path)
+                        stars = self.parse_stars_from_filename(filename)
+                        
+                        file_info_map[file_path] = {
+                            'hash': file_hash,
+                            'size': file_size,
+                            'created_time': created_time,
+                            'stars': stars,
+                            'valid': True
+                        }
+                        
+                    except Exception as e:
+                        log_message(f"预处理文件失败: {os.path.basename(file_path)} - {str(e)}")
+                        file_info_map[file_path] = {'valid': False}
+                
+                # 第二阶段：去重处理
+                log_message("开始去重处理...")
+                
+                # 按MD5分组
+                hash_groups = {}
+                for file_path, info in file_info_map.items():
+                    if info.get('valid') and info.get('hash'):
+                        file_hash = info['hash']
+                        if file_hash not in hash_groups:
+                            hash_groups[file_hash] = []
+                        hash_groups[file_hash].append(file_path)
+                
+                # 处理重复文件
+                files_to_process = []  # 最终要处理的文件列表
+                files_to_delete = []   # 要删除的重复文件列表
+                
+                for file_hash, file_paths in hash_groups.items():
+                    # 检查数据库中是否已存在此MD5
+                    if self.check_duplicate_by_hash(file_hash):
+                        log_message(f"MD5 {file_hash[:8]}... 在数据库中已存在，跳过所有相关文件")
+                        if delete_duplicate:
+                            files_to_delete.extend(file_paths)
+                        continue
+                    
+                    if len(file_paths) == 1:
+                        # 没有重复，直接添加到处理列表
+                        files_to_process.append(file_paths[0])
+                    else:
+                        # 有重复文件，需要选择保留哪个
+                        log_message(f"发现 {len(file_paths)} 个重复文件 (MD5: {file_hash[:8]}...)")
+                        
+                        # 排序规则：1. 星级高的优先 2. 创建时间早的优先
+                        def sort_key(path):
+                            info = file_info_map[path]
+                            return (-info['stars'], info['created_time'])  # 负号表示降序
+                        
+                        sorted_paths = sorted(file_paths, key=sort_key)
+                        keep_file = sorted_paths[0]
+                        duplicate_files = sorted_paths[1:]
+                        
+                        files_to_process.append(keep_file)
+                        
+                        log_message(f"保留文件: {os.path.basename(keep_file)} (星级: {file_info_map[keep_file]['stars']})")
+                        for dup_file in duplicate_files:
+                            log_message(f"标记为重复: {os.path.basename(dup_file)} (星级: {file_info_map[dup_file]['stars']})")
+                        
+                        if delete_duplicate:
+                            files_to_delete.extend(duplicate_files)
+                
+                # 删除无效和重复文件
+                invalid_count = 0
+                duplicate_count = 0
+                
+                for file_path in file_info_map:
+                    if not file_info_map[file_path].get('valid'):
+                        if delete_invalid:
+                            try:
+                                send2trash(file_path)
+                                log_message(f"已删除无效文件: {os.path.basename(file_path)}")
+                                invalid_count += 1
+                            except Exception as e:
+                                log_message(f"删除无效文件失败: {os.path.basename(file_path)} - {str(e)}")
+                
+                for file_path in files_to_delete:
+                    try:
+                        send2trash(file_path)
+                        log_message(f"已删除重复文件: {os.path.basename(file_path)}")
+                        duplicate_count += 1
+                    except Exception as e:
+                        log_message(f"删除重复文件失败: {os.path.basename(file_path)} - {str(e)}")
+                
+                # 第三阶段：处理剩余的有效文件
+                log_message(f"开始处理 {len(files_to_process)} 个有效文件...")
+                
+                processed_count = 0
+                success_count = 0
+                failed_count = 0
+                
+                for i, file_path in enumerate(files_to_process):
+                    try:
+                        progress = 50 + (i / len(files_to_process)) * 50  # 处理阶段占50%进度
+                        progress_var.set(progress)
+                        status_var.set(f"导入文件 {i+1}/{len(files_to_process)}: {os.path.basename(file_path)}")
+                        
+                        # 重命名文件
+                        if rename_files:
+                            new_filename = self.process_filename(os.path.basename(file_path))
+                        else:
+                            new_filename = os.path.basename(file_path)
+                        
+                        # 构建目标路径
+                        target_path = os.path.join(target_folder, new_filename)
+                        
+                        # 处理文件名冲突
+                        target_path = self.resolve_filename_conflict(target_path)
+                        
+                        # 移动文件
+                        shutil.move(file_path, target_path)
+                        
+                        # 将文件添加到数据库
+                        try:
+                            # 确定文件夹类型
+                            folder_type = "local"  # 默认为本地文件夹
+                            
+                            # 检查是否为NAS文件夹
+                            cursor = self.conn.cursor()
+                            cursor.execute("SELECT folder_type FROM folders WHERE folder_path = ?", (target_folder,))
+                            folder_result = cursor.fetchone()
+                            if folder_result:
+                                folder_type = folder_result[0]
+                            
+                            # 添加到数据库
+                            self.add_video_to_db(target_path, folder_type)
+                            log_message(f"成功导入并添加到数据库: {os.path.basename(target_path)}")
+                        except Exception as db_error:
+                            log_message(f"文件移动成功但数据库插入失败: {os.path.basename(target_path)} - {str(db_error)}")
+                        
+                        success_count += 1
+                        
+                    except Exception as e:
+                        log_message(f"处理文件失败: {os.path.basename(file_path)} - {str(e)}")
+                        failed_count += 1
+                    
+                    processed_count += 1
+                
+                # 完成
+                progress_var.set(100)
+                status_var.set("导入完成")
+                log_message(f"导入完成！成功: {success_count}, 失败: {failed_count}, 重复: {duplicate_count}, 无效: {invalid_count}")
+                
+                # 刷新媒体库显示
+                if success_count > 0:
+                    log_message("正在刷新媒体库...")
+                    self.root.after(0, self.load_videos)
+                
+                self.root.after(0, lambda: messagebox.showinfo("完成", 
+                    f"导入完成！\n\n成功导入: {success_count} 个文件\n失败: {failed_count} 个文件\n删除重复: {duplicate_count} 个文件\n删除无效: {invalid_count} 个文件"))
+                
+            except Exception as e:
+                error_msg = str(e)
+                log_message(f"导入过程发生错误: {error_msg}")
+                self.root.after(0, lambda: messagebox.showerror("错误", f"导入过程发生错误: {error_msg}"))
+            finally:
+                # 重新启用导入按钮
+                self.root.after(0, lambda: import_button.config(state="normal"))
+        
+        # 在新线程中执行导入
+        threading.Thread(target=import_worker, daemon=True).start()
+    
+    def collect_video_files_from_folder(self, folder_path):
+        """从文件夹收集所有视频文件"""
+        video_extensions = {'.mp4', '.avi', '.mkv', '.mov', '.wmv', '.flv', '.webm', '.m4v', '.3gp', '.ts', '.mts', '.m2ts'}
+        video_files = []
+        
+        if not os.path.exists(folder_path):
+            print(f"文件夹不存在: {folder_path}")
+            return video_files
+            
+        if not os.path.isdir(folder_path):
+            print(f"路径不是文件夹: {folder_path}")
+            return video_files
+        
+        try:
+            for root, dirs, files in os.walk(folder_path):
+                for file in files:
+                    if any(file.lower().endswith(ext) for ext in video_extensions):
+                        full_path = os.path.join(root, file)
+                        if os.path.exists(full_path) and os.path.isfile(full_path):
+                            video_files.append(full_path)
+        except Exception as e:
+            print(f"扫描文件夹失败 {folder_path}: {str(e)}")
+        
+        return video_files
+    
+    def can_play_video(self, file_path):
+        """检查视频文件是否可以播放"""
+        try:
+            cap = cv2.VideoCapture(file_path)
+            if not cap.isOpened():
+                return False
+            
+            frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+            cap.release()
+            
+            return frame_count > 0
+        except Exception:
+            return False
+    
+    def check_duplicate_by_hash(self, file_hash):
+        """检查文件哈希是否已存在于数据库中"""
+        try:
+            cursor = self.conn.cursor()
+            cursor.execute("SELECT COUNT(*) FROM videos WHERE md5_hash = ?", (file_hash,))
+            count = cursor.fetchone()[0]
+            return count > 0
+        except Exception:
+            return False
+    
+    def process_filename(self, filename):
+        """使用cfn4.py中的逻辑处理文件名"""
+        # 获取文件名和后缀
+        filename_no_ext, ext = os.path.splitext(filename)
+        
+        # 将文件名转换为大写
+        filename_upper = filename_no_ext.upper()
+        
+        # 将后缀转换为小写
+        ext_lower = ext.lower()
+        
+        # 构建新的文件名
+        new_filename = filename_upper + ext_lower
+        
+        # 去掉空格
+        if " " in new_filename:
+            new_filename = new_filename.replace(" ", "")
+        
+        # 去掉"Chinese homemade video"和"_CHINESE_HOMEMADE_VIDEO"
+        if "CHINESEHOMEMADEVIDEO" in new_filename:
+            new_filename = new_filename.replace("CHINESEHOMEMADEVIDEO", "")
+        if "_CHINESE_HOMEMADE_VIDEO" in new_filename:
+            new_filename = new_filename.replace("_CHINESE_HOMEMADE_VIDEO", "")
+        
+        # 去掉"hhd800.com@"
+        if "HHD800.COM@" in new_filename:
+            new_filename = new_filename.replace("HHD800.COM@", "")
+        
+        # 去掉"WoXav.Com@"
+        if "WOXAV.COM@" in new_filename:
+            new_filename = new_filename.replace("WOXAV.COM@", "")
+        
+        # 去掉"【"和"】"之间的内容
+        pattern = r"(【.*?】)"
+        if "【" in new_filename and "】" in new_filename:
+            new_filename = re.sub(pattern, "", new_filename)
+        
+        # 去掉各种括号内容
+        partern2 = r"[\[\【\(\（][^)）].*?[\）\)\】\]]"
+        new_filename = re.sub(partern2, "", new_filename)
+        
+        # 去掉各种括号没有括回而是.
+        partern3 = r"[\[\【\(\（][^)）].*?\."
+        new_filename = re.sub(partern3, ".", new_filename)
+        
+        # 去掉直角单引号之间的内容
+        if "「" in new_filename and "」" in new_filename:
+            new_filename = re.sub(r"「.*?」", "", new_filename)
+        
+        # 去掉直角双引号之间的内容
+        if "『" in new_filename and "』" in new_filename:
+            new_filename = re.sub(r"『.*?』", "", new_filename)
+        
+        # 去掉网址名称格式
+        url_pattern = r"(?:WWW\.)?[A-Z0-9]+\.(COM|NET|ORG|CN|CC|ME)"
+        new_filename = re.sub(url_pattern, "", new_filename)
+        
+        return new_filename
+    
+    def resolve_filename_conflict(self, target_path):
+        """解决文件名冲突"""
+        if not os.path.exists(target_path):
+            return target_path
+        
+        base_path, ext = os.path.splitext(target_path)
+        counter = 1
+        
+        while True:
+            new_path = f"{base_path}_{counter}{ext}"
+            if not os.path.exists(new_path):
+                return new_path
+            counter += 1
+    
     def __del__(self):
         """析构函数"""
         if hasattr(self, 'conn'):
