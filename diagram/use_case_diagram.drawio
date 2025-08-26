@@ -409,7 +409,7 @@
         </mxCell>
         
         <!-- Legend -->
-        <mxCell id="legend" value="Use Case Legend:\n\n👤 Primary Actor: Media Library User\n🔧 Secondary Actor: System Administrator\n🌐 External System: JAVDB Website\n💾 External System: File System\n\nRelationship Types:\n——— Association\n- - - → <<include>>\n- - - → <<extend>>\n\nUse Case Categories:\n🔵 Core Media Management\n🟣 Content Analysis\n🟡 Metadata Management\n🟢 Data Management\n🔴 Advanced Features\n🟠 System Configuration" style="text;html=1;strokeColor=#666666;fillColor=#f5f5f5;align=left;verticalAlign=top;whiteSpace=wrap;rounded=1;fontSize=11;fontFamily=Helvetica;" vertex="1" parent="1">
+        <mxCell id="legend" value="Use Case Legend:\n\n👤 Primary Actor: Media Library User\n🔧 Secondary Actor: System Administrator\n🌐 External System: JAVDB Website\n💾 External System: File System\n\nRelationship Types:\n——— Association\n- - - → &lt;&lt;include&gt;&gt;\n- - - → &lt;&lt;extend&gt;&gt;\n\nUse Case Categories:\n🔵 Core Media Management\n🟣 Content Analysis\n🟡 Metadata Management\n🟢 Data Management\n🔴 Advanced Features\n🟠 System Configuration" style="text;html=1;strokeColor=#666666;fillColor=#f5f5f5;align=left;verticalAlign=top;whiteSpace=wrap;rounded=1;fontSize=11;fontFamily=Helvetica;" vertex="1" parent="1">
           <mxGeometry x="40" y="600" width="140" height="280" as="geometry" />
         </mxCell>
         
