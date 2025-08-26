@@ -157,11 +157,13 @@ python media_library.py
 
 ### 文件命名约定 / File Naming Convention
 系统支持从文件名自动解析星级 / System supports automatic star rating parsing from filename：
-- `movie!.mp4` → 1星 / 1 star
-- `movie!!.mp4` → 2星 / 2 stars
-- `movie!!!.mp4` → 3星 / 3 stars
-- `movie!!!!.mp4` → 4星 / 4 stars
-- `movie!!!!!.mp4` → 5星 / 5 stars
+- 只有叹号在文件名称的开头才算 / Only exclamation marks at the beginning of the filename are counted
+- `!movie.mp4` → 2星 / 2 stars
+- `!!movie.mp4` → 3星 / 3 stars
+- `!!!movie.mp4` → 4星 / 4 stars
+- `!!!!movie.mp4` → 5星 / 5 stars
+- `movie.mp4` → 0星 / 0 stars (没有叹号 / no exclamation marks)
+- `movie.mp4!` → 0星 / 0 stars (叹号不在开头 / exclamation marks not at the beginning)
 
 ## 数据库结构 / Database Structure
 

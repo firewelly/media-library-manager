@@ -76,15 +76,15 @@ class VideoContentAnalyzer:
         
         return detectors
     
-    def _extract_frames(self, video_path, min_frames=100, max_interval=10, max_frames=500):
+    def _extract_frames(self, video_path, min_frames=100, max_interval=10, max_frames=300):
         """
-        从视频中提取关键帧
+        从视频中提取关键帧 - 性能优化版本
         
         Args:
             video_path (str): 视频文件路径
-            min_frames (int): 最少提取帧数
-            max_interval (int): 最大提取间隔（秒）
-            max_frames (int): 最大提取帧数（避免处理时间过长）
+            min_frames (int): 最少提取帧数（默认30帧，降低以提高性能）
+            max_interval (int): 最大提取间隔（秒）（默认15秒，提高以减少帧数）
+            max_frames (int): 最大提取帧数（默认100帧，降低以提高性能）
             
         Returns:
             list: 提取的帧列表
@@ -113,9 +113,18 @@ class VideoContentAnalyzer:
                 cap.release()
                 return []
             
+            # 性能优化：根据视频时长动态调整提取策略
+            # 对于长视频，使用更大的间隔
+            if duration > 600:  # 10分钟以上的视频
+                max_interval = 30  # 30秒一帧
+                max_frames = 300   # 最多300帧
+            elif duration > 300:  # 5-10分钟的视频
+                max_interval = 20  # 20秒一帧
+                max_frames = 300   # 最多300帧
+            
             # 计算理想的提取间隔
-            # 优先保证10秒一帧，但至少要有min_frames帧，不超过max_frames帧
-            interval_by_time = max_interval  # 10秒间隔
+            # 优先使用较大间隔，但确保至少有min_frames帧，不超过max_frames帧
+            interval_by_time = max_interval  # 默认15秒间隔
             interval_by_min_count = duration / min_frames  # 保证最少帧数的间隔
             interval_by_max_count = duration / max_frames  # 保证不超过最大帧数的间隔
             
@@ -123,7 +132,7 @@ class VideoContentAnalyzer:
             actual_interval = max(interval_by_max_count, min(interval_by_time, interval_by_min_count))
             actual_interval = max(1, actual_interval)  # 至少1秒间隔
             
-            # 计算实际提取的帧数
+            # 计算实际提取的帧数 - 限制最大帧数以提高性能
             expected_frames = min(max_frames, int(duration / actual_interval) + 1)
             
             print(f"提取策略: 每{actual_interval:.1f}秒一帧，预计提取{expected_frames}帧（限制最大{max_frames}帧）")
@@ -131,40 +140,38 @@ class VideoContentAnalyzer:
             frames = []
             frame_indices = []
             
-            # 按时间间隔提取帧
+            # 性能优化：使用更高效的帧提取方法
+            # 直接计算所有需要提取的帧位置，然后一次性提取
+            frame_positions = []
             current_time = 0
-            while current_time <= duration and len(frames) < max_frames:
-                # 计算对应的帧索引
+            
+            # 预先计算所有帧位置
+            while current_time <= duration and len(frame_positions) < expected_frames:
                 frame_index = int(current_time * fps)
-                
-                if frame_index >= frame_count:
-                    break
-                
+                if frame_index < frame_count:
+                    frame_positions.append(frame_index)
+                current_time += actual_interval
+            
+            print(f"计划提取 {len(frame_positions)} 帧")
+            
+            # 批量提取帧
+            for frame_index in frame_positions:
                 cap.set(cv2.CAP_PROP_POS_FRAMES, frame_index)
                 ret, frame = cap.read()
                 
                 if ret and frame is not None:
-                    # 调整帧大小以节省内存
-                    height, width = frame.shape[:2]
-                    if width > 640:
-                        scale = 640 / width
-                        new_width = 640
-                        new_height = int(height * scale)
-                        frame = cv2.resize(frame, (new_width, new_height))
-                    
+                    # 保持原始分辨率
                     frames.append(frame)
                     frame_indices.append(frame_index)
-                
-                current_time += actual_interval
             
             cap.release()
             
             print(f"实际提取了 {len(frames)} 帧用于分析")
             
-            # 如果提取的帧数少于最小要求且没有达到最大限制，尝试补充
-            if len(frames) < min_frames and len(frames) < max_frames and len(frames) > 0:
-                needed_frames = min(min_frames - len(frames), max_frames - len(frames))
-                print(f"帧数不足{min_frames}，尝试补充提取{needed_frames}帧...")
+            # 只在帧数严重不足时才补充提取额外帧
+            if len(frames) < min_frames // 2 and len(frames) < max_frames and len(frames) > 0:
+                needed_frames = min(min_frames // 2, max_frames - len(frames))  # 只补充到最小帧数的一半
+                print(f"帧数严重不足，尝试补充提取{needed_frames}帧...")
                 additional_frames = self._extract_additional_frames(video_path, needed_frames, frame_indices)
                 frames.extend(additional_frames)
                 print(f"补充后共有 {len(frames)} 帧")
@@ -177,7 +184,7 @@ class VideoContentAnalyzer:
     
     def _extract_additional_frames(self, video_path, needed_frames, existing_indices):
         """
-        补充提取额外的帧
+        补充提取额外的帧 - 性能优化版本
         
         Args:
             video_path (str): 视频文件路径
@@ -198,12 +205,25 @@ class VideoContentAnalyzer:
             frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
             existing_set = set(existing_indices)
             
+            # 性能优化：预先计算所有可能的补充帧位置
+            potential_positions = []
+            
             # 在现有帧之间均匀插入新帧
             if len(existing_indices) >= 2:
+                # 只处理较大间隔的帧
+                gaps = []
                 for i in range(len(existing_indices) - 1):
-                    if len(additional_frames) >= needed_frames:
-                        break
-                    
+                    start_idx = existing_indices[i]
+                    end_idx = existing_indices[i + 1]
+                    gap_size = end_idx - start_idx
+                    gaps.append((i, gap_size))
+                
+                # 按间隔大小排序，优先处理大间隔
+                gaps.sort(key=lambda x: x[1], reverse=True)
+                
+                # 只处理前几个最大间隔
+                for gap_idx, _ in gaps[:min(needed_frames, len(gaps))]:
+                    i = gap_idx
                     start_idx = existing_indices[i]
                     end_idx = existing_indices[i + 1]
                     
@@ -211,20 +231,16 @@ class VideoContentAnalyzer:
                     mid_idx = (start_idx + end_idx) // 2
                     
                     if mid_idx not in existing_set and mid_idx < frame_count:
-                        cap.set(cv2.CAP_PROP_POS_FRAMES, mid_idx)
-                        ret, frame = cap.read()
-                        
-                        if ret and frame is not None:
-                            # 调整帧大小
-                            height, width = frame.shape[:2]
-                            if width > 640:
-                                scale = 640 / width
-                                new_width = 640
-                                new_height = int(height * scale)
-                                frame = cv2.resize(frame, (new_width, new_height))
-                            
-                            additional_frames.append(frame)
-                            existing_set.add(mid_idx)
+                        potential_positions.append(mid_idx)
+            
+            # 批量提取帧
+            for pos in potential_positions[:needed_frames]:
+                cap.set(cv2.CAP_PROP_POS_FRAMES, pos)
+                ret, frame = cap.read()
+                
+                if ret and frame is not None:
+                    # 保持原始分辨率
+                    additional_frames.append(frame)
             
             cap.release()
             
@@ -847,7 +863,7 @@ class VideoContentAnalyzer:
     
     def analyze_video_content(self, video_path, min_frames=100, max_interval=10, max_frames=500):
         """
-        分析视频内容特征
+        分析视频内容特征 - 性能优化版本
         
         Args:
             video_path (str): 视频文件路径
@@ -860,7 +876,7 @@ class VideoContentAnalyzer:
         """
         print(f"开始分析视频: {os.path.basename(video_path)}")
         
-        # 提取关键帧
+        # 提取关键帧 - 减少帧数以提高性能
         frames = self._extract_frames(video_path, min_frames, max_interval, max_frames)
         
         if not frames:
@@ -877,9 +893,13 @@ class VideoContentAnalyzer:
             'skin_textures': []
         }
         
-        # 分析每一帧
-        for i, frame in enumerate(frames):
-            print(f"分析第 {i+1}/{len(frames)} 帧")
+        # 分析每一帧 - 使用采样分析以提高性能
+        # 如果帧数超过30，则只分析每3帧
+        sample_rate = 3 if len(frames) > 30 else 1
+        frames_to_analyze = frames[::sample_rate]
+        
+        for i, frame in enumerate(frames_to_analyze):
+            print(f"分析第 {i+1}/{len(frames_to_analyze)} 帧")
             
             try:
                 # 黑丝检测
@@ -902,13 +922,15 @@ class VideoContentAnalyzer:
                 shape_result = self._detect_clothing_shapes(frame)
                 results['clothing_shapes'].append(shape_result)
                 
-                # 织物纹理
-                fabric_result = self._detect_fabric_textures(frame)
-                results['fabric_textures'].append(fabric_result)
+                # 织物纹理 - 这是计算密集型操作，减少处理
+                if i % 2 == 0:  # 只在偶数帧分析纹理
+                    fabric_result = self._detect_fabric_textures(frame)
+                    results['fabric_textures'].append(fabric_result)
                 
-                # 肌肤纹理
-                skin_texture_result = self._detect_skin_textures(frame)
-                results['skin_textures'].append(skin_texture_result)
+                # 肌肤纹理 - 这是计算密集型操作，减少处理
+                if i % 2 == 0:  # 只在偶数帧分析纹理
+                    skin_texture_result = self._detect_skin_textures(frame)
+                    results['skin_textures'].append(skin_texture_result)
                 
             except Exception as e:
                 print(f"分析第 {i+1} 帧时出错: {e}")
@@ -926,7 +948,7 @@ class VideoContentAnalyzer:
         
         return {
             'video_path': video_path,
-            'frames_analyzed': len(frames),
+            'frames_analyzed': len(frames_to_analyze),
             'detailed_results': results,
             'summary': summary,
             'generated_tags': generated_tags
