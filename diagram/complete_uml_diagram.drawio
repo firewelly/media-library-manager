@@ -1,0 +1,199 @@
+<mxfile host="app.diagrams.net" modified="2024-01-15T10:00:00.000Z" agent="5.0" etag="xxx" version="22.1.16" type="device">
+  <diagram name="YY Media Library UML" id="uml-diagram">
+    <mxGraphModel dx="2074" dy="1181" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1654" pageHeight="2336" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+        
+        <!-- MediaLibrary Main Class -->
+        <mxCell id="MediaLibrary" value="MediaLibrary" style="swimlane;fontStyle=1;align=center;verticalAlign=top;childLayout=stackLayout;horizontal=1;startSize=26;horizontalStack=0;resizeParent=1;resizeParentMax=0;resizeLast=0;collapsible=1;marginBottom=0;fillColor=#dae8fc;strokeColor=#6c8ebf;" vertex="1" parent="1">
+          <mxGeometry x="40" y="40" width="320" height="400" as="geometry" />
+        </mxCell>
+        <mxCell id="MediaLibrary-attrs" value="- db_path: str&#xa;- root: Tk&#xa;- tree: ttk.Treeview&#xa;- folders: list&#xa;- current_folder: str&#xa;- column_config: dict&#xa;- sort_column: str&#xa;- sort_reverse: bool&#xa;- filter_text: str&#xa;- star_filter: int" style="text;strokeColor=none;fillColor=none;align=left;verticalAlign=top;spacingLeft=4;spacingRight=4;overflow=hidden;rotatable=0;points=[[0,0.5],[1,0.5]];portConstraint=eastwest;" vertex="1" parent="MediaLibrary">
+          <mxGeometry y="26" width="320" height="134" as="geometry" />
+        </mxCell>
+        <mxCell id="MediaLibrary-line" value="" style="line;strokeWidth=1;fillColor=none;align=left;verticalAlign=middle;spacingTop=-1;spacingLeft=3;spacingRight=3;rotatable=0;labelPosition=right;points=[];portConstraint=eastwest;strokeColor=inherit;" vertex="1" parent="MediaLibrary">
+          <mxGeometry y="160" width="320" height="8" as="geometry" />
+        </mxCell>
+        <mxCell id="MediaLibrary-methods" value="+ __init__(db_path: str)&#xa;+ create_gui(): void&#xa;+ scan_folder(folder_path: str): void&#xa;+ load_videos(): void&#xa;+ refresh_display(): void&#xa;+ on_item_select(event): void&#xa;+ on_double_click(event): void&#xa;+ handle_right_click(event): void&#xa;+ show_column_menu(event): void&#xa;+ setup_column_drag(): void&#xa;+ move_column(from_idx: int, to_idx: int): void&#xa;+ recreate_treeview(): void&#xa;+ load_column_config(): dict&#xa;+ save_column_config(): void&#xa;+ batch_import_nfo_for_no_actors(): void&#xa;+ batch_import_javdb_for_no_title(): void" style="text;strokeColor=none;fillColor=none;align=left;verticalAlign=top;spacingLeft=4;spacingRight=4;overflow=hidden;rotatable=0;points=[[0,0.5],[1,0.5]];portConstraint=eastwest;" vertex="1" parent="MediaLibrary">
+          <mxGeometry y="168" width="320" height="232" as="geometry" />
+        </mxCell>
+        
+        <!-- ProgressWindow Class -->
+        <mxCell id="ProgressWindow" value="ProgressWindow" style="swimlane;fontStyle=1;align=center;verticalAlign=top;childLayout=stackLayout;horizontal=1;startSize=26;horizontalStack=0;resizeParent=1;resizeParentMax=0;resizeLast=0;collapsible=1;marginBottom=0;fillColor=#fff2cc;strokeColor=#d6b656;" vertex="1" parent="1">
+          <mxGeometry x="400" y="40" width="280" height="200" as="geometry" />
+        </mxCell>
+        <mxCell id="ProgressWindow-attrs" value="- root: Toplevel&#xa;- progress_var: StringVar&#xa;- progress_bar: ttk.Progressbar&#xa;- log_text: Text&#xa;- cancel_flag: bool" style="text;strokeColor=none;fillColor=none;align=left;verticalAlign=top;spacingLeft=4;spacingRight=4;overflow=hidden;rotatable=0;points=[[0,0.5],[1,0.5]];portConstraint=eastwest;" vertex="1" parent="ProgressWindow">
+          <mxGeometry y="26" width="280" height="74" as="geometry" />
+        </mxCell>
+        <mxCell id="ProgressWindow-line" value="" style="line;strokeWidth=1;fillColor=none;align=left;verticalAlign=middle;spacingTop=-1;spacingLeft=3;spacingRight=3;rotatable=0;labelPosition=right;points=[];portConstraint=eastwest;strokeColor=inherit;" vertex="1" parent="ProgressWindow">
+          <mxGeometry y="100" width="280" height="8" as="geometry" />
+        </mxCell>
+        <mxCell id="ProgressWindow-methods" value="+ __init__(parent: Tk, title: str)&#xa;+ update_progress(value: int, text: str): void&#xa;+ add_log(message: str): void&#xa;+ set_cancel_callback(callback): void&#xa;+ close(): void" style="text;strokeColor=none;fillColor=none;align=left;verticalAlign=top;spacingLeft=4;spacingRight=4;overflow=hidden;rotatable=0;points=[[0,0.5],[1,0.5]];portConstraint=eastwest;" vertex="1" parent="ProgressWindow">
+          <mxGeometry y="108" width="280" height="92" as="geometry" />
+        </mxCell>
+        
+        <!-- VideoContentAnalyzer Class -->
+        <mxCell id="VideoContentAnalyzer" value="VideoContentAnalyzer" style="swimlane;fontStyle=1;align=center;verticalAlign=top;childLayout=stackLayout;horizontal=1;startSize=26;horizontalStack=0;resizeParent=1;resizeParentMax=0;resizeLast=0;collapsible=1;marginBottom=0;fillColor=#e1d5e7;strokeColor=#9673a6;" vertex="1" parent="1">
+          <mxGeometry x="720" y="40" width="350" height="320" as="geometry" />
+        </mxCell>
+        <mxCell id="VideoContentAnalyzer-attrs" value="- db_path: str&#xa;- feature_detectors: dict&#xa;- analysis_cache: dict" style="text;strokeColor=none;fillColor=none;align=left;verticalAlign=top;spacingLeft=4;spacingRight=4;overflow=hidden;rotatable=0;points=[[0,0.5],[1,0.5]];portConstraint=eastwest;" vertex="1" parent="VideoContentAnalyzer">
+          <mxGeometry y="26" width="350" height="54" as="geometry" />
+        </mxCell>
+        <mxCell id="VideoContentAnalyzer-line" value="" style="line;strokeWidth=1;fillColor=none;align=left;verticalAlign=middle;spacingTop=-1;spacingLeft=3;spacingRight=3;rotatable=0;labelPosition=right;points=[];portConstraint=eastwest;strokeColor=inherit;" vertex="1" parent="VideoContentAnalyzer">
+          <mxGeometry y="80" width="350" height="8" as="geometry" />
+        </mxCell>
+        <mxCell id="VideoContentAnalyzer-methods" value="+ __init__(db_path: str)&#xa;+ _init_feature_detectors(): dict&#xa;+ _extract_frames(video_path: str): list&#xa;+ _extract_additional_frames(): list&#xa;+ _detect_black_stockings(frame): bool&#xa;+ _detect_skin_tone(frame): dict&#xa;+ _detect_clothing_colors(frame): list&#xa;+ _detect_body_proportions(frame): dict&#xa;+ _detect_clothing_shapes(frame): list&#xa;+ _detect_fabric_textures(frame): list&#xa;+ _detect_nurse_uniform(frame): bool&#xa;+ _detect_medical_equipment(frame): bool&#xa;+ _detect_forced_scenario(frame): bool&#xa;+ analyze_video(video_path: str): dict&#xa;+ batch_analyze_videos(): void" style="text;strokeColor=none;fillColor=none;align=left;verticalAlign=top;spacingLeft=4;spacingRight=4;overflow=hidden;rotatable=0;points=[[0,0.5],[1,0.5]];portConstraint=eastwest;" vertex="1" parent="VideoContentAnalyzer">
+          <mxGeometry y="88" width="350" height="232" as="geometry" />
+        </mxCell>
+        
+        <!-- VideoTagger Class -->
+        <mxCell id="VideoTagger" value="VideoTagger" style="swimlane;fontStyle=1;align=center;verticalAlign=top;childLayout=stackLayout;horizontal=1;startSize=26;horizontalStack=0;resizeParent=1;resizeParentMax=0;resizeLast=0;collapsible=1;marginBottom=0;fillColor=#f8cecc;strokeColor=#b85450;" vertex="1" parent="1">
+          <mxGeometry x="1120" y="40" width="320" height="280" as="geometry" />
+        </mxCell>
+        <mxCell id="VideoTagger-attrs" value="- db_path: str&#xa;- vocabulary_file: str&#xa;- vocabulary: dict&#xa;- tag_rules: dict" style="text;strokeColor=none;fillColor=none;align=left;verticalAlign=top;spacingLeft=4;spacingRight=4;overflow=hidden;rotatable=0;points=[[0,0.5],[1,0.5]];portConstraint=eastwest;" vertex="1" parent="VideoTagger">
+          <mxGeometry y="26" width="320" height="64" as="geometry" />
+        </mxCell>
+        <mxCell id="VideoTagger-line" value="" style="line;strokeWidth=1;fillColor=none;align=left;verticalAlign=middle;spacingTop=-1;spacingLeft=3;spacingRight=3;rotatable=0;labelPosition=right;points=[];portConstraint=eastwest;strokeColor=inherit;" vertex="1" parent="VideoTagger">
+          <mxGeometry y="90" width="320" height="8" as="geometry" />
+        </mxCell>
+        <mxCell id="VideoTagger-methods" value="+ __init__(db_path: str, vocabulary_file: str)&#xa;+ _load_vocabulary(): dict&#xa;+ _create_tag_rules(): dict&#xa;+ get_test_videos(limit: int): list&#xa;+ extract_features_from_filename(filename: str): list&#xa;+ _extract_from_av_code(filename: str): list&#xa;+ calculate_tag_scores(features: list): dict&#xa;+ generate_tags_for_video(video_id: int): list&#xa;+ batch_tag_videos(): void&#xa;+ update_video_tags(video_id: int, tags: list): void" style="text;strokeColor=none;fillColor=none;align=left;verticalAlign=top;spacingLeft=4;spacingRight=4;overflow=hidden;rotatable=0;points=[[0,0.5],[1,0.5]];portConstraint=eastwest;" vertex="1" parent="VideoTagger">
+          <mxGeometry y="98" width="320" height="182" as="geometry" />
+        </mxCell>
+        
+        <!-- Database Functions -->
+        <mxCell id="DatabaseFunctions" value="Database Functions" style="swimlane;fontStyle=1;align=center;verticalAlign=top;childLayout=stackLayout;horizontal=1;startSize=26;horizontalStack=0;resizeParent=1;resizeParentMax=0;resizeLast=0;collapsible=1;marginBottom=0;fillColor=#d5e8d4;strokeColor=#82b366;" vertex="1" parent="1">
+          <mxGeometry x="40" y="480" width="280" height="200" as="geometry" />
+        </mxCell>
+        <mxCell id="DatabaseFunctions-methods" value="+ init_empty_database(): void&#xa;+ create_videos_table(): void&#xa;+ create_folders_table(): void&#xa;+ create_tags_table(): void&#xa;+ create_indexes(): void&#xa;+ backup_database(): str&#xa;+ restore_database(backup_path: str): bool" style="text;strokeColor=none;fillColor=none;align=left;verticalAlign=top;spacingLeft=4;spacingRight=4;overflow=hidden;rotatable=0;points=[[0,0.5],[1,0.5]];portConstraint=eastwest;" vertex="1" parent="DatabaseFunctions">
+          <mxGeometry y="26" width="280" height="174" as="geometry" />
+        </mxCell>
+        
+        <!-- JAVDB Crawler Functions -->
+        <mxCell id="JAVDBCrawler" value="JAVDB Crawler Functions" style="swimlane;fontStyle=1;align=center;verticalAlign=top;childLayout=stackLayout;horizontal=1;startSize=26;horizontalStack=0;resizeParent=1;resizeParentMax=0;resizeLast=0;collapsible=1;marginBottom=0;fillColor=#ffe6cc;strokeColor=#d79b00;" vertex="1" parent="1">
+          <mxGeometry x="360" y="480" width="320" height="280" as="geometry" />
+        </mxCell>
+        <mxCell id="JAVDBCrawler-methods" value="+ setup_driver(): WebDriver&#xa;+ setup_socks5_proxy(): socket&#xa;+ restore_socket(original_socket): void&#xa;+ random_delay(min_sec: float, max_sec: float): void&#xa;+ safe_filename(filename: str): str&#xa;+ download_image(img_url: str, filename: str): str&#xa;+ is_female_actor(driver, actor_link: str): bool&#xa;+ search_video_by_code(driver, video_code: str): str&#xa;+ get_video_detail_links(driver, max_pages: int): list&#xa;+ parse_detail(driver, detail_url: str): dict&#xa;+ save_to_csv(data: list, filename: str): void&#xa;+ main(): void" style="text;strokeColor=none;fillColor=none;align=left;verticalAlign=top;spacingLeft=4;spacingRight=4;overflow=hidden;rotatable=0;points=[[0,0.5],[1,0.5]];portConstraint=eastwest;" vertex="1" parent="JAVDBCrawler">
+          <mxGeometry y="26" width="320" height="254" as="geometry" />
+        </mxCell>
+        
+        <!-- Title Analysis Functions -->
+        <mxCell id="TitleAnalysis" value="Title Analysis Functions" style="swimlane;fontStyle=1;align=center;verticalAlign=top;childLayout=stackLayout;horizontal=1;startSize=26;horizontalStack=0;resizeParent=1;resizeParentMax=0;resizeLast=0;collapsible=1;marginBottom=0;fillColor=#f0f0f0;strokeColor=#666666;" vertex="1" parent="1">
+          <mxGeometry x="720" y="480" width="300" height="200" as="geometry" />
+        </mxCell>
+        <mxCell id="TitleAnalysis-methods" value="+ extract_av_code(filename: str): str&#xa;+ clean_title(title: str): str&#xa;+ analyze_title_patterns(titles: list): dict&#xa;+ suggest_title_improvements(): list&#xa;+ batch_analyze_titles(): void&#xa;+ export_analysis_report(): str" style="text;strokeColor=none;fillColor=none;align=left;verticalAlign=top;spacingLeft=4;spacingRight=4;overflow=hidden;rotatable=0;points=[[0,0.5],[1,0.5]];portConstraint=eastwest;" vertex="1" parent="TitleAnalysis">
+          <mxGeometry y="26" width="300" height="174" as="geometry" />
+        </mxCell>
+        
+        <!-- Utility Functions -->
+        <mxCell id="UtilityFunctions" value="Utility Functions" style="swimlane;fontStyle=1;align=center;verticalAlign=top;childLayout=stackLayout;horizontal=1;startSize=26;horizontalStack=0;resizeParent=1;resizeParentMax=0;resizeLast=0;collapsible=1;marginBottom=0;fillColor=#e6f3ff;strokeColor=#4d94ff;" vertex="1" parent="1">
+          <mxGeometry x="1080" y="480" width="280" height="160" as="geometry" />
+        </mxCell>
+        <mxCell id="UtilityFunctions-methods" value="+ get_file_hash(file_path: str): str&#xa;+ get_video_duration(file_path: str): int&#xa;+ get_video_resolution(file_path: str): str&#xa;+ extract_thumbnail(video_path: str): bytes&#xa;+ format_file_size(size: int): str&#xa;+ validate_video_file(file_path: str): bool" style="text;strokeColor=none;fillColor=none;align=left;verticalAlign=top;spacingLeft=4;spacingRight=4;overflow=hidden;rotatable=0;points=[[0,0.5],[1,0.5]];portConstraint=eastwest;" vertex="1" parent="UtilityFunctions">
+          <mxGeometry y="26" width="280" height="134" as="geometry" />
+        </mxCell>
+        
+        <!-- Database Tables -->
+        <mxCell id="VideosTable" value="videos (Table)" style="swimlane;fontStyle=1;align=center;verticalAlign=top;childLayout=stackLayout;horizontal=1;startSize=26;horizontalStack=0;resizeParent=1;resizeParentMax=0;resizeLast=0;collapsible=1;marginBottom=0;fillColor=#ffd6cc;strokeColor=#d79b00;" vertex="1" parent="1">
+          <mxGeometry x="40" y="720" width="280" height="280" as="geometry" />
+        </mxCell>
+        <mxCell id="VideosTable-attrs" value="+ id: INTEGER (PK)&#xa;+ file_path: TEXT (UNIQUE)&#xa;+ file_name: TEXT&#xa;+ file_size: INTEGER&#xa;+ file_hash: TEXT&#xa;+ title: TEXT&#xa;+ description: TEXT&#xa;+ genre: TEXT&#xa;+ year: INTEGER&#xa;+ rating: REAL&#xa;+ stars: INTEGER&#xa;+ tags: TEXT&#xa;+ nas_path: TEXT&#xa;+ is_nas_online: BOOLEAN&#xa;+ thumbnail_data: BLOB&#xa;+ thumbnail_path: TEXT&#xa;+ duration: INTEGER&#xa;+ resolution: TEXT&#xa;+ created_at: TIMESTAMP&#xa;+ updated_at: TIMESTAMP" style="text;strokeColor=none;fillColor=none;align=left;verticalAlign=top;spacingLeft=4;spacingRight=4;overflow=hidden;rotatable=0;points=[[0,0.5],[1,0.5]];portConstraint=eastwest;" vertex="1" parent="VideosTable">
+          <mxGeometry y="26" width="280" height="254" as="geometry" />
+        </mxCell>
+        
+        <mxCell id="FoldersTable" value="folders (Table)" style="swimlane;fontStyle=1;align=center;verticalAlign=top;childLayout=stackLayout;horizontal=1;startSize=26;horizontalStack=0;resizeParent=1;resizeParentMax=0;resizeLast=0;collapsible=1;marginBottom=0;fillColor=#ffd6cc;strokeColor=#d79b00;" vertex="1" parent="1">
+          <mxGeometry x="360" y="720" width="200" height="140" as="geometry" />
+        </mxCell>
+        <mxCell id="FoldersTable-attrs" value="+ id: INTEGER (PK)&#xa;+ folder_path: TEXT (UNIQUE)&#xa;+ folder_type: TEXT&#xa;+ is_active: BOOLEAN&#xa;+ created_at: TIMESTAMP" style="text;strokeColor=none;fillColor=none;align=left;verticalAlign=top;spacingLeft=4;spacingRight=4;overflow=hidden;rotatable=0;points=[[0,0.5],[1,0.5]];portConstraint=eastwest;" vertex="1" parent="FoldersTable">
+          <mxGeometry y="26" width="200" height="114" as="geometry" />
+        </mxCell>
+        
+        <mxCell id="TagsTable" value="tags (Table)" style="swimlane;fontStyle=1;align=center;verticalAlign=top;childLayout=stackLayout;horizontal=1;startSize=26;horizontalStack=0;resizeParent=1;resizeParentMax=0;resizeLast=0;collapsible=1;marginBottom=0;fillColor=#ffd6cc;strokeColor=#d79b00;" vertex="1" parent="1">
+          <mxGeometry x="600" y="720" width="180" height="120" as="geometry" />
+        </mxCell>
+        <mxCell id="TagsTable-attrs" value="+ id: INTEGER (PK)&#xa;+ tag_name: TEXT (UNIQUE)&#xa;+ created_at: TIMESTAMP" style="text;strokeColor=none;fillColor=none;align=left;verticalAlign=top;spacingLeft=4;spacingRight=4;overflow=hidden;rotatable=0;points=[[0,0.5],[1,0.5]];portConstraint=eastwest;" vertex="1" parent="TagsTable">
+          <mxGeometry y="26" width="180" height="94" as="geometry" />
+        </mxCell>
+        
+        <!-- Relationships -->
+        <!-- MediaLibrary uses ProgressWindow -->
+        <mxCell id="rel1" value="uses" style="endArrow=open;endFill=1;endSize=12;html=1;rounded=0;exitX=1;exitY=0.25;exitDx=0;exitDy=0;entryX=0;entryY=0.25;entryDx=0;entryDy=0;" edge="1" parent="1" source="MediaLibrary" target="ProgressWindow">
+          <mxGeometry width="160" relative="1" as="geometry">
+            <mxPoint x="370" y="140" as="sourcePoint" />
+            <mxPoint x="530" y="140" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        
+        <!-- MediaLibrary uses VideoContentAnalyzer -->
+        <mxCell id="rel2" value="uses" style="endArrow=open;endFill=1;endSize=12;html=1;rounded=0;exitX=1;exitY=0.75;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;" edge="1" parent="1" source="MediaLibrary" target="VideoContentAnalyzer">
+          <mxGeometry width="160" relative="1" as="geometry">
+            <mxPoint x="370" y="340" as="sourcePoint" />
+            <mxPoint x="720" y="200" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        
+        <!-- MediaLibrary uses VideoTagger -->
+        <mxCell id="rel3" value="uses" style="endArrow=open;endFill=1;endSize=12;html=1;rounded=0;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.75;entryDx=0;entryDy=0;" edge="1" parent="1" source="MediaLibrary" target="VideoTagger">
+          <mxGeometry width="160" relative="1" as="geometry">
+            <mxPoint x="370" y="240" as="sourcePoint" />
+            <mxPoint x="1120" y="280" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        
+        <!-- MediaLibrary accesses Database -->
+        <mxCell id="rel4" value="accesses" style="endArrow=open;endFill=1;endSize=12;html=1;rounded=0;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" edge="1" parent="1" source="MediaLibrary" target="VideosTable">
+          <mxGeometry width="160" relative="1" as="geometry">
+            <mxPoint x="200" y="450" as="sourcePoint" />
+            <mxPoint x="180" y="720" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        
+        <!-- VideoContentAnalyzer accesses Database -->
+        <mxCell id="rel5" value="accesses" style="endArrow=open;endFill=1;endSize=12;html=1;rounded=0;exitX=0.25;exitY=1;exitDx=0;exitDy=0;entryX=1;entryY=0.25;entryDx=0;entryDy=0;" edge="1" parent="1" source="VideoContentAnalyzer" target="VideosTable">
+          <mxGeometry width="160" relative="1" as="geometry">
+            <mxPoint x="810" y="370" as="sourcePoint" />
+            <mxPoint x="320" y="790" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        
+        <!-- VideoTagger accesses Database -->
+        <mxCell id="rel6" value="accesses" style="endArrow=open;endFill=1;endSize=12;html=1;rounded=0;exitX=0;exitY=1;exitDx=0;exitDy=0;entryX=1;entryY=0.5;entryDx=0;entryDy=0;" edge="1" parent="1" source="VideoTagger" target="VideosTable">
+          <mxGeometry width="160" relative="1" as="geometry">
+            <mxPoint x="1120" y="330" as="sourcePoint" />
+            <mxPoint x="320" y="850" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        
+        <!-- JAVDB Crawler uses Utility Functions -->
+        <mxCell id="rel7" value="uses" style="endArrow=open;endFill=1;endSize=12;html=1;rounded=0;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;" edge="1" parent="1" source="JAVDBCrawler" target="UtilityFunctions">
+          <mxGeometry width="160" relative="1" as="geometry">
+            <mxPoint x="690" y="620" as="sourcePoint" />
+            <mxPoint x="1080" y="560" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        
+        <!-- Database Functions manages Tables -->
+        <mxCell id="rel8" value="manages" style="endArrow=open;endFill=1;endSize=12;html=1;rounded=0;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" edge="1" parent="1" source="DatabaseFunctions" target="FoldersTable">
+          <mxGeometry width="160" relative="1" as="geometry">
+            <mxPoint x="180" y="690" as="sourcePoint" />
+            <mxPoint x="460" y="720" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        
+        <!-- Title Analysis uses Database -->
+        <mxCell id="rel9" value="analyzes" style="endArrow=open;endFill=1;endSize=12;html=1;rounded=0;exitX=0;exitY=1;exitDx=0;exitDy=0;entryX=1;entryY=0;entryDx=0;entryDy=0;" edge="1" parent="1" source="TitleAnalysis" target="TagsTable">
+          <mxGeometry width="160" relative="1" as="geometry">
+            <mxPoint x="720" y="690" as="sourcePoint" />
+            <mxPoint x="780" y="720" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        
+        <!-- Legend -->
+        <mxCell id="legend" value="YY Media Library - Complete UML Class Diagram\n\nMain Classes:\n• MediaLibrary: Core application with GUI\n• ProgressWindow: Progress tracking UI\n• VideoContentAnalyzer: AI-based content analysis\n• VideoTagger: Automatic tagging system\n\nUtility Modules:\n• Database Functions: DB initialization & management\n• JAVDB Crawler: Web scraping functionality\n• Title Analysis: Filename & title processing\n• Utility Functions: File operations & helpers\n\nDatabase Schema:\n• videos: Main video metadata table\n• folders: Folder configuration\n• tags: Tag management" style="text;html=1;strokeColor=#666666;fillColor=#f5f5f5;align=left;verticalAlign=top;whiteSpace=wrap;rounded=1;fontSize=11;fontFamily=Helvetica;" vertex="1" parent="1">
+          <mxGeometry x="820" y="720" width="320" height="280" as="geometry" />
+        </mxCell>
+        
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

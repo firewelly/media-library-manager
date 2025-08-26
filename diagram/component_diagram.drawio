@@ -1,0 +1,243 @@
+<mxfile host="app.diagrams.net" modified="2024-01-15T10:00:00.000Z" agent="5.0" etag="xxx" version="22.1.16" type="device">
+  <diagram name="YY Media Library Components" id="component-diagram">
+    <mxGraphModel dx="2074" dy="1181" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1654" pageHeight="2336" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+        
+        <!-- Title -->
+        <mxCell id="title" value="YY Media Library - Component Architecture" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=16;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="40" y="20" width="1200" height="30" as="geometry" />
+        </mxCell>
+        
+        <!-- UI Layer -->
+        <mxCell id="ui-layer" value="" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;strokeWidth=2;" vertex="1" parent="1">
+          <mxGeometry x="80" y="80" width="1200" height="200" as="geometry" />
+        </mxCell>
+        
+        <mxCell id="ui-title" value="User Interface Layer" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=top;whiteSpace=wrap;rounded=0;fontSize=14;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="100" y="90" width="200" height="30" as="geometry" />
+        </mxCell>
+        
+        <!-- Main GUI Component -->
+        <mxCell id="main-gui" value="&lt;&lt;component&gt;&gt;\nMain GUI\n(MediaLibrary)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;" vertex="1" parent="1">
+          <mxGeometry x="120" y="130" width="150" height="80" as="geometry" />
+        </mxCell>
+        
+        <!-- Progress Window Component -->
+        <mxCell id="progress-gui" value="&lt;&lt;component&gt;&gt;\nProgress Window\n(ProgressWindow)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;" vertex="1" parent="1">
+          <mxGeometry x="320" y="130" width="150" height="80" as="geometry" />
+        </mxCell>
+        
+        <!-- File Dialog Component -->
+        <mxCell id="file-dialog" value="&lt;&lt;component&gt;&gt;\nFile Dialogs\n(tkinter.filedialog)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;" vertex="1" parent="1">
+          <mxGeometry x="520" y="130" width="150" height="80" as="geometry" />
+        </mxCell>
+        
+        <!-- Menu System Component -->
+        <mxCell id="menu-system" value="&lt;&lt;component&gt;&gt;\nMenu System\n(Context Menus)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;" vertex="1" parent="1">
+          <mxGeometry x="720" y="130" width="150" height="80" as="geometry" />
+        </mxCell>
+        
+        <!-- Column Management Component -->
+        <mxCell id="column-mgmt" value="&lt;&lt;component&gt;&gt;\nColumn Management\n(Drag & Drop)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;" vertex="1" parent="1">
+          <mxGeometry x="920" y="130" width="150" height="80" as="geometry" />
+        </mxCell>
+        
+        <!-- Business Logic Layer -->
+        <mxCell id="logic-layer" value="" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f0f0f0;strokeColor=#666666;strokeWidth=2;" vertex="1" parent="1">
+          <mxGeometry x="80" y="320" width="1200" height="280" as="geometry" />
+        </mxCell>
+        
+        <mxCell id="logic-title" value="Business Logic Layer" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=top;whiteSpace=wrap;rounded=0;fontSize=14;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="100" y="330" width="200" height="30" as="geometry" />
+        </mxCell>
+        
+        <!-- Video Content Analyzer -->
+        <mxCell id="analyzer-comp" value="&lt;&lt;component&gt;&gt;\nVideo Content Analyzer\n\n• extract_keyframes()\n• analyze_colors()\n• detect_shapes()\n• analyze_textures()\n• detect_professions()\n• analyze_scenes()" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;align=left;" vertex="1" parent="1">
+          <mxGeometry x="120" y="370" width="180" height="120" as="geometry" />
+        </mxCell>
+        
+        <!-- Video Tagger -->
+        <mxCell id="tagger-comp" value="&lt;&lt;component&gt;&gt;\nVideo Tagger\n\n• load_vocabulary()\n• create_tag_rules()\n• extract_features()\n• generate_tags()\n• update_video_tags()" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;align=left;" vertex="1" parent="1">
+          <mxGeometry x="340" y="370" width="180" height="120" as="geometry" />
+        </mxCell>
+        
+        <!-- File Manager -->
+        <mxCell id="file-mgr" value="&lt;&lt;component&gt;&gt;\nFile Manager\n\n• scan_folder()\n• get_video_files()\n• extract_metadata()\n• handle_duplicates()\n• organize_files()" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;align=left;" vertex="1" parent="1">
+          <mxGeometry x="560" y="370" width="180" height="120" as="geometry" />
+        </mxCell>
+        
+        <!-- Database Manager -->
+        <mxCell id="db-mgr" value="&lt;&lt;component&gt;&gt;\nDatabase Manager\n\n• init_database()\n• execute_query()\n• batch_operations()\n• backup_database()\n• optimize_queries()" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;align=left;" vertex="1" parent="1">
+          <mxGeometry x="780" y="370" width="180" height="120" as="geometry" />
+        </mxCell>
+        
+        <!-- Configuration Manager -->
+        <mxCell id="config-mgr" value="&lt;&lt;component&gt;&gt;\nConfiguration Manager\n\n• load_config()\n• save_config()\n• manage_columns()\n• handle_settings()\n• export_import()" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;align=left;" vertex="1" parent="1">
+          <mxGeometry x="1000" y="370" width="180" height="120" as="geometry" />
+        </mxCell>
+        
+        <!-- External Services Layer -->
+        <mxCell id="external-layer" value="" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;strokeWidth=2;" vertex="1" parent="1">
+          <mxGeometry x="80" y="640" width="1200" height="200" as="geometry" />
+        </mxCell>
+        
+        <mxCell id="external-title" value="External Services Layer" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=top;whiteSpace=wrap;rounded=0;fontSize=14;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="100" y="650" width="200" height="30" as="geometry" />
+        </mxCell>
+        
+        <!-- JAVDB Crawler -->
+        <mxCell id="javdb-crawler" value="&lt;&lt;component&gt;&gt;\nJAVDB Crawler\n\n• setup_driver()\n• search_video()\n• parse_detail()\n• download_images()\n• handle_proxies()" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;align=left;" vertex="1" parent="1">
+          <mxGeometry x="120" y="690" width="180" height="120" as="geometry" />
+        </mxCell>
+        
+        <!-- NFO Parser -->
+        <mxCell id="nfo-parser" value="&lt;&lt;component&gt;&gt;\nNFO Parser\n\n• parse_nfo_file()\n• extract_metadata()\n• validate_data()\n• convert_formats()\n• handle_encoding()" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;align=left;" vertex="1" parent="1">
+          <mxGeometry x="340" y="690" width="180" height="120" as="geometry" />
+        </mxCell>
+        
+        <!-- Image Downloader -->
+        <mxCell id="img-downloader" value="&lt;&lt;component&gt;&gt;\nImage Downloader\n\n• download_image()\n• resize_image()\n• validate_format()\n• handle_errors()\n• manage_cache()" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;align=left;" vertex="1" parent="1">
+          <mxGeometry x="560" y="690" width="180" height="120" as="geometry" />
+        </mxCell>
+        
+        <!-- Title Analyzer -->
+        <mxCell id="title-analyzer" value="&lt;&lt;component&gt;&gt;\nTitle Analyzer\n\n• analyze_title()\n• extract_keywords()\n• classify_content()\n• generate_summary()\n• detect_language()" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;align=left;" vertex="1" parent="1">
+          <mxGeometry x="780" y="690" width="180" height="120" as="geometry" />
+        </mxCell>
+        
+        <!-- Data Layer -->
+        <mxCell id="data-layer" value="" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;strokeWidth=2;" vertex="1" parent="1">
+          <mxGeometry x="80" y="880" width="1200" height="150" as="geometry" />
+        </mxCell>
+        
+        <mxCell id="data-title" value="Data Layer" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=top;whiteSpace=wrap;rounded=0;fontSize=14;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="100" y="890" width="200" height="30" as="geometry" />
+        </mxCell>
+        
+        <!-- SQLite Database -->
+        <mxCell id="sqlite-db" value="&lt;&lt;database&gt;&gt;\nSQLite Database\n\n• videos table\n• folders table\n• tags table\n• indexes" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;align=left;" vertex="1" parent="1">
+          <mxGeometry x="120" y="930" width="180" height="80" as="geometry" />
+        </mxCell>
+        
+        <!-- Configuration Files -->
+        <mxCell id="config-files" value="&lt;&lt;files&gt;&gt;\nConfiguration Files\n\n• column_config.json\n• settings.json\n• vocabulary files" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;align=left;" vertex="1" parent="1">
+          <mxGeometry x="340" y="930" width="180" height="80" as="geometry" />
+        </mxCell>
+        
+        <!-- Media Files -->
+        <mxCell id="media-files" value="&lt;&lt;files&gt;&gt;\nMedia Files\n\n• Video files (.mp4, .avi, etc.)\n• Image files (.jpg, .png)\n• NFO files (.nfo)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;align=left;" vertex="1" parent="1">
+          <mxGeometry x="560" y="930" width="180" height="80" as="geometry" />
+        </mxCell>
+        
+        <!-- Cache Files -->
+        <mxCell id="cache-files" value="&lt;&lt;files&gt;&gt;\nCache Files\n\n• Analysis results\n• Downloaded images\n• Temporary data" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;align=left;" vertex="1" parent="1">
+          <mxGeometry x="780" y="930" width="180" height="80" as="geometry" />
+        </mxCell>
+        
+        <!-- Dependencies -->
+        
+        <!-- UI to Logic connections -->
+        <mxCell id="ui-to-analyzer" value="" style="endArrow=classic;html=1;rounded=0;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" edge="1" parent="1" source="main-gui" target="analyzer-comp">
+          <mxGeometry width="50" height="50" relative="1" as="geometry">
+            <mxPoint x="640" y="400" as="sourcePoint" />
+            <mxPoint x="690" y="350" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        
+        <mxCell id="ui-to-tagger" value="" style="endArrow=classic;html=1;rounded=0;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" edge="1" parent="1" source="progress-gui" target="tagger-comp">
+          <mxGeometry width="50" height="50" relative="1" as="geometry">
+            <mxPoint x="640" y="400" as="sourcePoint" />
+            <mxPoint x="690" y="350" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        
+        <mxCell id="ui-to-file" value="" style="endArrow=classic;html=1;rounded=0;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" edge="1" parent="1" source="file-dialog" target="file-mgr">
+          <mxGeometry width="50" height="50" relative="1" as="geometry">
+            <mxPoint x="640" y="400" as="sourcePoint" />
+            <mxPoint x="690" y="350" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        
+        <mxCell id="ui-to-db" value="" style="endArrow=classic;html=1;rounded=0;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" edge="1" parent="1" source="menu-system" target="db-mgr">
+          <mxGeometry width="50" height="50" relative="1" as="geometry">
+            <mxPoint x="640" y="400" as="sourcePoint" />
+            <mxPoint x="690" y="350" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        
+        <mxCell id="ui-to-config" value="" style="endArrow=classic;html=1;rounded=0;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" edge="1" parent="1" source="column-mgmt" target="config-mgr">
+          <mxGeometry width="50" height="50" relative="1" as="geometry">
+            <mxPoint x="640" y="400" as="sourcePoint" />
+            <mxPoint x="690" y="350" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        
+        <!-- Logic to External connections -->
+        <mxCell id="logic-to-javdb" value="" style="endArrow=classic;html=1;rounded=0;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" edge="1" parent="1" source="analyzer-comp" target="javdb-crawler">
+          <mxGeometry width="50" height="50" relative="1" as="geometry">
+            <mxPoint x="640" y="400" as="sourcePoint" />
+            <mxPoint x="690" y="350" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        
+        <mxCell id="logic-to-nfo" value="" style="endArrow=classic;html=1;rounded=0;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" edge="1" parent="1" source="tagger-comp" target="nfo-parser">
+          <mxGeometry width="50" height="50" relative="1" as="geometry">
+            <mxPoint x="640" y="400" as="sourcePoint" />
+            <mxPoint x="690" y="350" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        
+        <mxCell id="logic-to-img" value="" style="endArrow=classic;html=1;rounded=0;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" edge="1" parent="1" source="file-mgr" target="img-downloader">
+          <mxGeometry width="50" height="50" relative="1" as="geometry">
+            <mxPoint x="640" y="400" as="sourcePoint" />
+            <mxPoint x="690" y="350" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        
+        <mxCell id="logic-to-title" value="" style="endArrow=classic;html=1;rounded=0;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" edge="1" parent="1" source="db-mgr" target="title-analyzer">
+          <mxGeometry width="50" height="50" relative="1" as="geometry">
+            <mxPoint x="640" y="400" as="sourcePoint" />
+            <mxPoint x="690" y="350" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        
+        <!-- Logic to Data connections -->
+        <mxCell id="db-to-sqlite" value="" style="endArrow=classic;html=1;rounded=0;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" edge="1" parent="1" source="db-mgr" target="sqlite-db">
+          <mxGeometry width="50" height="50" relative="1" as="geometry">
+            <mxPoint x="640" y="400" as="sourcePoint" />
+            <mxPoint x="690" y="350" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        
+        <mxCell id="config-to-files" value="" style="endArrow=classic;html=1;rounded=0;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" edge="1" parent="1" source="config-mgr" target="config-files">
+          <mxGeometry width="50" height="50" relative="1" as="geometry">
+            <mxPoint x="640" y="400" as="sourcePoint" />
+            <mxPoint x="690" y="350" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        
+        <mxCell id="file-to-media" value="" style="endArrow=classic;html=1;rounded=0;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" edge="1" parent="1" source="file-mgr" target="media-files">
+          <mxGeometry width="50" height="50" relative="1" as="geometry">
+            <mxPoint x="640" y="400" as="sourcePoint" />
+            <mxPoint x="690" y="350" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        
+        <mxCell id="analyzer-to-cache" value="" style="endArrow=classic;html=1;rounded=0;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" edge="1" parent="1" source="analyzer-comp" target="cache-files">
+          <mxGeometry width="50" height="50" relative="1" as="geometry">
+            <mxPoint x="640" y="400" as="sourcePoint" />
+            <mxPoint x="690" y="350" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        
+        <!-- Legend -->
+        <mxCell id="legend" value="Component Dependencies:\n\n→ Uses/Depends on\n\nLayers:\n• UI Layer: User interface components\n• Business Logic: Core application logic\n• External Services: Third-party integrations\n• Data Layer: Storage and persistence" style="text;html=1;strokeColor=#666666;fillColor=#f5f5f5;align=left;verticalAlign=top;whiteSpace=wrap;rounded=1;fontSize=11;fontFamily=Helvetica;" vertex="1" parent="1">
+          <mxGeometry x="1320" y="80" width="250" height="150" as="geometry" />
+        </mxCell>
+        
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>
