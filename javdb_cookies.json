@@ -1,0 +1,82 @@
+[
+  {
+    "name": "over18",
+    "value": "",
+    "domain": "javdb.com",
+    "path": "/",
+    "secure": false,
+    "httpOnly": false,
+    "expiry": 1763878832
+  },
+  {
+    "name": "_ym_d",
+    "value": "",
+    "domain": ".javdb.com",
+    "path": "/",
+    "secure": true,
+    "httpOnly": false,
+    "expiry": 1785394877
+  },
+  {
+    "name": "_ym_uid",
+    "value": "",
+    "domain": ".javdb.com",
+    "path": "/",
+    "secure": true,
+    "httpOnly": false,
+    "expiry": 1785394877
+  },
+  {
+    "name": "list_mode",
+    "value": "",
+    "domain": "javdb.com",
+    "path": "/",
+    "secure": false,
+    "httpOnly": false,
+    "expiry": 1789114942
+  },
+  {
+    "name": "theme",
+    "value": "",
+    "domain": "javdb.com",
+    "path": "/",
+    "secure": false,
+    "httpOnly": false,
+    "expiry": 1789114942
+  },
+  {
+    "name": "_ym_isad",
+    "value": "",
+    "domain": ".javdb.com",
+    "path": "/",
+    "secure": true,
+    "httpOnly": false
+  },
+  {
+    "name": "_jdb_session",
+    "value": "",
+    "domain": "javdb.com",
+    "path": "/",
+    "secure": true,
+    "httpOnly": true,
+    "expiry": 1757380979
+  },
+  {
+    "name": "locale",
+    "value": "",
+    "domain": "javdb.com",
+    "path": "/",
+    "secure": false,
+    "httpOnly": false,
+    "expiry": 1790644979
+  },
+  {
+    "name": "cf_clearance",
+    "value": "",
+    "domain": ".javdb.com",
+    "path": "/",
+    "secure": true,
+    "httpOnly": true,
+    "expiry": 1787620980
+  }
+]
