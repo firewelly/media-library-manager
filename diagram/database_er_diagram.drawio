@@ -1,0 +1,211 @@
+<mxfile host="app.diagrams.net" modified="2024-01-15T10:00:00.000Z" agent="5.0" etag="xxx" version="22.1.16" type="device">
+  <diagram name="YY Media Library Database ER" id="er-diagram">
+    <mxGraphModel dx="2074" dy="1181" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1654" pageHeight="2336" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+        
+        <!-- Title -->
+        <mxCell id="title" value="YY Media Library - Database Entity Relationship Diagram" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=16;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="40" y="20" width="1200" height="30" as="geometry" />
+        </mxCell>
+        
+        <!-- Videos Table -->
+        <mxCell id="videos-table" value="" style="swimlane;fontStyle=1;align=center;verticalAlign=top;childLayout=stackLayout;horizontal=1;startSize=26;horizontalStack=0;resizeParent=1;resizeParentMax=0;resizeLast=0;collapsible=1;marginBottom=0;fillColor=#dae8fc;strokeColor=#6c8ebf;" vertex="1" parent="1">
+          <mxGeometry x="200" y="100" width="300" height="520" as="geometry" />
+        </mxCell>
+        
+        <mxCell id="videos-title" value="videos" style="text;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontStyle=1;fontSize=14;" vertex="1" parent="videos-table">
+          <mxGeometry y="26" width="300" height="24" as="geometry" />
+        </mxCell>
+        
+        <mxCell id="videos-separator" value="" style="line;strokeWidth=1;fillColor=none;align=left;verticalAlign=middle;spacingTop=-1;spacingLeft=3;spacingRight=3;rotatable=0;labelPosition=right;points=[];portConstraint=eastwest;" vertex="1" parent="videos-table">
+          <mxGeometry y="50" width="300" height="8" as="geometry" />
+        </mxCell>
+        
+        <mxCell id="videos-fields" value="🔑 id: INTEGER PRIMARY KEY AUTOINCREMENT\n📁 folder_path: TEXT\n📄 filename: TEXT\n📏 file_size: INTEGER\n📅 date_added: TEXT\n📅 date_modified: TEXT\n🎬 title: TEXT\n🔢 code: TEXT\n📅 release_date: TEXT\n⏱️ duration: TEXT\n⭐ rating: REAL\n🎭 actors: TEXT\n🏷️ tags: TEXT\n📝 description: TEXT\n🖼️ cover_image: TEXT\n🌐 javdb_url: TEXT\n📊 analysis_result: TEXT\n🏷️ auto_tags: TEXT\n📈 content_rating: TEXT\n🎨 color_analysis: TEXT\n🔍 shape_analysis: TEXT\n🧩 texture_analysis: TEXT\n👔 profession_tags: TEXT\n🎬 scene_tags: TEXT\n📊 analysis_confidence: REAL\n📅 last_analysis_date: TEXT" style="text;strokeColor=none;fillColor=none;align=left;verticalAlign=top;spacingLeft=4;spacingRight=4;overflow=hidden;rotatable=0;points=[[0,0.5],[1,0.5]];portConstraint=eastwest;fontSize=11;" vertex="1" parent="videos-table">
+          <mxGeometry y="58" width="300" height="462" as="geometry" />
+        </mxCell>
+        
+        <!-- Folders Table -->
+        <mxCell id="folders-table" value="" style="swimlane;fontStyle=1;align=center;verticalAlign=top;childLayout=stackLayout;horizontal=1;startSize=26;horizontalStack=0;resizeParent=1;resizeParentMax=0;resizeLast=0;collapsible=1;marginBottom=0;fillColor=#fff2cc;strokeColor=#d6b656;" vertex="1" parent="1">
+          <mxGeometry x="600" y="100" width="250" height="180" as="geometry" />
+        </mxCell>
+        
+        <mxCell id="folders-title" value="folders" style="text;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontStyle=1;fontSize=14;" vertex="1" parent="folders-table">
+          <mxGeometry y="26" width="250" height="24" as="geometry" />
+        </mxCell>
+        
+        <mxCell id="folders-separator" value="" style="line;strokeWidth=1;fillColor=none;align=left;verticalAlign=middle;spacingTop=-1;spacingLeft=3;spacingRight=3;rotatable=0;labelPosition=right;points=[];portConstraint=eastwest;" vertex="1" parent="folders-table">
+          <mxGeometry y="50" width="250" height="8" as="geometry" />
+        </mxCell>
+        
+        <mxCell id="folders-fields" value="🔑 id: INTEGER PRIMARY KEY AUTOINCREMENT\n📁 path: TEXT UNIQUE\n📅 date_added: TEXT\n📅 last_scanned: TEXT\n📊 video_count: INTEGER\n📏 total_size: INTEGER" style="text;strokeColor=none;fillColor=none;align=left;verticalAlign=top;spacingLeft=4;spacingRight=4;overflow=hidden;rotatable=0;points=[[0,0.5],[1,0.5]];portConstraint=eastwest;fontSize=11;" vertex="1" parent="folders-table">
+          <mxGeometry y="58" width="250" height="122" as="geometry" />
+        </mxCell>
+        
+        <!-- Tags Table -->
+        <mxCell id="tags-table" value="" style="swimlane;fontStyle=1;align=center;verticalAlign=top;childLayout=stackLayout;horizontal=1;startSize=26;horizontalStack=0;resizeParent=1;resizeParentMax=0;resizeLast=0;collapsible=1;marginBottom=0;fillColor=#d5e8d4;strokeColor=#82b366;" vertex="1" parent="1">
+          <mxGeometry x="600" y="320" width="250" height="200" as="geometry" />
+        </mxCell>
+        
+        <mxCell id="tags-title" value="tags" style="text;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontStyle=1;fontSize=14;" vertex="1" parent="tags-table">
+          <mxGeometry y="26" width="250" height="24" as="geometry" />
+        </mxCell>
+        
+        <mxCell id="tags-separator" value="" style="line;strokeWidth=1;fillColor=none;align=left;verticalAlign=middle;spacingTop=-1;spacingLeft=3;spacingRight=3;rotatable=0;labelPosition=right;points=[];portConstraint=eastwest;" vertex="1" parent="tags-table">
+          <mxGeometry y="50" width="250" height="8" as="geometry" />
+        </mxCell>
+        
+        <mxCell id="tags-fields" value="🔑 id: INTEGER PRIMARY KEY AUTOINCREMENT\n🏷️ name: TEXT UNIQUE\n📝 description: TEXT\n🎨 color: TEXT\n📊 usage_count: INTEGER\n📅 created_date: TEXT\n🤖 is_auto_generated: BOOLEAN\n📂 category: TEXT" style="text;strokeColor=none;fillColor=none;align=left;verticalAlign=top;spacingLeft=4;spacingRight=4;overflow=hidden;rotatable=0;points=[[0,0.5],[1,0.5]];portConstraint=eastwest;fontSize=11;" vertex="1" parent="tags-table">
+          <mxGeometry y="58" width="250" height="142" as="geometry" />
+        </mxCell>
+        
+        <!-- Video_Tags Junction Table -->
+        <mxCell id="video-tags-table" value="" style="swimlane;fontStyle=1;align=center;verticalAlign=top;childLayout=stackLayout;horizontal=1;startSize=26;horizontalStack=0;resizeParent=1;resizeParentMax=0;resizeLast=0;collapsible=1;marginBottom=0;fillColor=#f8cecc;strokeColor=#b85450;" vertex="1" parent="1">
+          <mxGeometry x="950" y="320" width="250" height="140" as="geometry" />
+        </mxCell>
+        
+        <mxCell id="video-tags-title" value="video_tags" style="text;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontStyle=1;fontSize=14;" vertex="1" parent="video-tags-table">
+          <mxGeometry y="26" width="250" height="24" as="geometry" />
+        </mxCell>
+        
+        <mxCell id="video-tags-separator" value="" style="line;strokeWidth=1;fillColor=none;align=left;verticalAlign=middle;spacingTop=-1;spacingLeft=3;spacingRight=3;rotatable=0;labelPosition=right;points=[];portConstraint=eastwest;" vertex="1" parent="video-tags-table">
+          <mxGeometry y="50" width="250" height="8" as="geometry" />
+        </mxCell>
+        
+        <mxCell id="video-tags-fields" value="🔑 id: INTEGER PRIMARY KEY AUTOINCREMENT\n🎬 video_id: INTEGER (FK)\n🏷️ tag_id: INTEGER (FK)\n📅 assigned_date: TEXT\n🤖 assigned_by: TEXT (manual/auto)" style="text;strokeColor=none;fillColor=none;align=left;verticalAlign=top;spacingLeft=4;spacingRight=4;overflow=hidden;rotatable=0;points=[[0,0.5],[1,0.5]];portConstraint=eastwest;fontSize=11;" vertex="1" parent="video-tags-table">
+          <mxGeometry y="58" width="250" height="82" as="geometry" />
+        </mxCell>
+        
+        <!-- Actors Table -->
+        <mxCell id="actors-table" value="" style="swimlane;fontStyle=1;align=center;verticalAlign=top;childLayout=stackLayout;horizontal=1;startSize=26;horizontalStack=0;resizeParent=1;resizeParentMax=0;resizeLast=0;collapsible=1;marginBottom=0;fillColor=#e1d5e7;strokeColor=#9673a6;" vertex="1" parent="1">
+          <mxGeometry x="950" y="100" width="250" height="180" as="geometry" />
+        </mxCell>
+        
+        <mxCell id="actors-title" value="actors" style="text;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontStyle=1;fontSize=14;" vertex="1" parent="actors-table">
+          <mxGeometry y="26" width="250" height="24" as="geometry" />
+        </mxCell>
+        
+        <mxCell id="actors-separator" value="" style="line;strokeWidth=1;fillColor=none;align=left;verticalAlign=middle;spacingTop=-1;spacingLeft=3;spacingRight=3;rotatable=0;labelPosition=right;points=[];portConstraint=eastwest;" vertex="1" parent="actors-table">
+          <mxGeometry y="50" width="250" height="8" as="geometry" />
+        </mxCell>
+        
+        <mxCell id="actors-fields" value="🔑 id: INTEGER PRIMARY KEY AUTOINCREMENT\n👤 name: TEXT UNIQUE\n🚻 gender: TEXT\n📅 birth_date: TEXT\n🖼️ photo_url: TEXT\n📝 biography: TEXT\n📊 video_count: INTEGER" style="text;strokeColor=none;fillColor=none;align=left;verticalAlign=top;spacingLeft=4;spacingRight=4;overflow=hidden;rotatable=0;points=[[0,0.5],[1,0.5]];portConstraint=eastwest;fontSize=11;" vertex="1" parent="actors-table">
+          <mxGeometry y="58" width="250" height="122" as="geometry" />
+        </mxCell>
+        
+        <!-- Video_Actors Junction Table -->
+        <mxCell id="video-actors-table" value="" style="swimlane;fontStyle=1;align=center;verticalAlign=top;childLayout=stackLayout;horizontal=1;startSize=26;horizontalStack=0;resizeParent=1;resizeParentMax=0;resizeLast=0;collapsible=1;marginBottom=0;fillColor=#ffe6cc;strokeColor=#d79b00;" vertex="1" parent="1">
+          <mxGeometry x="1250" y="100" width="250" height="140" as="geometry" />
+        </mxCell>
+        
+        <mxCell id="video-actors-title" value="video_actors" style="text;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontStyle=1;fontSize=14;" vertex="1" parent="video-actors-table">
+          <mxGeometry y="26" width="250" height="24" as="geometry" />
+        </mxCell>
+        
+        <mxCell id="video-actors-separator" value="" style="line;strokeWidth=1;fillColor=none;align=left;verticalAlign=middle;spacingTop=-1;spacingLeft=3;spacingRight=3;rotatable=0;labelPosition=right;points=[];portConstraint=eastwest;" vertex="1" parent="video-actors-table">
+          <mxGeometry y="50" width="250" height="8" as="geometry" />
+        </mxCell>
+        
+        <mxCell id="video-actors-fields" value="🔑 id: INTEGER PRIMARY KEY AUTOINCREMENT\n🎬 video_id: INTEGER (FK)\n👤 actor_id: INTEGER (FK)\n🎭 role: TEXT\n📅 assigned_date: TEXT" style="text;strokeColor=none;fillColor=none;align=left;verticalAlign=top;spacingLeft=4;spacingRight=4;overflow=hidden;rotatable=0;points=[[0,0.5],[1,0.5]];portConstraint=eastwest;fontSize=11;" vertex="1" parent="video-actors-table">
+          <mxGeometry y="58" width="250" height="82" as="geometry" />
+        </mxCell>
+        
+        <!-- Relationships -->
+        
+        <!-- Videos to Folders (Many-to-One) -->
+        <mxCell id="videos-folders-rel" value="" style="endArrow=classic;html=1;rounded=0;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;" edge="1" parent="1" source="videos-fields" target="folders-fields">
+          <mxGeometry width="50" height="50" relative="1" as="geometry">
+            <mxPoint x="640" y="400" as="sourcePoint" />
+            <mxPoint x="690" y="350" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        
+        <mxCell id="videos-folders-label" value="belongs to\n(folder_path)" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="520" y="200" width="80" height="30" as="geometry" />
+        </mxCell>
+        
+        <!-- Videos to Video_Tags (One-to-Many) -->
+        <mxCell id="videos-videotags-rel" value="" style="endArrow=classic;html=1;rounded=0;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;" edge="1" parent="1" source="videos-fields" target="video-tags-fields">
+          <mxGeometry width="50" height="50" relative="1" as="geometry">
+            <mxPoint x="640" y="400" as="sourcePoint" />
+            <mxPoint x="690" y="350" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        
+        <mxCell id="videos-videotags-label" value="has many\ntag assignments" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="520" y="360" width="80" height="30" as="geometry" />
+        </mxCell>
+        
+        <!-- Tags to Video_Tags (One-to-Many) -->
+        <mxCell id="tags-videotags-rel" value="" style="endArrow=classic;html=1;rounded=0;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;" edge="1" parent="1" source="tags-fields" target="video-tags-fields">
+          <mxGeometry width="50" height="50" relative="1" as="geometry">
+            <mxPoint x="640" y="400" as="sourcePoint" />
+            <mxPoint x="690" y="350" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        
+        <mxCell id="tags-videotags-label" value="assigned to\nmany videos" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="860" y="360" width="80" height="30" as="geometry" />
+        </mxCell>
+        
+        <!-- Videos to Video_Actors (One-to-Many) -->
+        <mxCell id="videos-videoactors-rel" value="" style="endArrow=classic;html=1;rounded=0;exitX=1;exitY=0.2;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;" edge="1" parent="1" source="videos-fields" target="video-actors-fields">
+          <mxGeometry width="50" height="50" relative="1" as="geometry">
+            <mxPoint x="640" y="400" as="sourcePoint" />
+            <mxPoint x="690" y="350" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        
+        <mxCell id="videos-videoactors-label" value="features\nactors" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="520" y="140" width="80" height="30" as="geometry" />
+        </mxCell>
+        
+        <!-- Actors to Video_Actors (One-to-Many) -->
+        <mxCell id="actors-videoactors-rel" value="" style="endArrow=classic;html=1;rounded=0;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;" edge="1" parent="1" source="actors-fields" target="video-actors-fields">
+          <mxGeometry width="50" height="50" relative="1" as="geometry">
+            <mxPoint x="640" y="400" as="sourcePoint" />
+            <mxPoint x="690" y="350" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        
+        <mxCell id="actors-videoactors-label" value="appears in\nmany videos" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="1210" y="140" width="80" height="30" as="targetPoint" />
+        </mxCell>
+        
+        <!-- Indexes Section -->
+        <mxCell id="indexes-section" value="" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f0f0f0;strokeColor=#666666;strokeWidth=2;" vertex="1" parent="1">
+          <mxGeometry x="200" y="680" width="1300" height="200" as="geometry" />
+        </mxCell>
+        
+        <mxCell id="indexes-title" value="Database Indexes" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=top;whiteSpace=wrap;rounded=0;fontSize=14;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="220" y="690" width="200" height="30" as="geometry" />
+        </mxCell>
+        
+        <mxCell id="indexes-content" value="📊 Performance Indexes:\n\n🎬 Videos Table:\n   • idx_videos_filename: CREATE INDEX idx_videos_filename ON videos(filename)\n   • idx_videos_code: CREATE INDEX idx_videos_code ON videos(code)\n   • idx_videos_date_added: CREATE INDEX idx_videos_date_added ON videos(date_added)\n   • idx_videos_folder_path: CREATE INDEX idx_videos_folder_path ON videos(folder_path)\n\n📁 Folders Table:\n   • idx_folders_path: CREATE UNIQUE INDEX idx_folders_path ON folders(path)\n\n🏷️ Tags Table:\n   • idx_tags_name: CREATE UNIQUE INDEX idx_tags_name ON tags(name)\n   • idx_tags_category: CREATE INDEX idx_tags_category ON tags(category)\n\n🔗 Junction Tables:\n   • idx_video_tags_video_id: CREATE INDEX idx_video_tags_video_id ON video_tags(video_id)\n   • idx_video_tags_tag_id: CREATE INDEX idx_video_tags_tag_id ON video_tags(tag_id)\n   • idx_video_actors_video_id: CREATE INDEX idx_video_actors_video_id ON video_actors(video_id)\n   • idx_video_actors_actor_id: CREATE INDEX idx_video_actors_actor_id ON video_actors(actor_id)" style="text;strokeColor=none;fillColor=none;align=left;verticalAlign=top;spacingLeft=10;spacingRight=10;overflow=hidden;rotatable=0;points=[[0,0.5],[1,0.5]];portConstraint=eastwest;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="220" y="720" width="1260" height="150" as="geometry" />
+        </mxCell>
+        
+        <!-- Legend -->
+        <mxCell id="legend" value="Entity Relationship Legend:\n\n🔑 Primary Key\n🔗 Foreign Key\n📊 Index\n\nRelationship Types:\n→ One-to-Many\n↔ Many-to-Many (via junction table)\n\nTable Categories:\n• Core Data (videos, folders)\n• Metadata (tags, actors)\n• Relationships (junction tables)" style="text;html=1;strokeColor=#666666;fillColor=#f5f5f5;align=left;verticalAlign=top;whiteSpace=wrap;rounded=1;fontSize=11;fontFamily=Helvetica;" vertex="1" parent="1">
+          <mxGeometry x="40" y="400" width="140" height="200" as="geometry" />
+        </mxCell>
+        
+        <!-- Cardinality Labels -->
+        <mxCell id="card-videos-folders" value="N:1" style="text;html=1;strokeColor=none;fillColor=#ffffff;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=1;fontSize=10;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="540" y="180" width="30" height="20" as="geometry" />
+        </mxCell>
+        
+        <mxCell id="card-videos-tags" value="N:M" style="text;html=1;strokeColor=none;fillColor=#ffffff;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=1;fontSize=10;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="870" y="380" width="30" height="20" as="geometry" />
+        </mxCell>
+        
+        <mxCell id="card-videos-actors" value="N:M" style="text;html=1;strokeColor=none;fillColor=#ffffff;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=1;fontSize=10;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="1220" y="160" width="30" height="20" as="geometry" />
+        </mxCell>
+        
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>
