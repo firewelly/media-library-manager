@@ -26,9 +26,6 @@ import json
 import time
 import cv2
 from send2trash import send2trash
-import threading
-import shutil
-import re
 
 class ProgressWindow:
     """进度显示窗口"""
@@ -684,6 +681,10 @@ class MediaLibrary:
         file_menu.add_separator()
         file_menu.add_command(label="导入NFO文件", command=self.import_nfo)
         file_menu.add_command(label="导入视频文件", command=self.import_videos)
+        file_menu.add_separator()
+        file_menu.add_command(label="批量导入NFO信息", command=self.batch_import_nfo_for_no_actors)
+        file_menu.add_command(label="批量导入JAVDB信息", command=self.batch_import_javdb_for_no_title)
+        file_menu.add_separator()
         file_menu.add_command(label="去重复", command=self.remove_duplicates)
         
         # 工具菜单
@@ -705,6 +706,8 @@ class MediaLibrary:
         tools_menu.add_separator()
         tools_menu.add_command(label="批量自动更新所有标签", command=self.batch_auto_tag_all)
         tools_menu.add_command(label="批量标注没有标签的文件", command=self.batch_auto_tag_no_tags)
+        tools_menu.add_separator()
+        tools_menu.add_command(label="批量清理文件名", command=self.batch_clean_filename_selected_videos)
         tools_menu.add_separator()
         tools_menu.add_command(label="智能媒体库更新", command=self.comprehensive_media_update)
         
@@ -738,13 +741,23 @@ class MediaLibrary:
         
         # 标签搜索
         tag_search_frame = ttk.Frame(search_frame)
-        tag_search_frame.pack(fill=tk.X, padx=5, pady=(2, 5))
+        tag_search_frame.pack(fill=tk.X, padx=5, pady=(2, 2))
         
         ttk.Label(tag_search_frame, text="标签:").pack(side=tk.LEFT)
         self.tag_search_var = tk.StringVar()
         tag_search_entry = ttk.Entry(tag_search_frame, textvariable=self.tag_search_var)
         tag_search_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(5, 0))
         tag_search_entry.bind('<KeyRelease>', self.on_search)
+        
+        # 演员搜索
+        actor_search_frame = ttk.Frame(search_frame)
+        actor_search_frame.pack(fill=tk.X, padx=5, pady=(2, 5))
+        
+        ttk.Label(actor_search_frame, text="演员:").pack(side=tk.LEFT)
+        self.actor_search_var = tk.StringVar()
+        actor_search_entry = ttk.Entry(actor_search_frame, textvariable=self.actor_search_var)
+        actor_search_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(5, 0))
+        actor_search_entry.bind('<KeyRelease>', self.on_search)
         
         # 星级筛选
         stars_frame = ttk.LabelFrame(left_frame, text="星级筛选")
@@ -1848,19 +1861,26 @@ class MediaLibrary:
             
             # 检查是否在筛选模式，如果是则添加搜索条件
             if getattr(self, 'is_filtering', False):
-                # 标题搜索条件
+                # 标题搜索条件 - 同时搜索videos表的title和javdb_info表的javdb_title
                 title_search_text = self.title_search_var.get().strip()
                 if title_search_text:
-                    conditions.append("(title LIKE ? OR file_name LIKE ?)")
+                    conditions.append("(v.title LIKE ? OR v.file_name LIKE ? OR j.javdb_title LIKE ?)")
                     title_search_param = f"%{title_search_text}%"
-                    params.extend([title_search_param, title_search_param])
+                    params.extend([title_search_param, title_search_param, title_search_param])
                     
-                # 标签搜索条件
+                # 标签搜索条件 - 同时搜索videos表的tags和javdb_info表的标签关联
                 tag_search_text = self.tag_search_var.get().strip()
                 if tag_search_text:
-                    conditions.append("tags LIKE ?")
+                    conditions.append("(v.tags LIKE ? OR EXISTS (SELECT 1 FROM javdb_tags jt JOIN tags t ON jt.tag_id = t.id WHERE jt.javdb_info_id = j.id AND t.name LIKE ?))")
                     tag_search_param = f"%{tag_search_text}%"
-                    params.append(tag_search_param)
+                    params.extend([tag_search_param, tag_search_param])
+                    
+                # 演员搜索条件
+                actor_search_text = self.actor_search_var.get().strip()
+                if actor_search_text:
+                    conditions.append("EXISTS (SELECT 1 FROM video_actors va JOIN actors a ON va.actor_id = a.id WHERE va.video_id = v.id AND a.name LIKE ?)")
+                    actor_search_param = f"%{actor_search_text}%"
+                    params.append(actor_search_param)
                     
                 # 星级筛选
                 star_filter = self.star_filter.get()
@@ -1868,13 +1888,13 @@ class MediaLibrary:
                     conditions.append("stars = ?")
                     params.append(star_filter)
                     
-                # 标签筛选
+                # 标签筛选 - 同时支持videos表的tags和javdb_info表的标签关联
                 selected_tags = [self.tags_listbox.get(i) for i in self.tags_listbox.curselection()]
                 if selected_tags:
                     tag_conditions = []
                     for tag in selected_tags:
-                        tag_conditions.append("tags LIKE ?")
-                        params.append(f"%{tag}%")
+                        tag_conditions.append("(v.tags LIKE ? OR EXISTS (SELECT 1 FROM javdb_tags jt JOIN tags t ON jt.tag_id = t.id WHERE jt.javdb_info_id = j.id AND t.name LIKE ?))")
+                        params.extend([f"%{tag}%", f"%{tag}%"])
                     if tag_conditions:
                         conditions.append(f"({' OR '.join(tag_conditions)})")
                         
@@ -1893,7 +1913,7 @@ class MediaLibrary:
                     if online_video_folders:
                         folder_conditions = []
                         for folder_path in online_video_folders:
-                            folder_conditions.append("source_folder LIKE ?")
+                            folder_conditions.append("v.source_folder LIKE ?")
                             params.append(f"{folder_path}%")
                         conditions.append(f"({' OR '.join(folder_conditions)})")
                     else:
@@ -1912,7 +1932,7 @@ class MediaLibrary:
                     if offline_video_folders:
                         folder_conditions = []
                         for folder_path in offline_video_folders:
-                            folder_conditions.append("source_folder LIKE ?")
+                            folder_conditions.append("v.source_folder LIKE ?")
                             params.append(f"{folder_path}%")
                         conditions.append(f"({' OR '.join(folder_conditions)})")
                     else:
@@ -1926,7 +1946,7 @@ class MediaLibrary:
                     if selected_folder != "全部" and selected_folder in self.folder_path_mapping:
                         folder_path = self.folder_path_mapping[selected_folder]
                         if folder_path:  # 确保folder_path不为None
-                            conditions.append("source_folder LIKE ?")
+                            conditions.append("v.source_folder LIKE ?")
                             params.append(f"{folder_path}%")
             
             # 设备和在线筛选逻辑
@@ -1949,7 +1969,7 @@ class MediaLibrary:
                     # 构建文件夹条件
                     folder_conditions = []
                     for folder_path in online_folders:
-                        folder_conditions.append("source_folder LIKE ?")
+                        folder_conditions.append("v.source_folder LIKE ?")
                         params.append(f"{folder_path}%")
                     conditions.append(f"({' OR '.join(folder_conditions)})")
                 else:
@@ -1961,39 +1981,74 @@ class MediaLibrary:
                     EXISTS (
                         SELECT 1 FROM folders f
                         WHERE f.is_active = 1 
-                        AND source_folder LIKE f.folder_path || '%'
+                        AND v.source_folder LIKE f.folder_path || '%'
                     )
                 """)
             
             # 构建排序查询
-            order_clause = "ORDER BY title"  # 默认排序
+            order_clause = "ORDER BY v.title"  # 默认排序
             if hasattr(self, 'sort_column_name') and self.sort_column_name:
-                # 映射显示列名到数据库列名
+                # 映射显示列名到数据库列名（使用表别名）
                 column_mapping = {
-                    'title': 'title',
-                    'stars': 'stars',
-                    'tags': 'tags',
-                    'size': 'file_size',
-                    'status': 'is_nas_online',
-                    'duration': 'duration',
-                    'resolution': 'resolution',
-                    'file_created_time': 'file_created_time',
-                    'top_folder': 'source_folder',
-                    'full_path': 'source_folder',
-                    'year': 'year'
+                    'title': 'v.title',
+                    'actors': 'actors_display',  # 演员列需要特殊处理
+                    'stars': 'v.stars',
+                    'tags': 'v.tags',
+                    'size': 'v.file_size',
+                    'status': 'v.is_nas_online',
+                    'duration': 'v.duration',
+                    'resolution': 'v.resolution',
+                    'file_created_time': 'v.file_created_time',
+                    'top_folder': 'v.source_folder',
+                    'full_path': 'v.source_folder',
+                    'year': 'v.year',
+                    'javdb_code': 'j.javdb_code',
+                    'javdb_title': 'j.javdb_title',
+                    'release_date': 'j.release_date',
+                    'javdb_rating': 'j.score',
+                    'javdb_tags': 'javdb_tags_display'  # JAVDB标签需要特殊处理
                 }
                 
-                db_column = column_mapping.get(self.sort_column_name, 'title')
-                direction = "DESC" if self.sort_reverse else "ASC"
-                order_clause = f"ORDER BY {db_column} {direction}"
+                # 特殊处理演员排序
+                if self.sort_column_name == 'actors':
+                    direction = "DESC" if self.sort_reverse else "ASC"
+                    # 对于演员排序，使用子查询获取演员信息并排序
+                    # 降序时，有演员信息的记录排在前面（NULL值排在后面）
+                    # 升序时，无演员信息的记录排在前面（NULL值排在前面）
+                    if self.sort_reverse:  # 降序：有演员的在前
+                        order_clause = f"""ORDER BY 
+                            CASE WHEN (
+                                SELECT COUNT(*) FROM video_actors va WHERE va.video_id = v.id
+                            ) > 0 THEN 0 ELSE 1 END ASC,
+                            (
+                                SELECT GROUP_CONCAT(a.name, ', ') 
+                                FROM video_actors va 
+                                JOIN actors a ON va.actor_id = a.id 
+                                WHERE va.video_id = v.id
+                            ) {direction}"""
+                    else:  # 升序：无演员的在前
+                        order_clause = f"""ORDER BY 
+                            CASE WHEN (
+                                SELECT COUNT(*) FROM video_actors va WHERE va.video_id = v.id
+                            ) > 0 THEN 1 ELSE 0 END ASC,
+                            (
+                                SELECT GROUP_CONCAT(a.name, ', ') 
+                                FROM video_actors va 
+                                JOIN actors a ON va.actor_id = a.id 
+                                WHERE va.video_id = v.id
+                            ) {direction}"""
+                else:
+                    db_column = column_mapping.get(self.sort_column_name, 'v.title')
+                    direction = "DESC" if self.sort_reverse else "ASC"
+                    order_clause = f"ORDER BY {db_column} {direction}"
             
-            # 构建最终查询
+            # 构建最终查询 - 使用LEFT JOIN连接javdb_info表
             if conditions:
                 where_clause = f"WHERE {' AND '.join(conditions)}"
             else:
                 where_clause = ""
                 
-            query = f"SELECT * FROM videos {where_clause} {order_clause}"
+            query = f"SELECT v.* FROM videos v LEFT JOIN javdb_info j ON v.id = j.video_id {where_clause} {order_clause}"
             self.cursor.execute(query, params)
             
             videos = self.cursor.fetchall()
@@ -5056,6 +5111,10 @@ class MediaLibrary:
             context_menu.add_separator()
             context_menu.add_command(label="更新元数据", command=lambda: self.update_single_file_metadata(video_info['id']))
             context_menu.add_separator()
+            context_menu.add_command(label="清理文件名", command=lambda: self.clean_filename_from_context(video_info['id']))
+            context_menu.add_separator()
+            context_menu.add_command(label="导入NFO", command=lambda: self.import_nfo_from_context(video_info['id'], video_info['path']))
+            context_menu.add_separator()
             context_menu.add_command(label="删除文件", command=lambda: self.delete_file_from_context(video_info['id'], video_info['path']))
             
             # 添加移动到子菜单
@@ -5081,6 +5140,9 @@ class MediaLibrary:
             context_menu.add_separator()
             context_menu.add_command(label=f"批量更新元数据 ({len(selected_videos)}个文件)", 
                                    command=lambda: self.batch_update_metadata_selected_videos())
+            context_menu.add_separator()
+            context_menu.add_command(label=f"批量清理文件名 ({len(selected_videos)}个文件)", 
+                                   command=lambda: self.batch_clean_filename_selected_videos())
             context_menu.add_separator()
             context_menu.add_command(label=f"批量删除文件 ({len(selected_videos)}个文件)", 
                                    command=lambda: self.batch_delete_selected_videos())
@@ -6315,12 +6377,12 @@ class MediaLibrary:
             else:
                 title = "批量处理进度"
                 
-            progress_window = ProgressWindow(self.root, title)
+            progress_window = ProgressWindow(self.root, title, 0)  # 初始化为0，稍后更新
             
             def progress_callback(current, total, message):
                 """进度回调函数"""
                 if not progress_window.is_cancelled():
-                    progress_window.update_progress(current, total, message)
+                    progress_window.update_progress(current + 1, message)
             
             def analyze_videos():
                 try:
@@ -6346,6 +6408,10 @@ class MediaLibrary:
                         self.root.after(0, progress_window.close)
                         return
                     
+                    # 更新进度窗口的总数
+                    progress_window.total_items = len(videos)
+                    progress_window.progress_text.config(text=f"0/{len(videos)} (0%)")
+                    
                     processed = 0
                     failed = 0
                     updated = 0
@@ -6360,6 +6426,7 @@ class MediaLibrary:
                         if not os.path.exists(file_path):
                             print(f"文件不存在，跳过: {current_file}")
                             failed += 1
+                            progress_window.update_progress(i, f"跳过: {current_file}", success=False)
                             continue
                         
                         try:
@@ -6369,6 +6436,7 @@ class MediaLibrary:
                             if 'error' in analysis_result:
                                 print(f"分析失败: {current_file} - {analysis_result['error']}")
                                 failed += 1
+                                progress_window.update_progress(i, f"失败: {current_file}", success=False)
                                 continue
                             
                             processed += 1
@@ -6387,12 +6455,15 @@ class MediaLibrary:
                                 
                                 print(f"已更新标签: {current_file} - {', '.join(generated_tags)}")
                                 updated += 1
+                                progress_window.update_progress(i, f"已完成: {current_file}", success=True)
                             else:
                                 print(f"未生成标签: {current_file}")
+                                progress_window.update_progress(i, f"已完成: {current_file}", success=True)
                                 
                         except Exception as e:
                             print(f"处理失败: {current_file} - {str(e)}")
                             failed += 1
+                            progress_window.update_progress(i, f"错误: {current_file}", success=False)
                     
                     # 等待一下让用户看到完成状态
                     time.sleep(1)
@@ -6453,7 +6524,7 @@ class MediaLibrary:
                     javdb_info.get('release_date', ''),
                     javdb_info.get('duration', ''),
                     javdb_info.get('studio', ''),
-                    float(javdb_info.get('rating', 0)) if javdb_info.get('rating') else None,
+                    float(javdb_info.get('rating', 0)) if javdb_info.get('rating') and javdb_info.get('rating') != 'N/A' else None,
                     javdb_info.get('cover_image_url', ''),
                     javdb_info.get('local_image_path', ''),
                     cover_image_data,
@@ -6480,7 +6551,7 @@ class MediaLibrary:
                     javdb_info.get('release_date', ''),
                     javdb_info.get('duration', ''),
                     javdb_info.get('studio', ''),
-                    float(javdb_info.get('rating', 0)) if javdb_info.get('rating') else None,
+                    float(javdb_info.get('rating', 0)) if javdb_info.get('rating') and javdb_info.get('rating') != 'N/A' else None,
                     javdb_info.get('cover_image_url', ''),
                     javdb_info.get('local_image_path', ''),
                     cover_image_data,
@@ -7418,7 +7489,7 @@ class MediaLibrary:
         if " " in new_filename:
             new_filename = new_filename.replace(" ", "")
         
-        # 去掉"Chinese homemade video"和"_CHINESE_HOMEMADE_VIDEO"
+        # 去掉其他可能的变体
         if "CHINESEHOMEMADEVIDEO" in new_filename:
             new_filename = new_filename.replace("CHINESEHOMEMADEVIDEO", "")
         if "_CHINESE_HOMEMADE_VIDEO" in new_filename:
@@ -7457,6 +7528,10 @@ class MediaLibrary:
         url_pattern = r"(?:WWW\.)?[A-Z0-9]+\.(COM|NET|ORG|CN|CC|ME)"
         new_filename = re.sub(url_pattern, "", new_filename)
         
+        # 去掉开头的叹号
+        if new_filename.startswith("!"):
+            new_filename = new_filename[1:]
+        
         return new_filename
     
     def resolve_filename_conflict(self, target_path):
@@ -7473,6 +7548,741 @@ class MediaLibrary:
                 return new_path
             counter += 1
     
+    def clean_filename_for_video(self, video_id):
+        """为单个视频清理文件名"""
+        try:
+            # 获取视频信息
+            cursor = self.conn.cursor()
+            cursor.execute("SELECT file_path, title FROM videos WHERE id = ?", (video_id,))
+            result = cursor.fetchone()
+            if not result:
+                print(f"未找到视频ID: {video_id}")
+                return False
+            
+            old_file_path, old_title = result
+            if not os.path.exists(old_file_path):
+                print(f"文件不存在: {old_file_path}")
+                return False
+            
+            # 获取文件目录和原始文件名
+            file_dir = os.path.dirname(old_file_path)
+            old_filename = os.path.basename(old_file_path)
+            
+            # 应用清理逻辑
+            new_filename = self.process_single_filename(old_filename)
+            
+            # 如果文件名没有变化，直接返回
+            if new_filename == old_filename:
+                print(f"文件名无需清理: {old_filename}")
+                return True
+            
+            # 构建新的完整路径
+            new_file_path = os.path.join(file_dir, new_filename)
+            
+            # 处理文件名冲突
+            if os.path.exists(new_file_path):
+                new_file_path = self.handle_filename_conflict(new_file_path)
+                new_filename = os.path.basename(new_file_path)
+            
+            # 重命名文件
+            os.rename(old_file_path, new_file_path)
+            
+            # 生成新的标题（应用相同的清理逻辑）
+            # 对数据库中的原始标题应用清理逻辑
+            cleaned_title_with_ext = self.process_single_filename(old_title + ".tmp")  # 添加临时扩展名
+            new_title = os.path.splitext(cleaned_title_with_ext)[0]  # 去掉临时扩展名
+            
+            # 更新数据库中的文件路径和标题
+            cursor.execute("UPDATE videos SET file_path = ?, title = ? WHERE id = ?", (new_file_path, new_title, video_id))
+            self.conn.commit()
+            
+            print(f"文件重命名成功: {old_filename} -> {new_filename}")
+            print(f"标题更新: {old_title} -> {new_title}")
+            return True
+            
+        except Exception as e:
+            print(f"清理文件名失败: {str(e)}")
+            return False
+    
+    def process_single_filename(self, filename):
+        """处理单个文件名，基于cfn4.py的逻辑"""
+        import re
+        
+        # 获取文件名和后缀
+        filename_no_ext, ext = os.path.splitext(filename)
+        
+        # 去除开头的叹号（保留叹号用于星级评分）
+        # 注意：这里不移除叹号，因为叹号用于星级评分
+        
+        # 去除开头和结尾的句号
+        filename_no_ext = filename_no_ext.strip('.')
+        
+        # 将文件名转换为大写
+        filename_upper = filename_no_ext.upper()
+        
+        # 将后缀转换为小写
+        ext_lower = ext.lower()
+        
+        # 构建新的文件名
+        new_filename = filename_upper + ext_lower
+        
+        # 去掉空格
+        if " " in new_filename:
+            new_filename = new_filename.replace(" ", "")
+        
+        # 去掉"Chinese homemade video"和"_CHINESE_HOMEMADE_VIDEO"
+        if "CHINESEHOMEMADEVIDEO" in new_filename:
+            new_filename = new_filename.replace("CHINESEHOMEMADEVIDEO", "")
+        if "_CHINESE_HOMEMADE_VIDEO" in new_filename:
+            new_filename = new_filename.replace("_CHINESE_HOMEMADE_VIDEO", "")
+        
+        # 去掉"hhd800.com@"
+        if "HHD800.COM@" in new_filename:
+            new_filename = new_filename.replace("HHD800.COM@", "")
+        
+        # 去掉"WoXav.Com@"
+        if "WOXAV.COM@" in new_filename:
+            new_filename = new_filename.replace("WOXAV.COM@", "")
+        
+        # 匹配"【"和"】"之间的内容
+        pattern = r"(【.*?】)"
+        if "【" in new_filename and "】" in new_filename:
+            match = re.search(pattern, new_filename)
+            if match:
+                new_filename = re.sub(pattern, "", new_filename)
+        
+        # 第二轮匹配各种括号情形
+        partern2 = r"[\[\【\(\（][^)）].*?[\）\)\】\]]"
+        match = re.search(partern2, new_filename)
+        if match:
+            new_filename = re.sub(partern2, "", new_filename)
+        
+        # 第三轮匹配各种括号没有括回而是.
+        partern3 = r"[\[\【\(\（][^)）].*?\."
+        match = re.search(partern3, new_filename)
+        if match:
+            new_filename = re.sub(partern3, "", new_filename)
+        
+        # 去掉直角单引号之间的内容
+        if "「" in new_filename and "」" in new_filename:
+            new_filename = re.sub(r"「.*?」", "", new_filename)
+        
+        # 去掉直角双引号之间的内容
+        if "『" in new_filename and "』" in new_filename:
+            new_filename = re.sub(r"『.*?』", "", new_filename)
+        
+        # 去掉网址名称格式
+        url_pattern = r"(?:WWW\.)?[A-Z0-9]+\.(COM|NET|ORG|CN|CC|ME)"
+        new_filename = re.sub(url_pattern, "", new_filename)
+        
+        # 清理连续的句号，替换为空字符串
+        new_filename = re.sub(r'\.{2,}', '', new_filename)
+        
+        # 最终清理：去除开头和结尾的句号
+        filename_part, ext_part = os.path.splitext(new_filename)
+        filename_part = filename_part.strip('.')
+        new_filename = filename_part + ext_part
+        
+        return new_filename
+    
+    def handle_filename_conflict(self, file_path):
+        """处理文件名冲突，添加数字后缀"""
+        base_path, ext = os.path.splitext(file_path)
+        counter = 1
+        
+        while True:
+            new_path = f"{base_path}_{counter}{ext}"
+            if not os.path.exists(new_path):
+                return new_path
+            counter += 1
+    
+    def batch_clean_filename_selected_videos(self):
+        """批量清理选中视频的文件名"""
+        selected_items = self.video_tree.selection()
+        if not selected_items:
+            messagebox.showwarning("警告", "请先选择要清理文件名的视频")
+            return
+        
+        # 确认操作
+        result = messagebox.askyesno("确认", f"确定要清理 {len(selected_items)} 个视频的文件名吗？")
+        if not result:
+            return
+        
+        success_count = 0
+        failed_count = 0
+        
+        for item in selected_items:
+            try:
+                video_id = self.video_tree.item(item)['tags'][0]
+                if self.clean_filename_for_video(video_id):
+                    success_count += 1
+                else:
+                    failed_count += 1
+            except (IndexError, TypeError):
+                failed_count += 1
+                continue
+        
+        # 刷新视频列表
+        self.load_videos()
+        
+        # 显示结果
+        messagebox.showinfo("完成", f"文件名清理完成\n成功: {success_count} 个\n失败: {failed_count} 个")
+    
+    def clean_filename_from_context(self, video_id):
+        """从右键菜单清理单个视频文件名"""
+        if self.clean_filename_for_video(video_id):
+            # 刷新视频列表
+            self.load_videos()
+            messagebox.showinfo("成功", "文件名清理完成")
+        else:
+            messagebox.showerror("错误", "文件名清理失败")
+    
+    def import_nfo_from_context(self, video_id, video_path):
+        """从右键菜单导入NFO文件"""
+        try:
+            # 获取视频文件所在目录
+            video_dir = os.path.dirname(video_path)
+            
+            # 检查必需的文件是否存在
+            fanart_path = os.path.join(video_dir, "fanart.jpg")
+            poster_path = os.path.join(video_dir, "poster.jpg")
+            nfo_path = os.path.join(video_dir, "movie.nfo")
+            
+            missing_files = []
+            if not os.path.exists(fanart_path):
+                missing_files.append("fanart.jpg")
+            if not os.path.exists(poster_path):
+                missing_files.append("poster.jpg")
+            if not os.path.exists(nfo_path):
+                missing_files.append("movie.nfo")
+            
+            if missing_files:
+                messagebox.showwarning("文件缺失", f"以下文件不存在，无法导入NFO：\n{', '.join(missing_files)}")
+                return
+            
+            # 读取NFO文件内容
+            nfo_data = self.parse_nfo_file(nfo_path)
+            if not nfo_data:
+                messagebox.showerror("错误", "无法解析NFO文件")
+                return
+            
+            # 读取fanart.jpg作为缩略图
+            thumbnail_data = None
+            try:
+                with open(fanart_path, 'rb') as f:
+                    thumbnail_data = f.read()
+            except Exception as e:
+                print(f"读取fanart.jpg失败: {e}")
+            
+            # 更新videos表的基本信息
+            video_update_fields = []
+            video_update_values = []
+            
+            # 使用JAVDB标题作为主标题，如果没有则使用完整标题
+            if nfo_data.get('javdb_title'):
+                video_update_fields.append("title = ?")
+                video_update_values.append(nfo_data['javdb_title'])
+            elif nfo_data.get('title'):
+                video_update_fields.append("title = ?")
+                video_update_values.append(nfo_data['title'])
+            
+            if nfo_data.get('plot'):
+                video_update_fields.append("description = ?")
+                video_update_values.append(nfo_data['plot'])
+            
+            if nfo_data.get('year'):
+                video_update_fields.append("year = ?")
+                video_update_values.append(nfo_data['year'])
+            
+            if nfo_data.get('genre'):
+                video_update_fields.append("genre = ?")
+                video_update_values.append(nfo_data['genre'])
+            
+            # 封面图片（fanart.jpg作为缩略图）
+            if thumbnail_data:
+                video_update_fields.append("thumbnail_data = ?")
+                video_update_values.append(thumbnail_data)
+            
+            # 更新videos表
+            if video_update_fields:
+                video_update_values.append(video_id)
+                sql = f"UPDATE videos SET {', '.join(video_update_fields)} WHERE id = ?"
+                self.cursor.execute(sql, video_update_values)
+            
+            # 将NFO数据存储到javdb_info表
+            javdb_code = nfo_data.get('uniqueid') or nfo_data.get('code')
+            if javdb_code:
+                # 检查是否已存在javdb_info记录
+                self.cursor.execute("SELECT id FROM javdb_info WHERE video_id = ?", (video_id,))
+                existing_record = self.cursor.fetchone()
+                
+                # 准备javdb_info数据
+                javdb_title = nfo_data.get('javdb_title') or nfo_data.get('title')
+                release_date = nfo_data.get('premiered')
+                studio = nfo_data.get('studio')
+                rating_text = nfo_data.get('rating')
+                score = None
+                
+                # 转换评分
+                if rating_text:
+                    try:
+                        score = float(rating_text)
+                    except ValueError:
+                        pass
+                
+                # 读取poster.jpg作为封面
+                cover_image_data = None
+                try:
+                    with open(poster_path, 'rb') as f:
+                        cover_image_data = f.read()
+                except Exception as e:
+                    print(f"读取poster.jpg失败: {e}")
+                
+                if existing_record:
+                    # 更新现有记录
+                    self.cursor.execute("""
+                        UPDATE javdb_info SET 
+                        javdb_code = ?, javdb_title = ?, release_date = ?, 
+                        studio = ?, rating = ?, score = ?, cover_image_data = ?,
+                        updated_at = CURRENT_TIMESTAMP
+                        WHERE video_id = ?
+                    """, (javdb_code, javdb_title, release_date, studio, rating_text, score, cover_image_data, video_id))
+                else:
+                    # 插入新记录
+                    self.cursor.execute("""
+                        INSERT INTO javdb_info 
+                        (video_id, javdb_code, javdb_title, release_date, studio, rating, score, cover_image_data, created_at, updated_at)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                    """, (video_id, javdb_code, javdb_title, release_date, studio, rating_text, score, cover_image_data))
+                
+                # 处理演员信息
+                if nfo_data.get('actors'):
+                    for actor_name in nfo_data['actors']:
+                        # 插入或获取演员ID
+                        self.cursor.execute("INSERT OR IGNORE INTO actors (name) VALUES (?)", (actor_name,))
+                        self.cursor.execute("SELECT id FROM actors WHERE name = ?", (actor_name,))
+                        actor_id = self.cursor.fetchone()[0]
+                        
+                        # 关联视频和演员
+                        self.cursor.execute("""
+                            INSERT OR IGNORE INTO video_actors (video_id, actor_id) 
+                            VALUES (?, ?)
+                        """, (video_id, actor_id))
+                
+                # 处理标签信息
+                if nfo_data.get('tags'):
+                    # 获取javdb_info记录ID
+                    self.cursor.execute("SELECT id FROM javdb_info WHERE video_id = ?", (video_id,))
+                    javdb_info_id = self.cursor.fetchone()[0]
+                    
+                    for tag_name in nfo_data['tags']:
+                        # 插入或获取标签ID
+                        self.cursor.execute("INSERT OR IGNORE INTO javdb_tags (tag_name) VALUES (?)", (tag_name,))
+                        self.cursor.execute("SELECT id FROM javdb_tags WHERE tag_name = ?", (tag_name,))
+                        tag_id = self.cursor.fetchone()[0]
+                        
+                        # 关联javdb_info和标签
+                        self.cursor.execute("""
+                            INSERT OR IGNORE INTO javdb_info_tags (javdb_info_id, tag_id) 
+                            VALUES (?, ?)
+                        """, (javdb_info_id, tag_id))
+            
+            self.conn.commit()
+            
+            # 刷新视频列表
+            self.load_videos()
+            
+            imported_info = []
+            if nfo_data.get('title'):
+                imported_info.append(f"标题: {nfo_data['title']}")
+            if nfo_data.get('year'):
+                imported_info.append(f"年份: {nfo_data['year']}")
+            if nfo_data.get('genre'):
+                imported_info.append(f"类型: {nfo_data['genre']}")
+            if nfo_data.get('rating'):
+                imported_info.append(f"评分: {nfo_data['rating']}")
+            if thumbnail_data:
+                imported_info.append("缩略图: fanart.jpg")
+            
+            messagebox.showinfo("导入成功", f"NFO数据导入完成！\n\n导入的信息：\n{chr(10).join(imported_info)}")
+            
+        except Exception as e:
+            messagebox.showerror("错误", f"导入NFO失败: {str(e)}")
+    
+    def parse_nfo_file(self, nfo_path):
+        """解析NFO文件"""
+        try:
+            import xml.etree.ElementTree as ET
+            
+            tree = ET.parse(nfo_path)
+            root = tree.getroot()
+            
+            nfo_data = {}
+            
+            # 提取标题（完整截取到</title>）
+            title_elem = root.find('title')
+            if title_elem is not None and title_elem.text:
+                full_title = title_elem.text.strip()
+                nfo_data['title'] = full_title
+                
+                # 从标题中提取番号和JAVDB标题
+                # 第一个空格前面作为番号，后面作为javdb标题
+                if ' ' in full_title:
+                    parts = full_title.split(' ', 1)
+                    nfo_data['code'] = parts[0]  # 番号
+                    nfo_data['javdb_title'] = parts[1]  # JAVDB标题
+                else:
+                    nfo_data['code'] = full_title
+                    nfo_data['javdb_title'] = full_title
+            
+            # 提取剧情描述
+            plot_elem = root.find('plot')
+            if plot_elem is not None and plot_elem.text:
+                nfo_data['plot'] = plot_elem.text.strip()
+            
+            # 提取年份
+            year_elem = root.find('year')
+            if year_elem is not None and year_elem.text:
+                nfo_data['year'] = year_elem.text.strip()
+            
+            # 提取发行日期
+            premiered_elem = root.find('premiered')
+            if premiered_elem is not None and premiered_elem.text:
+                nfo_data['premiered'] = premiered_elem.text.strip()
+            
+            # 提取类型
+            genre_elem = root.find('genre')
+            if genre_elem is not None and genre_elem.text:
+                nfo_data['genre'] = genre_elem.text.strip()
+            
+            # 提取JAVDB评分
+            rating_elem = root.find('rating')
+            if rating_elem is not None and rating_elem.text:
+                nfo_data['rating'] = rating_elem.text.strip()
+            
+            # 提取发行商
+            studio_elem = root.find('studio')
+            if studio_elem is not None and studio_elem.text:
+                nfo_data['studio'] = studio_elem.text.strip()
+            
+            # 提取番号（从uniqueid标签）
+            uniqueid_elem = root.find('.//uniqueid[@type="num"][@default="true"]')
+            if uniqueid_elem is not None and uniqueid_elem.text:
+                nfo_data['uniqueid'] = uniqueid_elem.text.strip()
+            
+            # 提取标签
+            tags = []
+            for tag_elem in root.findall('tag'):
+                if tag_elem.text:
+                    tags.append(tag_elem.text.strip())
+            if tags:
+                nfo_data['tags'] = tags
+            
+            # 提取演员信息（从<actor><name>标签）
+            actors = []
+            for actor_elem in root.findall('actor'):
+                name_elem = actor_elem.find('name')
+                if name_elem is not None and name_elem.text:
+                    actors.append(name_elem.text.strip())
+            if actors:
+                nfo_data['actors'] = actors
+            
+            return nfo_data
+            
+        except Exception as e:
+            print(f"解析NFO文件失败: {e}")
+            return None
+    
+    def batch_import_nfo_for_no_actors(self):
+        """批量导入NFO信息 - 针对没有演员信息的视频"""
+        try:
+            # 获取当前选定的文件夹
+            selected_folder_indices = self.folder_listbox.curselection()
+            if not selected_folder_indices or not hasattr(self, 'folder_path_mapping'):
+                messagebox.showwarning("警告", "请先选择一个文件夹")
+                return
+                
+            selected_folder = self.folder_listbox.get(selected_folder_indices[0])
+            if selected_folder == "全部":
+                messagebox.showwarning("警告", "请选择具体的文件夹，不能选择'全部'")
+                return
+                
+            if selected_folder not in self.folder_path_mapping:
+                messagebox.showwarning("警告", "无法找到选定文件夹的路径")
+                return
+                
+            folder_path = self.folder_path_mapping[selected_folder]
+            
+            # 查询该文件夹下没有演员信息的视频
+            self.cursor.execute("""
+                SELECT v.id, v.file_path, v.file_name 
+                FROM videos v
+                LEFT JOIN video_actors va ON v.id = va.video_id
+                WHERE v.source_folder LIKE ? AND va.video_id IS NULL
+            """, (f"{folder_path}%",))
+            
+            videos_without_actors = self.cursor.fetchall()
+            
+            if not videos_without_actors:
+                messagebox.showinfo("信息", f"文件夹 '{selected_folder}' 中没有找到缺少演员信息的视频")
+                return
+                
+            # 确认对话框
+            if not messagebox.askyesno("确认", 
+                f"找到 {len(videos_without_actors)} 个没有演员信息的视频\n\n是否开始批量导入NFO信息？"):
+                return
+                
+            # 复用现有的进度窗口创建逻辑（类似batch_javdb_info_selected_videos）
+            progress_window = tk.Toplevel(self.root)
+            progress_window.title("批量导入NFO信息")
+            progress_window.geometry("500x300")
+            progress_window.transient(self.root)
+            progress_window.grab_set()
+            
+            progress_label = ttk.Label(progress_window, text="准备导入...")
+            progress_label.pack(pady=10)
+            
+            progress_bar = ttk.Progressbar(progress_window, length=400, maximum=len(videos_without_actors))
+            progress_bar.pack(pady=10)
+            
+            log_frame = ttk.Frame(progress_window)
+            log_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+            
+            log_text = tk.Text(log_frame, height=10, width=60)
+            scrollbar = ttk.Scrollbar(log_frame, orient="vertical", command=log_text.yview)
+            log_text.configure(yscrollcommand=scrollbar.set)
+            
+            log_text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+            scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+            
+            def log_message(message):
+                log_text.insert(tk.END, message + "\n")
+                log_text.see(tk.END)
+                progress_window.update()
+                
+            cancel_button = ttk.Button(progress_window, text="取消")
+            cancel_button.pack(pady=5)
+            
+            self.cancel_import = False
+            
+            def cancel_import():
+                self.cancel_import = True
+                cancel_button.config(text="关闭", command=progress_window.destroy)
+                
+            cancel_button.config(command=cancel_import)
+            
+            def import_thread():
+                try:
+                    imported_count = 0
+                    skipped_count = 0
+                    
+                    for i, (video_id, file_path, file_name) in enumerate(videos_without_actors):
+                        if self.cancel_import:
+                            break
+                            
+                        progress_bar.config(value=i + 1)
+                        progress_label.config(text=f"处理: {file_name} ({i + 1}/{len(videos_without_actors)})")
+                        
+                        # 查找对应的NFO文件
+                        nfo_path = os.path.splitext(file_path)[0] + '.nfo'
+                        
+                        if os.path.exists(nfo_path):
+                            log_message(f"找到NFO文件: {os.path.basename(nfo_path)}")
+                            
+                            # 直接调用现有的parse_nfo_file方法
+                            if self.parse_nfo_file(nfo_path):
+                                imported_count += 1
+                                log_message(f"✓ 成功导入: {file_name}")
+                            else:
+                                skipped_count += 1
+                                log_message(f"✗ 导入失败: {file_name}")
+                        else:
+                            skipped_count += 1
+                            log_message(f"- 未找到NFO文件: {file_name}")
+                    
+                    # 完成
+                    progress_label.config(text="导入完成")
+                    log_message(f"\n=== 导入完成 ===")
+                    log_message(f"成功导入: {imported_count} 个")
+                    log_message(f"跳过: {skipped_count} 个")
+                    
+                    cancel_button.config(text="关闭", command=progress_window.destroy)
+                    
+                    # 刷新视频列表
+                    self.root.after(100, self.load_videos)
+                    
+                except Exception as e:
+                    log_message(f"批量导入过程中发生错误: {str(e)}")
+                    cancel_button.config(text="关闭", command=progress_window.destroy)
+            
+            # 在后台线程中执行导入
+            thread = threading.Thread(target=import_thread, daemon=True)
+            thread.start()
+            
+        except Exception as e:
+            messagebox.showerror("错误", f"批量导入NFO信息失败: {str(e)}")
+    
+    def batch_import_javdb_for_no_title(self):
+        """批量导入JAVDB信息 - 针对没有JAVDB标题的视频"""
+        try:
+            # 获取当前选定的文件夹
+            selected_folder_indices = self.folder_listbox.curselection()
+            if not selected_folder_indices or not hasattr(self, 'folder_path_mapping'):
+                messagebox.showwarning("警告", "请先选择一个文件夹")
+                return
+                
+            selected_folder = self.folder_listbox.get(selected_folder_indices[0])
+            if selected_folder == "全部":
+                messagebox.showwarning("警告", "请选择具体的文件夹，不能选择'全部'")
+                return
+                
+            if selected_folder not in self.folder_path_mapping:
+                messagebox.showwarning("警告", "无法找到选定文件夹的路径")
+                return
+                
+            folder_path = self.folder_path_mapping[selected_folder]
+            
+            # 查询该文件夹下没有JAVDB标题的视频
+            self.cursor.execute("""
+                SELECT v.id, v.file_path, v.file_name 
+                FROM videos v
+                LEFT JOIN javdb_info j ON v.id = j.video_id
+                WHERE v.source_folder LIKE ? AND (j.javdb_title IS NULL OR j.javdb_title = '')
+            """, (f"{folder_path}%",))
+            
+            videos_without_javdb = self.cursor.fetchall()
+            
+            if not videos_without_javdb:
+                messagebox.showinfo("信息", f"文件夹 '{selected_folder}' 中没有找到缺少JAVDB标题的视频")
+                return
+                
+            # 确认对话框
+            if not messagebox.askyesno("确认", 
+                f"找到 {len(videos_without_javdb)} 个没有JAVDB标题的视频\n\n是否开始批量导入JAVDB信息？\n\n注意：此操作可能需要较长时间"):
+                return
+                
+            # 复用现有的进度窗口创建逻辑（与batch_javdb_info_selected_videos相同）
+            progress_window = tk.Toplevel(self.root)
+            progress_window.title("批量导入JAVDB信息")
+            progress_window.geometry("600x400")
+            progress_window.transient(self.root)
+            progress_window.grab_set()
+            
+            progress_label = ttk.Label(progress_window, text="准备导入...")
+            progress_label.pack(pady=10)
+            
+            progress_bar = ttk.Progressbar(progress_window, length=500, maximum=len(videos_without_javdb))
+            progress_bar.pack(pady=10)
+            
+            log_frame = ttk.Frame(progress_window)
+            log_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+            
+            log_text = tk.Text(log_frame, height=15, width=70)
+            scrollbar = ttk.Scrollbar(log_frame, orient="vertical", command=log_text.yview)
+            log_text.configure(yscrollcommand=scrollbar.set)
+            
+            log_text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+            scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+            
+            def log_message(message):
+                log_text.insert(tk.END, message + "\n")
+                log_text.see(tk.END)
+                progress_window.update()
+                
+            cancel_button = ttk.Button(progress_window, text="取消")
+            cancel_button.pack(pady=5)
+            
+            self.cancel_import = False
+            
+            def cancel_import():
+                self.cancel_import = True
+                cancel_button.config(text="关闭", command=progress_window.destroy)
+                
+            cancel_button.config(command=cancel_import)
+            
+            def import_thread():
+                try:
+                    from code_extractor import CodeExtractor
+                    import subprocess
+                    import json
+                    
+                    extractor = CodeExtractor()
+                    imported_count = 0
+                    skipped_count = 0
+                    
+                    for i, (video_id, file_path, file_name) in enumerate(videos_without_javdb):
+                        if self.cancel_import:
+                            break
+                            
+                        progress_bar.config(value=i + 1)
+                        progress_label.config(text=f"处理: {file_name} ({i + 1}/{len(videos_without_javdb)})")
+                        
+                        # 直接调用现有的番号提取逻辑
+                        av_code = extractor.extract_code_from_filename(file_name)
+                        
+                        if not av_code:
+                            skipped_count += 1
+                            log_message(f"- 无法提取番号: {file_name}")
+                            continue
+                            
+                        log_message(f"提取番号: {av_code} <- {file_name}")
+                        
+                        try:
+                            # 直接调用现有的JAVDB爬虫逻辑
+                            cmd = ["python", "javdb_crawler_single.py", av_code]
+                            process = subprocess.run(cmd, capture_output=True, text=True, 
+                                                   cwd=os.path.dirname(os.path.abspath(__file__)), timeout=60)
+                            
+                            if process.returncode == 0 and process.stdout:
+                                try:
+                                    result = json.loads(process.stdout)
+                                    if "error" not in result:
+                                        # 直接调用现有的保存方法
+                                        self.save_javdb_info_to_db(video_id, result)
+                                        imported_count += 1
+                                        log_message(f"✓ 成功导入: {av_code} - {result.get('title', 'N/A')}")
+                                    else:
+                                        skipped_count += 1
+                                        log_message(f"✗ JAVDB返回错误: {av_code} - {result.get('error', 'Unknown error')}")
+                                except json.JSONDecodeError:
+                                    skipped_count += 1
+                                    log_message(f"✗ 解析JAVDB响应失败: {av_code}")
+                            else:
+                                skipped_count += 1
+                                log_message(f"✗ JAVDB获取失败: {av_code}")
+                                
+                        except subprocess.TimeoutExpired:
+                            skipped_count += 1
+                            log_message(f"✗ 获取超时: {av_code}")
+                        except Exception as e:
+                            skipped_count += 1
+                            log_message(f"✗ 处理错误: {av_code} - {str(e)}")
+                    
+                    # 完成
+                    progress_label.config(text="导入完成")
+                    log_message(f"\n=== 导入完成 ===")
+                    log_message(f"成功导入: {imported_count} 个")
+                    log_message(f"跳过: {skipped_count} 个")
+                    
+                    cancel_button.config(text="关闭", command=progress_window.destroy)
+                    
+                    # 刷新视频列表
+                    self.root.after(100, self.load_videos)
+                    
+                except ImportError:
+                    log_message("错误: 无法导入番号提取器模块")
+                    cancel_button.config(text="关闭", command=progress_window.destroy)
+                except Exception as e:
+                    log_message(f"批量导入过程中发生错误: {str(e)}")
+                    cancel_button.config(text="关闭", command=progress_window.destroy)
+            
+            # 在后台线程中执行导入
+            thread = threading.Thread(target=import_thread, daemon=True)
+            thread.start()
+            
+        except Exception as e:
+            messagebox.showerror("错误", f"批量导入JAVDB信息失败: {str(e)}")
+
     def __del__(self):
         """析构函数"""
         if hasattr(self, 'conn'):
