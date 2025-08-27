@@ -699,6 +699,8 @@ class MediaLibrary:
         tools_menu.add_command(label="智能去重", command=self.smart_remove_duplicates)
         tools_menu.add_command(label="文件移动管理", command=self.file_move_manager)
         tools_menu.add_separator()
+        tools_menu.add_command(label="清理演员信息", command=self.clean_actor_data)
+        tools_menu.add_separator()
         tools_menu.add_command(label="重新导入元数据", command=self.reimport_incomplete_metadata)
         tools_menu.add_command(label="完全重置数据库", command=self.full_database_reset)
         tools_menu.add_separator()
@@ -2705,9 +2707,8 @@ class MediaLibrary:
                                  foreground="blue", cursor="hand2")
             actor_link.pack(side=tk.LEFT)
             
-            # 绑定点击事件
-            if profile_url:
-                actor_link.bind("<Button-1>", lambda e, url=profile_url: self.open_actor_url(url))
+            # 绑定点击事件 - 弹出演员详情页面
+            actor_link.bind("<Button-1>", lambda e, name=actor_name: self.open_actor_detail(name))
     
     def display_magnet_links(self, magnet_links_json):
         """显示下载链接"""
@@ -5775,6 +5776,208 @@ class MediaLibrary:
         except Exception as e:
             messagebox.showerror("错误", f"移动文件失败: {str(e)}")
             
+    def clean_actor_data(self):
+        """清理演员信息 - 执行merge_duplicate_actors.py脚本"""
+        try:
+            # 创建选择对话框
+            choice_window = tk.Toplevel(self.root)
+            choice_window.title("清理演员信息")
+            choice_window.geometry("500x400")
+            choice_window.transient(self.root)
+            choice_window.grab_set()
+            
+            # 标题
+            title_label = ttk.Label(choice_window, text="演员记录清理选项", font=("Arial", 14, "bold"))
+            title_label.pack(pady=10)
+            
+            # 说明文本
+            info_text = tk.Text(choice_window, height=8, wrap=tk.WORD, state=tk.DISABLED)
+            info_text.pack(fill=tk.X, padx=20, pady=10)
+            
+            info_content = """演员记录清理工具可以帮助您：
+
+1. 处理逗号分隔的演员名称
+2. 基于相同URL合并重复演员记录
+3. 基于相同名称合并重复演员记录
+
+建议按顺序执行以获得最佳效果。每个步骤都会先预览，确认后再执行实际操作。"""
+            
+            info_text.config(state=tk.NORMAL)
+            info_text.insert(tk.END, info_content)
+            info_text.config(state=tk.DISABLED)
+            
+            # 选项框架
+            options_frame = ttk.LabelFrame(choice_window, text="选择清理操作")
+            options_frame.pack(fill=tk.X, padx=20, pady=10)
+            
+            # 选项变量
+            selected_option = tk.StringVar(value="split_comma")
+            
+            # 选项按钮
+            ttk.Radiobutton(options_frame, text="1. 处理逗号分隔名称", variable=selected_option, value="split_comma").pack(anchor=tk.W, padx=10, pady=5)
+            ttk.Radiobutton(options_frame, text="2. 基于URL合并重复演员", variable=selected_option, value="merge_url").pack(anchor=tk.W, padx=10, pady=5)
+            ttk.Radiobutton(options_frame, text="3. 基于名称合并重复演员", variable=selected_option, value="merge_names").pack(anchor=tk.W, padx=10, pady=5)
+            ttk.Radiobutton(options_frame, text="4. 完整清理流程（推荐）", variable=selected_option, value="full_clean").pack(anchor=tk.W, padx=10, pady=5)
+            
+            # 按钮框架
+            button_frame = ttk.Frame(choice_window)
+            button_frame.pack(fill=tk.X, padx=20, pady=10)
+            
+            def execute_cleaning():
+                choice_window.destroy()
+                self._execute_actor_cleaning(selected_option.get())
+            
+            ttk.Button(button_frame, text="开始清理", command=execute_cleaning).pack(side=tk.LEFT, padx=5)
+            ttk.Button(button_frame, text="取消", command=choice_window.destroy).pack(side=tk.LEFT, padx=5)
+            
+        except Exception as e:
+            messagebox.showerror("错误", f"打开清理选项失败: {str(e)}")
+    
+    def _execute_actor_cleaning(self, operation_type):
+        """执行演员清理操作"""
+        try:
+            # 创建进度窗口
+            progress_window = tk.Toplevel(self.root)
+            progress_window.title("清理演员信息")
+            progress_window.geometry("600x500")
+            progress_window.transient(self.root)
+            progress_window.grab_set()
+            
+            # 进度条
+            progress_var = tk.DoubleVar()
+            progress_bar = ttk.Progressbar(progress_window, variable=progress_var, maximum=100, mode='indeterminate')
+            progress_bar.pack(fill=tk.X, padx=20, pady=10)
+            progress_bar.start()
+            
+            # 状态标签
+            status_var = tk.StringVar(value="准备执行清理操作...")
+            status_label = ttk.Label(progress_window, textvariable=status_var)
+            status_label.pack(pady=5)
+            
+            # 日志区域
+            log_frame = ttk.LabelFrame(progress_window, text="清理日志")
+            log_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=10)
+            
+            log_text = tk.Text(log_frame, height=15)
+            log_scrollbar = ttk.Scrollbar(log_frame, orient=tk.VERTICAL, command=log_text.yview)
+            log_text.configure(yscrollcommand=log_scrollbar.set)
+            log_text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+            log_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+            
+            # 关闭按钮（初始禁用）
+            close_button = ttk.Button(progress_window, text="关闭", command=progress_window.destroy, state=tk.DISABLED)
+            close_button.pack(pady=10)
+            
+            def log_message(message):
+                log_text.insert(tk.END, f"{datetime.now().strftime('%H:%M:%S')} - {message}\n")
+                log_text.see(tk.END)
+                progress_window.update()
+            
+            def execute_script():
+                try:
+                    script_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "merge_duplicate_actors.py")
+                    
+                    if not os.path.exists(script_path):
+                        log_message(f"错误：找不到脚本文件 {script_path}")
+                        return
+                    
+                    # 根据操作类型构建命令
+                    if operation_type == "split_comma":
+                        commands = [
+                            ["python3", script_path, "--split-comma", "--limit", "5"],  # 预览
+                            ["python3", script_path, "--split-comma", "--execute"]  # 执行
+                        ]
+                        operation_name = "处理逗号分隔名称"
+                    elif operation_type == "merge_url":
+                        commands = [
+                            ["python3", script_path, "--merge-url", "--limit", "5"],  # 预览
+                            ["python3", script_path, "--merge-url", "--execute"]  # 执行
+                        ]
+                        operation_name = "基于URL合并重复演员"
+                    elif operation_type == "merge_names":
+                        commands = [
+                            ["python3", script_path, "--merge-names", "--limit", "5"],  # 预览
+                            ["python3", script_path, "--merge-names", "--execute"]  # 执行
+                        ]
+                        operation_name = "基于名称合并重复演员"
+                    elif operation_type == "full_clean":
+                        commands = [
+                            ["python3", script_path, "--split-comma", "--execute"],
+                            ["python3", script_path, "--merge-url", "--execute"],
+                            ["python3", script_path, "--merge-names", "--execute"]
+                        ]
+                        operation_name = "完整清理流程"
+                    
+                    log_message(f"开始执行{operation_name}...")
+                    status_var.set(f"正在执行{operation_name}...")
+                    
+                    for i, cmd in enumerate(commands):
+                        if operation_type == "full_clean":
+                            step_names = ["处理逗号分隔名称", "基于URL合并", "基于名称合并"]
+                            log_message(f"\n步骤 {i+1}/{len(commands)}: {step_names[i]}")
+                            status_var.set(f"步骤 {i+1}/{len(commands)}: {step_names[i]}")
+                        else:
+                            step_name = "预览" if i == 0 else "执行"
+                            log_message(f"\n{step_name}阶段:")
+                            status_var.set(f"{operation_name} - {step_name}阶段")
+                        
+                        # 执行命令
+                        process = subprocess.Popen(
+                            cmd,
+                            stdout=subprocess.PIPE,
+                            stderr=subprocess.STDOUT,
+                            text=True,
+                            cwd=os.path.dirname(script_path)
+                        )
+                        
+                        # 实时读取输出
+                        while True:
+                            output = process.stdout.readline()
+                            if output == '' and process.poll() is not None:
+                                break
+                            if output:
+                                log_message(output.strip())
+                        
+                        # 等待进程完成
+                        return_code = process.wait()
+                        
+                        if return_code != 0:
+                            log_message(f"命令执行失败，返回码: {return_code}")
+                            break
+                        
+                        # 对于非完整流程，在预览后询问是否继续
+                        if operation_type != "full_clean" and i == 0:
+                            if not messagebox.askyesno("确认执行", f"{operation_name}预览完成。\n\n是否继续执行实际操作？"):
+                                log_message("用户取消操作")
+                                break
+                    
+                    progress_bar.stop()
+                    progress_bar.config(mode='determinate')
+                    progress_var.set(100)
+                    status_var.set("清理操作完成")
+                    log_message(f"\n{operation_name}完成！")
+                    
+                    # 启用关闭按钮
+                    close_button.config(state=tk.NORMAL)
+                    
+                    # 刷新界面数据
+                    self.root.after(1000, self.load_videos)
+                    
+                    messagebox.showinfo("完成", f"{operation_name}已完成！\n\n请查看日志了解详细信息。")
+                    
+                except Exception as e:
+                    progress_bar.stop()
+                    log_message(f"执行失败: {str(e)}")
+                    status_var.set("执行失败")
+                    close_button.config(state=tk.NORMAL)
+                    messagebox.showerror("错误", f"清理操作失败: {str(e)}")
+            
+            # 在新线程中执行脚本
+            threading.Thread(target=execute_script, daemon=True).start()
+            
+        except Exception as e:
+            messagebox.showerror("错误", f"执行清理操作失败: {str(e)}")
+
     def comprehensive_media_update(self):
         """智能媒体库更新 - 优化版本：先导入所有活跃文件，再处理无效文件和迁移"""
         if not messagebox.askyesno("确认", "这将扫描所有活跃文件夹，添加新文件并更新移动文件的路径，可能需要一些时间。是否继续？"):
@@ -8283,10 +8486,305 @@ class MediaLibrary:
         except Exception as e:
             messagebox.showerror("错误", f"批量导入JAVDB信息失败: {str(e)}")
 
+    def get_actor_info_by_name(self, actor_name):
+        """根据演员名称获取演员详细信息"""
+        try:
+            self.cursor.execute("""
+                SELECT id, name, name_traditional, name_common, aliases, 
+                       avatar_url, avatar_data, profile_url, movie_count,
+                       birth_date, debut_date, height, measurements, description
+                FROM actors 
+                WHERE name = ? OR name_common = ? OR name_traditional = ?
+                LIMIT 1
+            """, (actor_name, actor_name, actor_name))
+            return self.cursor.fetchone()
+        except Exception as e:
+            print(f"获取演员信息失败: {e}")
+            return None
+    
+    def get_actor_movies_in_library(self, actor_name):
+        """获取演员在媒体库中的影片"""
+        try:
+            self.cursor.execute("""
+                SELECT DISTINCT v.id, v.file_name, v.file_path, j.javdb_title, 
+                       j.javdb_code, j.release_date, j.cover_url
+                FROM videos v
+                JOIN video_actors va ON v.id = va.video_id
+                JOIN actors a ON va.actor_id = a.id
+                LEFT JOIN javdb_info j ON v.id = j.video_id
+                WHERE a.name = ? OR a.name_common = ? OR a.name_traditional = ?
+                ORDER BY j.release_date DESC
+            """, (actor_name, actor_name, actor_name))
+            return self.cursor.fetchall()
+        except Exception as e:
+            print(f"获取演员影片失败: {e}")
+            return []
+    
+    def open_actor_detail(self, actor_name):
+        """打开演员详情页面"""
+        try:
+            ActorDetailWindow(self.root, actor_name, self)
+        except Exception as e:
+            messagebox.showerror("错误", f"无法打开演员详情页面: {str(e)}")
+
     def __del__(self):
         """析构函数"""
         if hasattr(self, 'conn'):
             self.conn.close()
+
+
+class ActorDetailWindow:
+    """演员详情页面窗口"""
+    
+    def __init__(self, parent, actor_name, media_library):
+        self.parent = parent
+        self.actor_name = actor_name
+        self.media_library = media_library
+        
+        # 获取演员信息
+        self.actor_info = media_library.get_actor_info_by_name(actor_name)
+        self.actor_movies = media_library.get_actor_movies_in_library(actor_name)
+        
+        self.create_window()
+        
+    def create_window(self):
+        """创建演员详情窗口"""
+        self.window = tk.Toplevel(self.parent)
+        self.window.title(f"演员详情 - {self.actor_name}")
+        self.window.geometry("800x600")
+        self.window.transient(self.parent)
+        self.window.grab_set()
+        
+        # 创建主框架
+        main_frame = ttk.Frame(self.window)
+        main_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+        
+        # 创建演员信息区域
+        self.create_actor_info_section(main_frame)
+        
+        # 创建分隔线
+        separator = ttk.Separator(main_frame, orient='horizontal')
+        separator.pack(fill=tk.X, pady=10)
+        
+        # 创建影片列表区域
+        self.create_movies_section(main_frame)
+        
+        # 创建底部按钮
+        self.create_bottom_buttons(main_frame)
+    
+    def create_actor_info_section(self, parent):
+        """创建演员信息区域"""
+        info_frame = ttk.Frame(parent)
+        info_frame.pack(fill=tk.X, pady=(0, 10))
+        
+        # 左侧头像区域
+        avatar_frame = ttk.Frame(info_frame)
+        avatar_frame.pack(side=tk.LEFT, padx=(0, 20))
+        
+        # 头像标签
+        self.avatar_label = ttk.Label(avatar_frame, text="头像")
+        self.avatar_label.pack()
+        
+        # 加载头像
+        self.load_avatar()
+        
+        # 右侧信息区域
+        details_frame = ttk.Frame(info_frame)
+        details_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        
+        if self.actor_info:
+            # 演员名称
+            name_frame = ttk.Frame(details_frame)
+            name_frame.pack(fill=tk.X, pady=2)
+            ttk.Label(name_frame, text="姓名:", font=('Arial', 10, 'bold')).pack(side=tk.LEFT)
+            ttk.Label(name_frame, text=self.actor_info[1] or "未知").pack(side=tk.LEFT, padx=(5, 0))
+            
+            # 繁体中文名
+            if self.actor_info[2]:
+                traditional_frame = ttk.Frame(details_frame)
+                traditional_frame.pack(fill=tk.X, pady=2)
+                ttk.Label(traditional_frame, text="繁体名:", font=('Arial', 10, 'bold')).pack(side=tk.LEFT)
+                ttk.Label(traditional_frame, text=self.actor_info[2]).pack(side=tk.LEFT, padx=(5, 0))
+            
+            # 常用名
+            if self.actor_info[3]:
+                common_frame = ttk.Frame(details_frame)
+                common_frame.pack(fill=tk.X, pady=2)
+                ttk.Label(common_frame, text="常用名:", font=('Arial', 10, 'bold')).pack(side=tk.LEFT)
+                ttk.Label(common_frame, text=self.actor_info[3]).pack(side=tk.LEFT, padx=(5, 0))
+            
+            # 别名
+            if self.actor_info[4]:
+                aliases_frame = ttk.Frame(details_frame)
+                aliases_frame.pack(fill=tk.X, pady=2)
+                ttk.Label(aliases_frame, text="别名:", font=('Arial', 10, 'bold')).pack(side=tk.LEFT)
+                ttk.Label(aliases_frame, text=self.actor_info[4]).pack(side=tk.LEFT, padx=(5, 0))
+            
+            # 影片数量
+            count_frame = ttk.Frame(details_frame)
+            count_frame.pack(fill=tk.X, pady=2)
+            ttk.Label(count_frame, text="媒体库影片:", font=('Arial', 10, 'bold')).pack(side=tk.LEFT)
+            ttk.Label(count_frame, text=f"{len(self.actor_movies)} 部").pack(side=tk.LEFT, padx=(5, 0))
+            
+            # 其他信息
+            if self.actor_info[10]:  # birth_date
+                birth_frame = ttk.Frame(details_frame)
+                birth_frame.pack(fill=tk.X, pady=2)
+                ttk.Label(birth_frame, text="出生日期:", font=('Arial', 10, 'bold')).pack(side=tk.LEFT)
+                ttk.Label(birth_frame, text=self.actor_info[10]).pack(side=tk.LEFT, padx=(5, 0))
+            
+            if self.actor_info[11]:  # debut_date
+                debut_frame = ttk.Frame(details_frame)
+                debut_frame.pack(fill=tk.X, pady=2)
+                ttk.Label(debut_frame, text="出道日期:", font=('Arial', 10, 'bold')).pack(side=tk.LEFT)
+                ttk.Label(debut_frame, text=self.actor_info[11]).pack(side=tk.LEFT, padx=(5, 0))
+            
+            if self.actor_info[12]:  # height
+                height_frame = ttk.Frame(details_frame)
+                height_frame.pack(fill=tk.X, pady=2)
+                ttk.Label(height_frame, text="身高:", font=('Arial', 10, 'bold')).pack(side=tk.LEFT)
+                ttk.Label(height_frame, text=self.actor_info[12]).pack(side=tk.LEFT, padx=(5, 0))
+            
+            if self.actor_info[13]:  # measurements
+                measurements_frame = ttk.Frame(details_frame)
+                measurements_frame.pack(fill=tk.X, pady=2)
+                ttk.Label(measurements_frame, text="三围:", font=('Arial', 10, 'bold')).pack(side=tk.LEFT)
+                ttk.Label(measurements_frame, text=self.actor_info[13]).pack(side=tk.LEFT, padx=(5, 0))
+        else:
+            ttk.Label(details_frame, text=f"未找到演员 '{self.actor_name}' 的详细信息", 
+                     font=('Arial', 12)).pack(pady=20)
+    
+    def load_avatar(self):
+        """加载演员头像"""
+        try:
+            if self.actor_info and self.actor_info[6]:  # avatar_data
+                # 从数据库加载头像
+                import io
+                from PIL import Image, ImageTk
+                
+                avatar_data = self.actor_info[6]
+                image = Image.open(io.BytesIO(avatar_data))
+                image = image.resize((150, 200), Image.Resampling.LANCZOS)
+                photo = ImageTk.PhotoImage(image)
+                
+                self.avatar_label.config(image=photo, text="")
+                self.avatar_label.image = photo  # 保持引用
+            else:
+                # 显示默认头像
+                self.avatar_label.config(text="暂无头像\n(150x200)", 
+                                        width=20, height=10, 
+                                        relief="solid", borderwidth=1)
+        except Exception as e:
+            print(f"加载头像失败: {e}")
+            self.avatar_label.config(text="头像加载失败\n(150x200)", 
+                                   width=20, height=10, 
+                                   relief="solid", borderwidth=1)
+    
+    def create_movies_section(self, parent):
+        """创建影片列表区域"""
+        movies_frame = ttk.LabelFrame(parent, text=f"在媒体库中的影片 ({len(self.actor_movies)} 部)")
+        movies_frame.pack(fill=tk.BOTH, expand=True, pady=(0, 10))
+        
+        # 创建Treeview
+        columns = ('title', 'code', 'release_date', 'file_name')
+        self.movies_tree = ttk.Treeview(movies_frame, columns=columns, show='headings')
+        
+        # 设置列标题
+        self.movies_tree.heading('title', text='标题')
+        self.movies_tree.heading('code', text='番号')
+        self.movies_tree.heading('release_date', text='发行日期')
+        self.movies_tree.heading('file_name', text='文件名')
+        
+        # 设置列宽
+        self.movies_tree.column('title', width=250)
+        self.movies_tree.column('code', width=100)
+        self.movies_tree.column('release_date', width=100)
+        self.movies_tree.column('file_name', width=300)
+        
+        # 添加滚动条
+        scrollbar = ttk.Scrollbar(movies_frame, orient=tk.VERTICAL, command=self.movies_tree.yview)
+        self.movies_tree.configure(yscrollcommand=scrollbar.set)
+        
+        # 布局
+        self.movies_tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        
+        # 填充数据
+        for movie in self.actor_movies:
+            video_id, file_name, file_path, javdb_title, javdb_code, release_date, cover_url = movie
+            self.movies_tree.insert('', 'end', values=(
+                javdb_title or file_name,
+                javdb_code or "未知",
+                release_date or "未知",
+                file_name
+            ), tags=(video_id,))
+        
+        # 绑定双击事件
+        self.movies_tree.bind('<Double-1>', self.on_movie_double_click)
+    
+    def on_movie_double_click(self, event):
+        """影片双击事件"""
+        item = self.movies_tree.selection()[0]
+        video_id = self.movies_tree.item(item, 'tags')[0]
+        
+        # 在主窗口中选中该视频
+        try:
+            # 关闭当前窗口
+            self.window.destroy()
+            
+            # 在主窗口中定位并选中该视频
+            self.media_library.select_video_by_id(int(video_id))
+        except Exception as e:
+            messagebox.showerror("错误", f"无法定位视频: {str(e)}")
+    
+    def create_bottom_buttons(self, parent):
+        """创建底部按钮"""
+        button_frame = ttk.Frame(parent)
+        button_frame.pack(fill=tk.X)
+        
+        # 访问JAVDB页面按钮
+        if self.actor_info and self.actor_info[7]:  # profile_url
+            ttk.Button(button_frame, text="访问JAVDB页面", 
+                      command=self.open_javdb_page).pack(side=tk.LEFT, padx=(0, 10))
+        
+        # 关闭按钮
+        ttk.Button(button_frame, text="关闭", 
+                  command=self.window.destroy).pack(side=tk.RIGHT)
+    
+    def open_javdb_page(self):
+        """打开JAVDB页面"""
+        try:
+            import webbrowser
+            webbrowser.open(self.actor_info[7])
+        except Exception as e:
+            messagebox.showerror("错误", f"无法打开链接: {str(e)}")
+
+
+    def select_video_by_id(self, video_id):
+        """根据视频ID在主界面中选中对应的视频"""
+        try:
+            # 遍历树形控件中的所有项目
+            for item in self.video_tree.get_children():
+                # 获取项目的tags（包含video_id）
+                tags = self.video_tree.item(item, 'tags')
+                if tags and int(tags[0]) == video_id:
+                    # 选中该项目
+                    self.video_tree.selection_set(item)
+                    self.video_tree.focus(item)
+                    # 确保该项目可见
+                    self.video_tree.see(item)
+                    # 触发选择事件以更新详情面板
+                    self.on_video_select(None)
+                    return True
+            
+            # 如果在当前页面没找到，可能需要搜索或切换页面
+            messagebox.showinfo("提示", "视频可能不在当前显示的列表中，请尝试搜索该视频")
+            return False
+            
+        except Exception as e:
+            print(f"选择视频失败: {e}")
+            return False
+
 
 if __name__ == "__main__":
     app = MediaLibrary()
