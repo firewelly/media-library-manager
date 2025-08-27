@@ -120,6 +120,13 @@ python media_library.py
 - **智能检测 / Smart Detection**：自动检测NAS在线状态和文件存在性 / Automatically detect NAS online status and file existence
 - **跨平台支持 / Cross-platform Support**：支持macOS、Windows、Linux系统 / Support macOS, Windows, Linux systems
 
+### 演员详情页面 / Actor Detail Page
+- **演员信息展示 / Actor Information Display**：显示演员的详细信息，包括姓名、别名、头像等 / Display detailed actor information including name, aliases, avatar, etc.
+- **影片列表 / Movie List**：展示该演员参演的所有影片 / Show all movies featuring the actor
+- **在线状态显示 / Online Status Display**：实时显示每个视频文件的在线状态（在线/离线）/ Real-time display of online status for each video file (Online/Offline)
+- **双击播放 / Double-click Play**：双击影片列表中的任意影片即可播放 / Double-click any movie in the list to play
+- **文件状态检测 / File Status Detection**：自动检测视频文件是否存在于文件系统中 / Automatically detect if video files exist in the file system
+
 ### 智能功能 / Smart Features
 
 #### 智能媒体库更新 / Smart Media Library Update
@@ -259,7 +266,15 @@ Welcome to submit Issues and Pull Requests to improve this project!
 
 ## 更新日志 / Changelog
 
-### v3.2.0 (Latest / 最新版本)
+### v3.3.0 (Latest / 最新版本)
+- 🎬 **演员详情页面增强 / Actor Detail Page Enhancement**
+  - 📊 新增视频在线状态列 / Added video online status column
+  - 🔍 实时检测视频文件存在性 / Real-time detection of video file existence
+  - 💡 直观显示"在线"/"离线"状态 / Intuitive display of "Online"/"Offline" status
+  - ⚡ 优化列宽布局，提升用户体验 / Optimized column width layout for better user experience
+  - 🎯 精确的文件状态检测机制 / Precise file status detection mechanism
+
+### v3.2.0
 - 🎭 **新增演员信息清理功能 / Added Actor Information Cleanup Feature**
   - 🛠️ 在工具菜单中新增"清理演员信息"选项 / Added "Clean Actor Information" option in Tools menu
   - 📝 支持处理逗号分隔的演员名称 / Support handling comma-separated actor names
