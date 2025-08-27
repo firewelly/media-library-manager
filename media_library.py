@@ -1835,8 +1835,13 @@ class MediaLibrary:
                 
                 # 从二进制数据创建图片
                 image = Image.open(io.BytesIO(thumbnail_data))
-                # 调整大小
-                image = image.resize((150, 112), Image.Resampling.LANCZOS)
+                # 调整大小 - 兼容不同版本的PIL
+                try:
+                    # 新版本PIL
+                    image = image.resize((150, 112), Image.Resampling.LANCZOS)
+                except AttributeError:
+                    # 旧版本PIL
+                    image = image.resize((150, 112), Image.LANCZOS)
                 # 转换为Tkinter可用的格式
                 photo = ImageTk.PhotoImage(image)
                 # 显示图片
@@ -5106,6 +5111,8 @@ class MediaLibrary:
             else:
                 context_menu.add_command(label="播放 (离线)", state="disabled")
             context_menu.add_separator()
+            context_menu.add_command(label="打开所在文件夹", command=lambda: self.open_file_folder(video_info['id']))
+            context_menu.add_separator()
             context_menu.add_command(label="自动标签", command=lambda: self.auto_tag_selected_videos())
             context_menu.add_separator()
             context_menu.add_command(label="JAVDB信息获取", command=lambda: self.fetch_javdb_info(video_info['id']))
@@ -5727,6 +5734,47 @@ class MediaLibrary:
                 messagebox.showerror("错误", f"不支持的操作系统: {system}")
         except Exception as e:
             messagebox.showerror("错误", f"播放视频失败: {str(e)}")
+    
+    def open_file_folder(self, video_id):
+        """打开文件所在文件夹并选中文件"""
+        try:
+            # 从数据库获取视频信息
+            self.cursor.execute("SELECT file_path FROM videos WHERE id = ?", (video_id,))
+            result = self.cursor.fetchone()
+            if not result:
+                messagebox.showerror("错误", "找不到视频信息")
+                return
+            
+            file_path = result[0]
+            
+            # 检查文件是否存在
+            if not os.path.exists(file_path):
+                messagebox.showerror("错误", "视频文件不存在")
+                return
+            
+            # 根据操作系统使用不同的命令打开文件夹并选中文件
+            system = platform.system()
+            if system == "Darwin":  # macOS
+                subprocess.run(["open", "-R", file_path])
+            elif system == "Windows":
+                subprocess.run(["explorer", "/select,", file_path])
+            elif system == "Linux":
+                # Linux下先尝试使用nautilus，如果失败则使用默认文件管理器打开文件夹
+                folder_path = os.path.dirname(file_path)
+                try:
+                    # 尝试使用nautilus选中文件
+                    subprocess.run(["nautilus", "--select", file_path], check=True)
+                except (subprocess.CalledProcessError, FileNotFoundError):
+                    try:
+                        # 如果nautilus不可用，尝试使用dolphin
+                        subprocess.run(["dolphin", "--select", file_path], check=True)
+                    except (subprocess.CalledProcessError, FileNotFoundError):
+                        # 如果都不可用，使用默认文件管理器打开文件夹
+                        subprocess.run(["xdg-open", folder_path])
+            else:
+                messagebox.showerror("错误", f"不支持的操作系统: {system}")
+        except Exception as e:
+            messagebox.showerror("错误", f"打开文件夹失败: {str(e)}")
     
     def delete_file_from_context(self, video_id, file_path):
         """从右键菜单删除文件"""
@@ -8527,6 +8575,31 @@ class MediaLibrary:
         except Exception as e:
             messagebox.showerror("错误", f"无法打开演员详情页面: {str(e)}")
 
+    def select_video_by_id(self, video_id):
+        """根据视频ID在主界面中选中对应的视频"""
+        try:
+            # 遍历树形控件中的所有项目
+            for item in self.video_tree.get_children():
+                # 获取项目的tags（包含video_id）
+                tags = self.video_tree.item(item, 'tags')
+                if tags and int(tags[0]) == video_id:
+                    # 选中该项目
+                    self.video_tree.selection_set(item)
+                    self.video_tree.focus(item)
+                    # 确保该项目可见
+                    self.video_tree.see(item)
+                    # 触发选择事件以更新详情面板
+                    self.on_video_select(None)
+                    return True
+            
+            # 如果在当前页面没找到，可能需要搜索或切换页面
+            messagebox.showinfo("提示", "视频可能不在当前显示的列表中，请尝试搜索该视频")
+            return False
+            
+        except Exception as e:
+            print(f"选择视频失败: {e}")
+            return False
+
     def __del__(self):
         """析构函数"""
         if hasattr(self, 'conn'):
@@ -8657,28 +8730,38 @@ class ActorDetailWindow:
     def load_avatar(self):
         """加载演员头像"""
         try:
-            if self.actor_info and self.actor_info[6]:  # avatar_data
+            if self.actor_info and self.actor_info[6] is not None:  # avatar_data
                 # 从数据库加载头像
                 import io
                 from PIL import Image, ImageTk
                 
                 avatar_data = self.actor_info[6]
-                image = Image.open(io.BytesIO(avatar_data))
-                image = image.resize((150, 200), Image.Resampling.LANCZOS)
-                photo = ImageTk.PhotoImage(image)
-                
-                self.avatar_label.config(image=photo, text="")
-                self.avatar_label.image = photo  # 保持引用
-            else:
-                # 显示默认头像
-                self.avatar_label.config(text="暂无头像\n(150x200)", 
-                                        width=20, height=10, 
-                                        relief="solid", borderwidth=1)
+                if len(avatar_data) > 0:  # 确保头像数据不为空
+                    image = Image.open(io.BytesIO(avatar_data))
+                    # 兼容不同版本的PIL
+                    try:
+                        # 新版本PIL
+                        image = image.resize((150, 200), Image.Resampling.LANCZOS)
+                    except AttributeError:
+                        # 旧版本PIL
+                        image = image.resize((150, 200), Image.LANCZOS)
+                    photo = ImageTk.PhotoImage(image)
+                    
+                    self.avatar_label.config(image=photo, text="")
+                    self.avatar_label.image = photo  # 保持引用
+                    return
+            
+            # 显示默认头像（没有头像数据或数据为空）
+            self.avatar_label.config(text="暂无头像\n(150x200)", 
+                                    width=20, height=10, 
+                                    relief="solid", borderwidth=1,
+                                    background="#f0f0f0")
         except Exception as e:
             print(f"加载头像失败: {e}")
             self.avatar_label.config(text="头像加载失败\n(150x200)", 
                                    width=20, height=10, 
-                                   relief="solid", borderwidth=1)
+                                   relief="solid", borderwidth=1,
+                                   background="#ffeeee")
     
     def create_movies_section(self, parent):
         """创建影片列表区域"""
@@ -8686,7 +8769,7 @@ class ActorDetailWindow:
         movies_frame.pack(fill=tk.BOTH, expand=True, pady=(0, 10))
         
         # 创建Treeview
-        columns = ('title', 'code', 'release_date', 'file_name')
+        columns = ('title', 'code', 'release_date', 'file_name', 'online_status')
         self.movies_tree = ttk.Treeview(movies_frame, columns=columns, show='headings')
         
         # 设置列标题
@@ -8694,12 +8777,14 @@ class ActorDetailWindow:
         self.movies_tree.heading('code', text='番号')
         self.movies_tree.heading('release_date', text='发行日期')
         self.movies_tree.heading('file_name', text='文件名')
+        self.movies_tree.heading('online_status', text='是否在线')
         
         # 设置列宽
-        self.movies_tree.column('title', width=250)
+        self.movies_tree.column('title', width=220)
         self.movies_tree.column('code', width=100)
-        self.movies_tree.column('release_date', width=100)
-        self.movies_tree.column('file_name', width=300)
+        self.movies_tree.column('release_date', width=80)
+        self.movies_tree.column('file_name', width=250)
+        self.movies_tree.column('online_status', width=30)
         
         # 添加滚动条
         scrollbar = ttk.Scrollbar(movies_frame, orient=tk.VERTICAL, command=self.movies_tree.yview)
@@ -8712,30 +8797,65 @@ class ActorDetailWindow:
         # 填充数据
         for movie in self.actor_movies:
             video_id, file_name, file_path, javdb_title, javdb_code, release_date, cover_url = movie
+            
+            # 检查视频是否在线
+            is_online = self.media_library.is_video_online(int(video_id))
+            online_status = "在线" if is_online else "离线"
+            
             self.movies_tree.insert('', 'end', values=(
                 javdb_title or file_name,
                 javdb_code or "未知",
                 release_date or "未知",
-                file_name
+                file_name,
+                online_status
             ), tags=(video_id,))
         
         # 绑定双击事件
         self.movies_tree.bind('<Double-1>', self.on_movie_double_click)
     
     def on_movie_double_click(self, event):
-        """影片双击事件"""
+        """影片双击事件 - 直接播放视频"""
         item = self.movies_tree.selection()[0]
         video_id = self.movies_tree.item(item, 'tags')[0]
         
-        # 在主窗口中选中该视频
+        # 直接播放视频
         try:
-            # 关闭当前窗口
-            self.window.destroy()
+            import platform
+            import subprocess
+            import os
             
-            # 在主窗口中定位并选中该视频
-            self.media_library.select_video_by_id(int(video_id))
+            # 从数据库获取视频信息
+            cursor = self.media_library.cursor
+            cursor.execute("SELECT file_path FROM videos WHERE id = ?", (video_id,))
+            result = cursor.fetchone()
+            if not result:
+                messagebox.showerror("错误", "找不到视频信息")
+                return
+            
+            file_path = result[0]
+            is_nas_online = self.media_library.is_video_online(int(video_id))
+            
+            if not is_nas_online:
+                messagebox.showwarning("警告", "文件离线，无法播放视频")
+                return
+                
+            if not os.path.exists(file_path):
+                messagebox.showerror("错误", "视频文件不存在")
+                return
+                
+            # 跨平台播放
+            system = platform.system()
+            if system == "Darwin":  # macOS
+                subprocess.run(["open", file_path])
+            elif system == "Windows":
+                os.startfile(file_path)
+            elif system == "Linux":
+                subprocess.run(["xdg-open", file_path])
+            else:
+                messagebox.showerror("错误", f"不支持的操作系统: {system}")
+                
         except Exception as e:
-            messagebox.showerror("错误", f"无法定位视频: {str(e)}")
+            messagebox.showerror("错误", f"播放视频失败: {str(e)}")
     
     def create_bottom_buttons(self, parent):
         """创建底部按钮"""
@@ -8758,32 +8878,6 @@ class ActorDetailWindow:
             webbrowser.open(self.actor_info[7])
         except Exception as e:
             messagebox.showerror("错误", f"无法打开链接: {str(e)}")
-
-
-    def select_video_by_id(self, video_id):
-        """根据视频ID在主界面中选中对应的视频"""
-        try:
-            # 遍历树形控件中的所有项目
-            for item in self.video_tree.get_children():
-                # 获取项目的tags（包含video_id）
-                tags = self.video_tree.item(item, 'tags')
-                if tags and int(tags[0]) == video_id:
-                    # 选中该项目
-                    self.video_tree.selection_set(item)
-                    self.video_tree.focus(item)
-                    # 确保该项目可见
-                    self.video_tree.see(item)
-                    # 触发选择事件以更新详情面板
-                    self.on_video_select(None)
-                    return True
-            
-            # 如果在当前页面没找到，可能需要搜索或切换页面
-            messagebox.showinfo("提示", "视频可能不在当前显示的列表中，请尝试搜索该视频")
-            return False
-            
-        except Exception as e:
-            print(f"选择视频失败: {e}")
-            return False
 
 
 if __name__ == "__main__":
