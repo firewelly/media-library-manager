@@ -140,6 +140,15 @@ python media_library.py
 - 批量计算MD5哈希 / Batch calculate MD5 hashes
 - 批量导入元数据 / Batch import metadata
 
+#### 演员信息清理 / Actor Information Cleanup
+- 🎭 **清理演员信息 / Clean Actor Information** - 通过工具菜单一键清理重复演员记录 / One-click cleanup of duplicate actor records via Tools menu
+- 📝 **处理逗号分隔名称 / Handle Comma-separated Names** - 自动分离逗号分隔的演员名称 / Automatically separate comma-separated actor names
+- 🔗 **基于URL合并 / URL-based Merging** - 根据演员URL合并重复记录 / Merge duplicate records based on actor URLs
+- 👤 **基于名称合并 / Name-based Merging** - 根据演员名称合并重复记录 / Merge duplicate records based on actor names
+- 🔄 **完整清理流程 / Complete Cleanup Process** - 执行所有清理步骤的完整流程 / Complete process executing all cleanup steps
+- 📊 **实时进度显示 / Real-time Progress Display** - 清理过程中显示详细进度和日志 / Display detailed progress and logs during cleanup
+- ✅ **安全确认机制 / Safe Confirmation Mechanism** - 操作前显示预览和确认对话框 / Show preview and confirmation dialogs before operations
+
 ## 配置说明 / Configuration
 
 ### GUI配置 / GUI Configuration
@@ -233,6 +242,8 @@ media-library/
 - `smart_remove_duplicates()` - 智能去重 / Smart deduplication
 - `batch_calculate_md5()` - 批量计算MD5 / Batch calculate MD5
 - `calculate_file_hash()` - 计算文件哈希 / Calculate file hash
+- `clean_actor_data()` - 清理演员信息 / Clean actor information
+- `_execute_actor_cleaning()` - 执行演员清理脚本 / Execute actor cleaning script
 
 ## 许可证 / License
 
@@ -248,7 +259,20 @@ Welcome to submit Issues and Pull Requests to improve this project!
 
 ## 更新日志 / Changelog
 
-### v3.1.0 (Latest / 最新版本)
+### v3.2.0 (Latest / 最新版本)
+- 🎭 **新增演员信息清理功能 / Added Actor Information Cleanup Feature**
+  - 🛠️ 在工具菜单中新增"清理演员信息"选项 / Added "Clean Actor Information" option in Tools menu
+  - 📝 支持处理逗号分隔的演员名称 / Support handling comma-separated actor names
+  - 🔗 基于URL合并重复演员记录 / Merge duplicate actor records based on URLs
+  - 👤 基于名称合并重复演员记录 / Merge duplicate actor records based on names
+  - 🔄 提供完整清理流程选项 / Provide complete cleanup process option
+  - 📊 实时显示清理进度和详细日志 / Real-time display of cleanup progress and detailed logs
+  - ✅ 操作前确认机制确保数据安全 / Confirmation mechanism before operations to ensure data safety
+- 📚 **完善文档 / Enhanced Documentation**
+  - 📖 创建详细的演员记录清理合并指南 / Created detailed actor record cleanup and merge guide
+  - 🔧 提供完整的使用说明和故障排除 / Provide complete usage instructions and troubleshooting
+
+### v3.1.0
 - 🎯 **重大修复：双击播放功能 / Major Fix: Double-click Play Feature**
   - 🔧 彻底重构事件处理机制 / Completely refactored event handling mechanism
   - 🎮 新增统一事件处理器 / Added unified event handlers
