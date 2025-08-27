@@ -8815,7 +8815,11 @@ class ActorDetailWindow:
     
     def on_movie_double_click(self, event):
         """影片双击事件 - 直接播放视频"""
-        item = self.movies_tree.selection()[0]
+        selection = self.movies_tree.selection()
+        if not selection:
+            return  # 没有选中任何项目
+        
+        item = selection[0]
         video_id = self.movies_tree.item(item, 'tags')[0]
         
         # 直接播放视频
