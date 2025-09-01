@@ -1683,27 +1683,22 @@ class MediaLibrary:
         
         cmd = [ffmpeg_cmd]
         
-        # 添加硬件加速参数
-        if hwaccel == "videotoolbox":
-            cmd.extend(["-hwaccel", "videotoolbox"])
-        elif hwaccel == "opencl":
-            cmd.extend(["-hwaccel", "opencl"])
-            
-        # 添加输入和处理参数
-        cmd.extend([
-            "-i", input_path,
-            "-ss", seek_time,
-            "-vframes", "1"
-        ])
+        # 添加输入参数
+        cmd.extend(["-i", input_path])
         
-        # 根据硬件加速选择合适的缩放滤镜
-        if hwaccel == "videotoolbox":
-            cmd.extend(["-vf", "scale_vt=200:150"])
-        elif hwaccel == "opencl":
-            cmd.extend(["-vf", "scale_opencl=200:150"])
-        else:
-            cmd.extend(["-vf", "scale=200:150"])
-            
+        # 添加时间定位
+        cmd.extend(["-ss", seek_time])
+        
+        # 添加帧数限制
+        cmd.extend(["-vframes", "1"])
+        
+        # 不进行缩放，保持原始分辨率
+        # 移除固定尺寸缩放以保持视频原始比例
+        
+        # 添加输出格式参数
+        cmd.extend(["-f", "image2"])
+        
+        # 覆盖输出文件
         cmd.extend(["-y", output_path])
         
         return cmd
@@ -1791,7 +1786,14 @@ class MediaLibrary:
                 os.unlink(temp_path)
                 
             else:
-                messagebox.showerror("错误", "生成封面失败")
+                # 显示详细的FFmpeg错误信息
+                error_msg = "生成封面失败"
+                if result.stderr:
+                    stderr_text = result.stderr.decode('utf-8', errors='ignore')
+                    error_msg += f"\n错误详情: {stderr_text.strip()}"
+                if result.returncode != 0:
+                    error_msg += f"\n返回码: {result.returncode}"
+                messagebox.showerror("错误", error_msg)
                 
         except Exception as e:
             messagebox.showerror("错误", f"生成封面失败: {str(e)}")
@@ -1835,13 +1837,28 @@ class MediaLibrary:
                 
                 # 从二进制数据创建图片
                 image = Image.open(io.BytesIO(thumbnail_data))
+                
+                # 按比例缩放，保持原始宽高比
+                # 设置最大显示尺寸
+                max_width = 200
+                max_height = 150
+                
+                # 计算缩放比例
+                width_ratio = max_width / image.width
+                height_ratio = max_height / image.height
+                scale_ratio = min(width_ratio, height_ratio)
+                
+                # 计算新尺寸
+                new_width = int(image.width * scale_ratio)
+                new_height = int(image.height * scale_ratio)
+                
                 # 调整大小 - 兼容不同版本的PIL
                 try:
                     # 新版本PIL
-                    image = image.resize((150, 112), Image.Resampling.LANCZOS)
+                    image = image.resize((new_width, new_height), Image.Resampling.LANCZOS)
                 except AttributeError:
                     # 旧版本PIL
-                    image = image.resize((150, 112), Image.LANCZOS)
+                    image = image.resize((new_width, new_height), Image.LANCZOS)
                 # 转换为Tkinter可用的格式
                 photo = ImageTk.PhotoImage(image)
                 # 显示图片
@@ -4215,22 +4232,32 @@ class MediaLibrary:
             
     def batch_generate_thumbnails(self):
         """批量生成封面"""
-        # 确认对话框
-        result = messagebox.askyesnocancel(
-            "批量生成封面",
-            "此操作将：\n\n" +
-            "✓ 为所有没有封面的视频生成封面\n" +
-            "✓ 跳过已有封面的视频\n" +
-            "✓ 跳过NAS离线的视频\n" +
-            "✓ 需要FFmpeg支持\n\n" +
-            "是否继续？\n\n" +
-            "是(Yes) - 生成所有缺失封面\n" +
-            "否(No) - 重新生成所有封面\n" +
-            "取消(Cancel) - 取消操作"
-        )
+        # 检查是否从右键菜单调用
+        from_context = hasattr(self, 'selected_video_ids_for_thumbnail') and self.selected_video_ids_for_thumbnail
         
-        if result is None:  # 取消
-            return
+        if not from_context:
+            # 确认对话框
+            result = messagebox.askyesnocancel(
+                "批量生成封面",
+                "此操作将：\n\n" +
+                "✓ 为所有没有封面的视频生成封面\n" +
+                "✓ 跳过已有封面的视频\n" +
+                "✓ 跳过NAS离线的视频\n" +
+                "✓ 需要FFmpeg支持\n\n" +
+                "是否继续？\n\n" +
+                "是(Yes) - 生成所有缺失封面\n" +
+                "否(No) - 重新生成所有封面\n" +
+                "取消(Cancel) - 取消操作"
+            )
+            
+            if result is None:  # 取消
+                return
+            
+            # 设置生成模式
+            self.generate_missing_only = result
+        else:
+            # 从右键菜单调用，使用预设的生成模式
+            result = getattr(self, 'generate_missing_only', True)
             
         try:
             # 获取FFmpeg命令
@@ -4309,24 +4336,166 @@ class MediaLibrary:
                     log_message("开始批量生成封面...")
                     
                     # 获取需要生成封面的视频
-                    if result:  # 只生成缺失的封面
-                        query = """
-                            SELECT id, file_path, file_name, is_nas_online, thumbnail_data 
-                            FROM videos 
-                            WHERE (thumbnail_data IS NULL OR thumbnail_data = '')
-                            ORDER BY file_name
-                        """
-                        log_message("模式：仅生成缺失封面")
-                    else:  # 重新生成所有封面
-                        query = """
-                            SELECT id, file_path, file_name, is_nas_online, thumbnail_data 
-                            FROM videos 
-                            ORDER BY file_name
-                        """
-                        log_message("模式：重新生成所有封面")
+                    if from_context:
+                        # 从右键菜单调用，使用选中的视频ID列表
+                        video_ids_str = ','.join(map(str, self.selected_video_ids_for_thumbnail))
+                        if result:  # 只生成缺失的封面
+                            query = f"""
+                                SELECT id, file_path, file_name, is_nas_online, thumbnail_data 
+                                FROM videos 
+                                WHERE id IN ({video_ids_str})
+                                AND (thumbnail_data IS NULL OR thumbnail_data = '') 
+                                AND is_nas_online = 1
+                                AND (LOWER(file_name) LIKE '%.mp4' OR LOWER(file_name) LIKE '%.avi' 
+                                     OR LOWER(file_name) LIKE '%.mkv' OR LOWER(file_name) LIKE '%.rmvb')
+                                ORDER BY file_name
+                            """
+                            log_message(f"模式：仅生成缺失封面（选中的 {len(self.selected_video_ids_for_thumbnail)} 个视频）")
+                        else:  # 重新生成所有封面
+                            query = f"""
+                                SELECT id, file_path, file_name, is_nas_online, thumbnail_data 
+                                FROM videos 
+                                WHERE id IN ({video_ids_str})
+                                AND is_nas_online = 1
+                                AND (LOWER(file_name) LIKE '%.mp4' OR LOWER(file_name) LIKE '%.avi' 
+                                     OR LOWER(file_name) LIKE '%.mkv' OR LOWER(file_name) LIKE '%.rmvb')
+                                ORDER BY file_name
+                            """
+                            log_message(f"模式：重新生成所有封面（选中的 {len(self.selected_video_ids_for_thumbnail)} 个视频）")
                         
-                    self.cursor.execute(query)
-                    videos = self.cursor.fetchall()
+                        # 执行查询
+                        self.cursor.execute(query)
+                        videos = self.cursor.fetchall()
+                    else:
+                        # 从菜单调用，处理当前筛选条件下的视频
+                        # 获取当前筛选条件
+                        conditions = []
+                        query_params = []
+                        
+                        # 检查是否在筛选模式，如果是则添加搜索条件
+                        if getattr(self, 'is_filtering', False):
+                            # 标题搜索条件
+                            title_search_text = self.title_search_var.get().strip()
+                            if title_search_text:
+                                conditions.append("(v.title LIKE ? OR v.file_name LIKE ? OR j.javdb_title LIKE ?)")
+                                title_search_param = f"%{title_search_text}%"
+                                query_params.extend([title_search_param, title_search_param, title_search_param])
+                                
+                            # 标签搜索条件
+                            tag_search_text = self.tag_search_var.get().strip()
+                            if tag_search_text:
+                                conditions.append("(v.tags LIKE ? OR EXISTS (SELECT 1 FROM javdb_tags jt JOIN tags t ON jt.tag_id = t.id WHERE jt.javdb_info_id = j.id AND t.name LIKE ?))")
+                                tag_search_param = f"%{tag_search_text}%"
+                                query_params.extend([tag_search_param, tag_search_param])
+                                
+                            # 演员搜索条件
+                            actor_search_text = self.actor_search_var.get().strip()
+                            if actor_search_text:
+                                conditions.append("EXISTS (SELECT 1 FROM video_actors va JOIN actors a ON va.actor_id = a.id WHERE va.video_id = v.id AND a.name LIKE ?)")
+                                actor_search_param = f"%{actor_search_text}%"
+                                query_params.append(actor_search_param)
+                                
+                            # 星级筛选
+                            star_filter = self.star_filter.get()
+                            if star_filter > 0:
+                                conditions.append("v.stars = ?")
+                                query_params.append(star_filter)
+                                
+                            # 标签筛选
+                            selected_tags = [self.tags_listbox.get(i) for i in self.tags_listbox.curselection()]
+                            if selected_tags:
+                                tag_conditions = []
+                                for tag in selected_tags:
+                                    tag_conditions.append("(v.tags LIKE ? OR EXISTS (SELECT 1 FROM javdb_tags jt JOIN tags t ON jt.tag_id = t.id WHERE jt.javdb_info_id = j.id AND t.name LIKE ?))")
+                                    query_params.extend([f"%{tag}%", f"%{tag}%"])
+                                if tag_conditions:
+                                    conditions.append(f"({' OR '.join(tag_conditions)})")
+                                    
+                            # NAS状态筛选
+                            nas_filter = self.nas_filter.get()
+                            if nas_filter == "online":
+                                self.cursor.execute("SELECT DISTINCT source_folder FROM videos WHERE source_folder IS NOT NULL")
+                                all_video_folders = [row[0] for row in self.cursor.fetchall()]
+                                
+                                online_video_folders = []
+                                for folder_path in all_video_folders:
+                                    if os.path.exists(folder_path) and os.path.isdir(folder_path):
+                                        online_video_folders.append(folder_path)
+                                
+                                if online_video_folders:
+                                    folder_conditions = []
+                                    for folder_path in online_video_folders:
+                                        folder_conditions.append("v.source_folder LIKE ?")
+                                        query_params.append(f"{folder_path}%")
+                                    conditions.append(f"({' OR '.join(folder_conditions)})")
+                                else:
+                                    conditions.append("1 = 0")
+                            elif nas_filter == "offline":
+                                self.cursor.execute("SELECT DISTINCT source_folder FROM videos WHERE source_folder IS NOT NULL")
+                                all_video_folders = [row[0] for row in self.cursor.fetchall()]
+                                
+                                offline_video_folders = []
+                                for folder_path in all_video_folders:
+                                    if not (os.path.exists(folder_path) and os.path.isdir(folder_path)):
+                                        offline_video_folders.append(folder_path)
+                                
+                                if offline_video_folders:
+                                    folder_conditions = []
+                                    for folder_path in offline_video_folders:
+                                        folder_conditions.append("v.source_folder LIKE ?")
+                                        query_params.append(f"{folder_path}%")
+                                    conditions.append(f"({' OR '.join(folder_conditions)})")
+                                else:
+                                    conditions.append("1 = 0")
+                                    
+                            # 文件夹来源筛选
+                            selected_folder_indices = self.folder_listbox.curselection()
+                            if selected_folder_indices and hasattr(self, 'folder_path_mapping'):
+                                selected_folder = self.folder_listbox.get(selected_folder_indices[0])
+                                if selected_folder != "全部" and selected_folder in self.folder_path_mapping:
+                                    folder_path = self.folder_path_mapping[selected_folder]
+                                    if folder_path:
+                                        conditions.append("v.source_folder LIKE ?")
+                                        query_params.append(f"{folder_path}%")
+                        
+                        # 添加基本条件：在线状态和文件格式
+                        conditions.append("v.is_nas_online = 1")
+                        conditions.append("(LOWER(v.file_name) LIKE '%.mp4' OR LOWER(v.file_name) LIKE '%.avi' OR LOWER(v.file_name) LIKE '%.mkv' OR LOWER(v.file_name) LIKE '%.rmvb')")
+                        
+                        # 添加仅显示在线内容筛选
+                        if hasattr(self, 'show_online_only') and self.show_online_only.get():
+                            self.cursor.execute("SELECT folder_path FROM folders WHERE is_active = 1")
+                            all_folders = [row[0] for row in self.cursor.fetchall()]
+                            
+                            online_folders = []
+                            for folder_path in all_folders:
+                                if os.path.exists(folder_path) and os.path.isdir(folder_path):
+                                    online_folders.append(folder_path)
+                            
+                            if online_folders:
+                                folder_conditions = []
+                                for folder_path in online_folders:
+                                    folder_conditions.append("v.source_folder LIKE ?")
+                                    query_params.append(f"{folder_path}%")
+                                conditions.append(f"({' OR '.join(folder_conditions)})")
+                            else:
+                                conditions.append("1 = 0")
+                        else:
+                            conditions.append("EXISTS (SELECT 1 FROM folders f WHERE f.is_active = 1 AND v.source_folder LIKE f.folder_path || '%')")
+                        
+                        # 根据生成模式添加额外条件
+                        if result:  # 只生成缺失的封面
+                            conditions.append("(v.thumbnail_data IS NULL OR v.thumbnail_data = '')")
+                            log_message("模式：仅生成缺失封面（当前筛选条件）")
+                        else:  # 重新生成所有封面
+                            log_message("模式：重新生成所有封面（当前筛选条件）")
+                        
+                        # 构建最终查询
+                        where_clause = f"WHERE {' AND '.join(conditions)}"
+                        query = f"SELECT v.id, v.file_path, v.file_name, v.is_nas_online, v.thumbnail_data FROM videos v LEFT JOIN javdb_info j ON v.id = j.video_id {where_clause} ORDER BY v.file_name"
+                        
+                        self.cursor.execute(query, query_params)
+                        videos = self.cursor.fetchall()
                     
                     total_videos = len(videos)
                     if total_videos == 0:
@@ -4359,9 +4528,19 @@ class MediaLibrary:
                         video_id, file_path, file_name, is_nas_online, thumbnail_data = video
                         
                         try:
-                            # 检查文件是否存在
+                            # 检查文件是否存在和是否在线
                             if not os.path.exists(file_path):
                                 log_message(f"跳过：文件不存在 - {file_name}")
+                                skipped_count += 1
+                                processed += 1
+                                progress_bar.config(value=processed)
+                                update_stats(total_videos, processed, success_count, failed_count, skipped_count)
+                                continue
+                                
+                            # 检查是否为支持的视频格式
+                            file_ext = os.path.splitext(file_name)[1].lower()
+                            if file_ext not in ['.mp4', '.avi', '.mkv', '.rmvb']:
+                                log_message(f"跳过：不支持的格式 - {file_name}")
                                 skipped_count += 1
                                 processed += 1
                                 progress_bar.config(value=processed)
@@ -4417,7 +4596,14 @@ class MediaLibrary:
                                     pass
                                     
                             else:
-                                log_message(f"失败：{file_name} - FFmpeg处理失败")
+                                # 显示详细的FFmpeg错误信息
+                                error_msg = f"失败：{file_name} - FFmpeg处理失败"
+                                if result_process.stderr:
+                                    stderr_text = result_process.stderr.decode('utf-8', errors='ignore')
+                                    error_msg += f" (错误: {stderr_text.strip()})"
+                                if result_process.returncode != 0:
+                                    error_msg += f" (返回码: {result_process.returncode})"
+                                log_message(error_msg)
                                 failed_count += 1
                                 
                         except subprocess.TimeoutExpired:
@@ -4441,6 +4627,12 @@ class MediaLibrary:
                         # 刷新当前视频的封面显示
                         if self.current_video:
                             self.load_video_details(self.current_video[0])
+                        
+                        # 清理临时变量
+                        if hasattr(self, 'selected_video_ids_for_thumbnail'):
+                            delattr(self, 'selected_video_ids_for_thumbnail')
+                        if hasattr(self, 'generate_missing_only'):
+                            delattr(self, 'generate_missing_only')
                             
                         cancel_button.config(text="完成", command=progress_window.destroy)
                         pause_button.config(state="disabled")
@@ -5123,6 +5315,12 @@ class MediaLibrary:
             context_menu.add_separator()
             context_menu.add_command(label="导入NFO", command=lambda: self.import_nfo_from_context(video_info['id'], video_info['path']))
             context_menu.add_separator()
+            # 生成封面选项 - 根据在线状态决定是否启用
+            if video_info['online']:
+                context_menu.add_command(label="生成封面", command=lambda: self.generate_thumbnail_from_context(video_info['id']))
+            else:
+                context_menu.add_command(label="生成封面 (离线)", state="disabled")
+            context_menu.add_separator()
             context_menu.add_command(label="删除文件", command=lambda: self.delete_file_from_context(video_info['id'], video_info['path']))
             
             # 添加移动到子菜单
@@ -5151,6 +5349,13 @@ class MediaLibrary:
             context_menu.add_separator()
             context_menu.add_command(label=f"批量清理文件名 ({len(selected_videos)}个文件)", 
                                    command=lambda: self.batch_clean_filename_selected_videos())
+            context_menu.add_separator()
+            # 批量生成封面选项 - 根据在线文件数量决定是否启用
+            if online_count > 0:
+                context_menu.add_command(label=f"批量生成封面 ({online_count}个在线文件)", 
+                                       command=lambda: self.batch_generate_thumbnails_from_context())
+            else:
+                context_menu.add_command(label=f"批量生成封面 (无在线文件)", state="disabled")
             context_menu.add_separator()
             context_menu.add_command(label=f"批量删除文件 ({len(selected_videos)}个文件)", 
                                    command=lambda: self.batch_delete_selected_videos())
@@ -8600,6 +8805,74 @@ class MediaLibrary:
             print(f"选择视频失败: {e}")
             return False
 
+    def generate_thumbnail_from_context(self, video_id):
+        """从右键菜单生成单个视频封面"""
+        try:
+            # 获取视频信息
+            self.cursor.execute("SELECT * FROM videos WHERE id = ?", (video_id,))
+            video_data = self.cursor.fetchone()
+            
+            if not video_data:
+                messagebox.showerror("错误", "视频信息不存在")
+                return
+            
+            # 设置当前视频
+            self.current_video = video_data
+            
+            # 调用现有的生成封面方法
+            self.generate_thumbnail()
+            
+        except Exception as e:
+            messagebox.showerror("错误", f"生成封面失败: {str(e)}")
+    
+    def batch_generate_thumbnails_from_context(self):
+        """从右键菜单批量生成选中视频的封面"""
+        try:
+            # 获取选中的视频项目
+            selected_items = self.video_tree.selection()
+            if not selected_items:
+                messagebox.showwarning("警告", "请先选择要生成封面的视频文件")
+                return
+            
+            # 获取选中的在线视频ID列表
+            selected_video_ids = []
+            for item in selected_items:
+                try:
+                    video_id = self.video_tree.item(item)['tags'][0]
+                    # 检查视频是否在线
+                    if self.is_video_online(video_id):
+                        selected_video_ids.append(video_id)
+                except (IndexError, TypeError):
+                    continue
+            
+            if not selected_video_ids:
+                messagebox.showwarning("警告", "没有选中的在线视频文件")
+                return
+            
+            # 显示选择对话框：生成缺失封面或重新生成所有封面
+            choice = messagebox.askyesnocancel(
+                "生成封面选项",
+                f"选中了 {len(selected_video_ids)} 个在线视频文件\n\n" +
+                "是：仅生成缺失的封面\n" +
+                "否：重新生成所有封面\n" +
+                "取消：取消操作"
+            )
+            
+            if choice is None:  # 用户点击了取消
+                return
+            
+            # 设置生成模式
+            self.generate_missing_only = choice
+            
+            # 临时保存选中的视频ID列表
+            self.selected_video_ids_for_thumbnail = selected_video_ids
+            
+            # 调用批量生成封面方法
+            self.batch_generate_thumbnails()
+            
+        except Exception as e:
+            messagebox.showerror("错误", f"批量生成封面失败: {str(e)}")
+
     def __del__(self):
         """析构函数"""
         if hasattr(self, 'conn'):
@@ -8882,8 +9155,7 @@ class ActorDetailWindow:
             webbrowser.open(self.actor_info[7])
         except Exception as e:
             messagebox.showerror("错误", f"无法打开链接: {str(e)}")
-
-
+    
 if __name__ == "__main__":
     app = MediaLibrary()
     app.run()
