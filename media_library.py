@@ -3279,7 +3279,7 @@ class MediaLibrary:
             # 创建去重选择窗口
             dup_window = tk.Toplevel(self.root)
             dup_window.title("智能去重 - 优化版本")
-            dup_window.geometry("700x600")
+            dup_window.geometry("750x750")  # 增加窗口高度以容纳文件夹选择界面
             dup_window.transient(self.root)
             dup_window.grab_set()
             
@@ -3293,6 +3293,66 @@ class MediaLibrary:
             
             ttk.Label(stats_frame, text=f"发现 {total_groups} 组重复文件，共 {total_files} 个文件").pack(pady=5)
             ttk.Label(stats_frame, text=f"预计可释放 {total_files - total_groups} 个重复记录").pack(pady=5)
+            
+            # 文件夹选择
+            folder_frame = ttk.LabelFrame(main_frame, text="选择去重范围")
+            folder_frame.pack(fill=tk.X, pady=(0, 10))
+            
+            # 获取所有不同的源文件夹
+            self.cursor.execute("""
+                SELECT DISTINCT source_folder 
+                FROM videos 
+                WHERE md5_hash IS NOT NULL AND md5_hash != '' AND source_folder IS NOT NULL
+                ORDER BY source_folder
+            """)
+            all_folders = [row[0] for row in self.cursor.fetchall() if row[0]]
+            
+            # 创建文件夹选择界面
+            folder_select_frame = ttk.Frame(folder_frame)
+            folder_select_frame.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
+            
+            # 全选/全不选按钮
+            select_all_frame = ttk.Frame(folder_select_frame)
+            select_all_frame.pack(fill=tk.X, pady=(0, 5))
+            
+            folder_vars = {}
+            
+            def select_all_folders():
+                for var in folder_vars.values():
+                    var.set(True)
+            
+            def deselect_all_folders():
+                for var in folder_vars.values():
+                    var.set(False)
+            
+            ttk.Button(select_all_frame, text="全选", command=select_all_folders).pack(side=tk.LEFT, padx=(0, 5))
+            ttk.Button(select_all_frame, text="全不选", command=deselect_all_folders).pack(side=tk.LEFT)
+            
+            # 文件夹列表（带滚动条）
+            folder_list_frame = ttk.Frame(folder_select_frame)
+            folder_list_frame.pack(fill=tk.BOTH, expand=True)
+            
+            # 创建Canvas和Scrollbar用于滚动
+            canvas = tk.Canvas(folder_list_frame, height=120)
+            scrollbar_folder = ttk.Scrollbar(folder_list_frame, orient="vertical", command=canvas.yview)
+            scrollable_frame = ttk.Frame(canvas)
+            
+            scrollable_frame.bind(
+                "<Configure>",
+                lambda e: canvas.configure(scrollregion=canvas.bbox("all"))
+            )
+            
+            canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
+            canvas.configure(yscrollcommand=scrollbar_folder.set)
+            
+            # 添加文件夹复选框
+            for folder in all_folders:
+                var = tk.BooleanVar(value=True)  # 默认全选
+                folder_vars[folder] = var
+                ttk.Checkbutton(scrollable_frame, text=folder, variable=var).pack(anchor=tk.W, padx=5, pady=1)
+            
+            canvas.pack(side="left", fill="both", expand=True)
+            scrollbar_folder.pack(side="right", fill="y")
             
             # 策略选择
             strategy_frame = ttk.LabelFrame(main_frame, text="保留策略")
@@ -3352,11 +3412,22 @@ class MediaLibrary:
                     removed_count = 0
                     processed_groups = 0
                     
+                    # 获取选中的文件夹
+                    selected_folders = [folder for folder, var in folder_vars.items() if var.get()]
+                    
+                    if not selected_folders:
+                        log_message("错误：请至少选择一个文件夹进行去重")
+                        return
+                    
                     log_message(f"开始智能去重，策略：{strategy}")
+                    log_message(f"选择的文件夹范围：{', '.join(selected_folders)}")
                     log_message(f"总共需要处理 {total_groups} 组重复文件")
                     
-                    # 获取详细的重复文件信息
-                    self.cursor.execute("""
+                    # 构建文件夹过滤条件
+                    folder_placeholders = ','.join(['?' for _ in selected_folders])
+                    
+                    # 获取详细的重复文件信息（仅限选中的文件夹）
+                    self.cursor.execute(f"""
                         SELECT md5_hash, COUNT(*) as count, 
                                GROUP_CONCAT(id) as ids, 
                                GROUP_CONCAT(file_path) as paths,
@@ -3365,11 +3436,12 @@ class MediaLibrary:
                                GROUP_CONCAT(source_folder) as source_folders,
                                GROUP_CONCAT(file_size) as file_sizes
                         FROM videos 
-                        WHERE md5_hash IS NOT NULL AND md5_hash != ''
+                        WHERE md5_hash IS NOT NULL AND md5_hash != '' 
+                              AND source_folder IN ({folder_placeholders})
                         GROUP BY md5_hash 
                         HAVING count > 1
                         ORDER BY count DESC
-                    """)
+                    """, selected_folders)
                     
                     duplicates = self.cursor.fetchall()
                     
@@ -3386,6 +3458,36 @@ class MediaLibrary:
                         time_list = created_times.split(',') if created_times else []
                         folder_list = source_folders.split(',') if source_folders else []
                         size_list = file_sizes.split(',') if file_sizes else []
+                        
+                        # 过滤出只在选中文件夹中的文件
+                        filtered_indices = []
+                        for i, folder in enumerate(folder_list):
+                            if folder in selected_folders:
+                                filtered_indices.append(i)
+                        
+                        # 如果没有文件在选中的文件夹中，跳过这组
+                        if not filtered_indices:
+                            continue
+                        
+                        # 重新构建只包含选中文件夹文件的列表
+                        filtered_id_list = [id_list[i] for i in filtered_indices]
+                        filtered_path_list = [path_list[i] for i in filtered_indices]
+                        filtered_name_list = [name_list[i] if i < len(name_list) else f"文件{i+1}" for i in filtered_indices]
+                        filtered_time_list = [time_list[i] if i < len(time_list) else None for i in filtered_indices]
+                        filtered_folder_list = [folder_list[i] for i in filtered_indices]
+                        filtered_size_list = [size_list[i] if i < len(size_list) else '0' for i in filtered_indices]
+                        
+                        # 如果过滤后只有一个文件，跳过（没有重复）
+                        if len(filtered_indices) <= 1:
+                            continue
+                        
+                        # 使用过滤后的列表
+                        id_list = filtered_id_list
+                        path_list = filtered_path_list
+                        name_list = filtered_name_list
+                        time_list = filtered_time_list
+                        folder_list = filtered_folder_list
+                        size_list = filtered_size_list
                         
                         keep_index = 0  # 默认保留第一个
                         
