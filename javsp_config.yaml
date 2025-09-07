@@ -1,0 +1,104 @@
+# JavSP爬虫系统配置文件
+# JavSP Crawler System Configuration
+
+# 网络配置 / Network Configuration
+network:
+  # SOCKS5代理设置 / SOCKS5 Proxy Settings
+  proxy:
+    enabled: true
+    host: "127.0.0.1"
+    port: 1080
+    type: "socks5"
+  
+  # 请求超时设置（秒） / Request Timeout Settings (seconds)
+  timeout: 30
+  
+  # 重试设置 / Retry Settings
+  retry:
+    max_attempts: 3
+    delay: 1.0  # 重试间隔（秒） / Retry delay (seconds)
+  
+  # User-Agent设置 / User-Agent Settings
+  user_agent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+
+# 爬虫配置 / Crawler Configuration
+crawlers:
+  # 启用的爬虫列表 / Enabled Crawlers List
+  enabled:
+    - "javbus"
+    - "javlib"
+    - "avsox"
+    - "fc2"
+  
+  # 爬虫优先级（数字越小优先级越高） / Crawler Priority (lower number = higher priority)
+  priority:
+    javbus: 1
+    javlib: 2
+    avsox: 3
+    fc2: 4
+  
+  # 并行搜索设置 / Parallel Search Settings
+  parallel:
+    enabled: true
+    max_workers: 4  # 最大并发数 / Maximum concurrent workers
+    timeout: 60     # 并行搜索超时（秒） / Parallel search timeout (seconds)
+
+# 数据处理配置 / Data Processing Configuration
+data:
+  # 标题清理设置 / Title Cleaning Settings
+  title_cleaning:
+    enabled: true
+    # 需要移除的关键词 / Keywords to remove
+    remove_keywords:
+      - "官方App下載"
+      - "官方App下载"
+      - "官方APP下载"
+      - "官方应用下载"
+      - "Download Official App"
+      - "Official App Download"
+  
+  # 数据验证设置 / Data Validation Settings
+  validation:
+    require_title: true
+    require_number: true
+    require_cover: false
+
+# 日志配置 / Logging Configuration
+logging:
+  # 日志级别 / Log Level
+  level: "INFO"  # DEBUG, INFO, WARNING, ERROR, CRITICAL
+  
+  # 彩色日志 / Colored Logging
+  colored: true
+  
+  # 日志格式 / Log Format
+  format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+  
+  # 日志文件设置 / Log File Settings
+  file:
+    enabled: false
+    path: "javsp_crawler.log"
+    max_size: "10MB"
+    backup_count: 5
+
+# 缓存配置 / Cache Configuration
+cache:
+  # 启用缓存 / Enable Cache
+  enabled: false
+  
+  # 缓存过期时间（小时） / Cache Expiration Time (hours)
+  expiration: 24
+  
+  # 缓存目录 / Cache Directory
+  directory: "./cache"
+
+# 性能配置 / Performance Configuration
+performance:
+  # 请求间隔（秒） / Request Interval (seconds)
+  request_delay: 0.5
+  
+  # 连接池大小 / Connection Pool Size
+  connection_pool_size: 10
+  
+  # 最大连接数 / Maximum Connections
+  max_connections: 20

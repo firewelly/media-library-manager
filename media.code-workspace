@@ -1,0 +1,13 @@
+{
+	"folders": [
+		{
+			"path": "."
+		},
+		{
+			"path": "../Jav/javsp_mac"
+		}
+	],
+	"settings": {
+		"python.languageServer": "None"
+	}
+}
