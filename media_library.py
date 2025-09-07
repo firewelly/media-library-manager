@@ -6500,6 +6500,22 @@ class MediaLibrary:
                 
                 log_message(f"发现 {total_files_to_scan} 个视频文件需要处理")
                 
+                # 预先建立数据库中已有文件的MD5映射，避免重复计算
+                log_message("建立数据库MD5映射以优化计算...")
+                self.cursor.execute("SELECT file_path, md5_hash, file_size FROM videos WHERE md5_hash IS NOT NULL AND md5_hash != ''")
+                existing_md5_map = {}
+                for db_path, db_md5, db_size in self.cursor.fetchall():
+                    # 使用文件路径+大小作为键，避免路径变化时的误判
+                    if os.path.exists(db_path):
+                        try:
+                            current_size = os.path.getsize(db_path)
+                            if current_size == db_size:  # 文件大小未变，MD5应该也未变
+                                existing_md5_map[db_path] = db_md5
+                        except:
+                            pass  # 文件可能已被删除或无法访问
+                
+                log_message(f"从数据库加载了 {len(existing_md5_map)} 个已有MD5值")
+                
                 # 扫描并建立映射
                 for folder_path in active_folders:
                     log_message(f"扫描文件夹: {folder_path}")
@@ -6519,8 +6535,14 @@ class MediaLibrary:
                                     # 获取文件信息
                                     file_size = os.path.getsize(file_path)
                                     
-                                    # 计算MD5哈希值
-                                    md5_hash = self.calculate_md5_hash(file_path)
+                                    # 优化：检查是否已有MD5值，避免重复计算
+                                    if file_path in existing_md5_map:
+                                        md5_hash = existing_md5_map[file_path]
+                                        log_message(f"跳过MD5计算（已存在）: {file}")
+                                    else:
+                                        # 计算MD5哈希值
+                                        log_message(f"计算MD5: {file}")
+                                        md5_hash = self.calculate_md5_hash(file_path)
                                     
                                     # 解析文件名获取标题和星级
                                     title = self.parse_title_from_filename(file)
