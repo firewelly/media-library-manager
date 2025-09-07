@@ -572,7 +572,7 @@ class MediaLibrary:
                 file_path TEXT UNIQUE NOT NULL,
                 file_name TEXT NOT NULL,
                 file_size INTEGER,
-                file_hash TEXT,
+                md5_hash TEXT,
                 title TEXT,
                 description TEXT,
                 genre TEXT,
@@ -709,7 +709,9 @@ class MediaLibrary:
         tools_menu.add_command(label="批量自动更新所有标签", command=self.batch_auto_tag_all)
         tools_menu.add_command(label="批量标注没有标签的文件", command=self.batch_auto_tag_no_tags)
         tools_menu.add_separator()
-        tools_menu.add_command(label="批量清理文件名", command=self.batch_clean_filename_selected_videos)
+        tools_menu.add_command(label="批量清理文件名(当前筛选)", command=self.batch_clean_filename_selected_videos)
+        tools_menu.add_separator()
+        tools_menu.add_command(label="修正JAVDB错误信息", command=self.fix_javdb_error_titles)
         tools_menu.add_separator()
         tools_menu.add_command(label="智能媒体库更新", command=self.comprehensive_media_update)
         
@@ -1352,8 +1354,8 @@ class MediaLibrary:
             # 获取来源文件夹
             source_folder = os.path.dirname(file_path)
             
-            # 计算文件哈希（用于去重）
-            file_hash = self.calculate_file_hash(file_path)
+            # 计算文件MD5哈希（用于去重）
+            md5_hash = self.calculate_md5_hash(file_path)
             
             # 从文件名解析星级
             stars = self.parse_stars_from_filename(file_name)
@@ -1371,9 +1373,9 @@ class MediaLibrary:
             
             self.cursor.execute(
                 """INSERT INTO videos 
-                   (file_path, file_name, file_size, file_hash, title, stars, nas_path, is_nas_online, duration, resolution, file_created_time, source_folder) 
+                   (file_path, file_name, file_size, md5_hash, title, stars, nas_path, is_nas_online, duration, resolution, file_created_time, source_folder) 
                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-                (file_path, file_name, file_size, file_hash, title, stars, nas_path, is_nas_online, duration, resolution, file_created_time, source_folder)
+                (file_path, file_name, file_size, md5_hash, title, stars, nas_path, is_nas_online, duration, resolution, file_created_time, source_folder)
             )
             
             return 'added'  # 新文件已添加
@@ -1432,8 +1434,8 @@ class MediaLibrary:
             # 获取来源文件夹
             source_folder = os.path.dirname(file_path)
             
-            # 计算文件哈希（用于去重）
-            file_hash = self.calculate_file_hash(file_path)
+            # 计算文件MD5哈希（用于去重）
+            md5_hash = self.calculate_md5_hash(file_path)
             
             # 从文件名解析星级
             stars = self.parse_stars_from_filename(file_name)
@@ -1451,26 +1453,26 @@ class MediaLibrary:
             
             self.cursor.execute(
                 """INSERT INTO videos 
-                   (file_path, file_name, file_size, file_hash, title, stars, nas_path, is_nas_online, duration, resolution, file_created_time, source_folder) 
+                   (file_path, file_name, file_size, md5_hash, title, stars, nas_path, is_nas_online, duration, resolution, file_created_time, source_folder) 
                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-                (file_path, file_name, file_size, file_hash, title, stars, nas_path, is_nas_online, duration, resolution, file_created_time, source_folder)
+                (file_path, file_name, file_size, md5_hash, title, stars, nas_path, is_nas_online, duration, resolution, file_created_time, source_folder)
             )
             self.conn.commit()
             
         except Exception as e:
             print(f"添加视频失败 {file_path}: {str(e)}")
             
-    def calculate_file_hash(self, file_path):
-        """计算文件哈希值"""
+    def calculate_md5_hash(self, file_path):
+        """计算完整文件的MD5哈希值"""
         try:
             if not os.path.exists(file_path):
                 return None
                 
             hash_md5 = hashlib.md5()
             with open(file_path, "rb") as f:
-                # 只读取文件的前1MB来计算哈希，提高性能
-                chunk = f.read(1024 * 1024)
-                hash_md5.update(chunk)
+                # 读取完整文件计算MD5哈希
+                for chunk in iter(lambda: f.read(4096), b""):
+                    hash_md5.update(chunk)
             return hash_md5.hexdigest()
         except:
             return None
@@ -2083,7 +2085,7 @@ class MediaLibrary:
                 while len(video_data) < 23:  # 确保有足够的字段
                     video_data.append(None)
                 
-                video_id, file_path, file_name, file_size, file_hash, title, description, genre, year, rating, stars, tags, nas_path, is_nas_online, created_at, updated_at, thumbnail_data, thumbnail_path, duration, resolution, file_created_time, source_folder, md5_hash = video_data[:23]
+                video_id, file_path, file_name, file_size, _, title, description, genre, year, rating, stars, tags, nas_path, is_nas_online, created_at, updated_at, thumbnail_data, thumbnail_path, duration, resolution, file_created_time, source_folder, md5_hash = video_data[:23]
                 
                 # 格式化星级显示（实心/空心星星组合）
                 star_display = self.format_stars_display(stars)
@@ -2554,7 +2556,7 @@ class MediaLibrary:
                 while len(video_data) < 23:  # 确保有足够的字段
                     video_data.append(None)
                 
-                video_id, file_path, file_name, file_size, file_hash, title, description, genre, year, rating, stars, tags, nas_path, is_nas_online, created_at, updated_at, thumbnail_data, thumbnail_path, duration, resolution, file_created_time, source_folder, md5_hash = video_data[:23]
+                video_id, file_path, file_name, file_size, _, title, description, genre, year, rating, stars, tags, nas_path, is_nas_online, created_at, updated_at, thumbnail_data, thumbnail_path, duration, resolution, file_created_time, source_folder, md5_hash = video_data[:23]
                 
                 # 基本信息
                 self.title_var.set(title or file_name)
@@ -3181,12 +3183,12 @@ class MediaLibrary:
                                 continue
                             
                             # 计算MD5哈希
-                            file_hash = self.calculate_file_hash(file_path)
-                            if file_hash:
-                                # 使用md5_hash字段而不是file_hash
+                            md5_hash = self.calculate_md5_hash(file_path)
+                            if md5_hash:
+                                # 使用md5_hash字段
                                 self.cursor.execute(
                                     "UPDATE videos SET md5_hash = ? WHERE id = ?",
-                                    (file_hash, video_id)
+                                    (md5_hash, video_id)
                                 )
                                 calculated_count += 1
                                 
@@ -4078,14 +4080,14 @@ class MediaLibrary:
                     # 1. 保存需要保留的信息
                     log_message("正在保存标签和星级信息...")
                     self.cursor.execute("""
-                        SELECT file_hash, stars, tags 
+                        SELECT md5_hash, stars, tags 
                         FROM videos 
-                        WHERE file_hash IS NOT NULL AND file_hash != ''
+                        WHERE md5_hash IS NOT NULL AND md5_hash != ''
                     """)
                     preserved_data = {}
                     for row in self.cursor.fetchall():
-                        file_hash, stars, tags = row
-                        preserved_data[file_hash] = {
+                        md5_hash, stars, tags = row
+                        preserved_data[md5_hash] = {
                             'stars': stars or 0,
                             'tags': tags or ''
                         }
@@ -4153,7 +4155,7 @@ class MediaLibrary:
                                         )
                                         
                                         # 计算MD5
-                                        file_hash = self.calculate_file_hash(file_path)
+                                        md5_hash = self.calculate_md5_hash(file_path)
                                         
                                         # 获取视频信息
                                         duration, resolution = self.get_video_info(file_path)
@@ -4166,10 +4168,10 @@ class MediaLibrary:
                                         stars = parsed_stars
                                         tags = ''
                                         
-                                        if file_hash in preserved_data:
+                                        if md5_hash in preserved_data:
                                             # 使用保留的信息
-                                            stars = preserved_data[file_hash]['stars']
-                                            tags = preserved_data[file_hash]['tags']
+                                            stars = preserved_data[md5_hash]['stars']
+                                            tags = preserved_data[md5_hash]['tags']
                                             restored_files += 1
                                             log_message(f"恢复: {file} (星级: {stars}, 标签: {tags or '无'})")
                                         else:
@@ -4183,12 +4185,12 @@ class MediaLibrary:
                                         # 插入数据库
                                         self.cursor.execute("""
                                             INSERT INTO videos (
-                                                file_path, file_name, file_size, file_hash, title, 
+                                                file_path, file_name, file_size, md5_hash, title, 
                                                 stars, tags, is_nas_online, duration, resolution, 
                                                 file_created_time, source_folder, created_at, updated_at
                                             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                                         """, (
-                                            file_path, file, file_size, file_hash, title,
+                                            file_path, file, file_size, md5_hash, title,
                                             stars, tags, is_nas_online, duration, resolution,
                                             file_created_time, os.path.dirname(file_path),
                                             datetime.now(), datetime.now()
@@ -4904,17 +4906,17 @@ class MediaLibrary:
         try:
             # 查找重复的文件（基于哈希值）
             self.cursor.execute(
-                """SELECT file_hash, COUNT(*) as count, GROUP_CONCAT(id) as ids 
+                """SELECT md5_hash, COUNT(*) as count, GROUP_CONCAT(id) as ids 
                    FROM videos 
-                   WHERE file_hash IS NOT NULL 
-                   GROUP BY file_hash 
+                   WHERE md5_hash IS NOT NULL 
+                   GROUP BY md5_hash 
                    HAVING count > 1"""
             )
             
             duplicates = self.cursor.fetchall()
             removed_count = 0
             
-            for file_hash, count, ids in duplicates:
+            for md5_hash, count, ids in duplicates:
                 id_list = ids.split(',')
                 # 保留第一个，删除其余的
                 for video_id in id_list[1:]:
@@ -5804,34 +5806,105 @@ class MediaLibrary:
                             # 更新状态 - 开始爬取
                             progress_window.update_status(f"正在爬取JAVDB信息: {av_code}")
                             
-                            # 调用javdb_crawler_single.py获取信息
+                            # 三级备用策略：优先使用javdb_crawler_single.py，失败时使用javbus_crawler_single.py，最后使用JavSP
                             import subprocess
                             import json
+                            javdb_result = None
                             
-                            # 执行javdb_crawler_single.py
-                            cmd = ["python", "javdb_crawler_single.py", av_code]
-                            process = subprocess.run(cmd, capture_output=True, text=True, 
-                                                   cwd=os.path.dirname(os.path.abspath(__file__)), 
-                                                   timeout=60)  # 设置60秒超时
+                            # 首先尝试javdb_crawler_single.py
+                            try:
+                                cmd = ["python", "javdb_crawler_single.py", av_code]
+                                process = subprocess.run(cmd, capture_output=True, text=True, 
+                                                       cwd=os.path.dirname(os.path.abspath(__file__)), 
+                                                       timeout=60)
+                                
+                                if process.returncode == 0 and process.stdout:
+                                    try:
+                                        javdb_result = json.loads(process.stdout)
+                                        # 检查是否有错误或信息不完整
+                                        if ("error" in javdb_result or 
+                                            not javdb_result.get('title') or 
+                                            javdb_result.get('title') in ['官方App下載', '官方App下载', 'Official App Download'] or
+                                            not javdb_result.get('actors')):
+                                            progress_window.update_status(f"javdb_crawler_single.py信息不完整，尝试javbus备用")
+                                            javdb_result = None
+                                        else:
+                                            progress_window.update_status(f"✓ javdb_crawler_single.py获取成功: {av_code}")
+                                    except json.JSONDecodeError:
+                                        progress_window.update_status(f"javdb_crawler_single.py解析失败，尝试javbus备用")
+                                        javdb_result = None
+                                else:
+                                    progress_window.update_status(f"javdb_crawler_single.py失败，尝试javbus备用")
+                                    javdb_result = None
+                            except Exception as e:
+                                progress_window.update_status(f"javdb_crawler_single.py异常，尝试javbus备用: {str(e)}")
+                                javdb_result = None
                             
-                            if process.returncode == 0 and process.stdout:
+                            # 如果javdb_crawler_single.py失败，尝试javbus_crawler_single.py
+                            if not javdb_result:
                                 try:
-                                    javdb_result = json.loads(process.stdout)
-                                    # 检查是否有错误
-                                    if "error" in javdb_result:
-                                        failed_files.append(f"{file_name}: {javdb_result['error']}")
-                                        progress_window.update_progress(i + 1, file_name, success=False)
-                                        progress_window.update_status(f"失败: {javdb_result['error']}", "red")
-                                        continue
-                                except json.JSONDecodeError:
-                                    failed_files.append(f"{file_name}: 解析JAVDB返回数据失败")
-                                    progress_window.update_progress(i + 1, file_name, success=False)
-                                    progress_window.update_status("失败: 解析返回数据失败", "red")
-                                    continue
-                            else:
-                                failed_files.append(f"{file_name}: JAVDB爬取失败")
+                                    cmd = ["python", "javbus_crawler_single.py", av_code]
+                                    process = subprocess.run(cmd, capture_output=True, text=True, 
+                                                           cwd=os.path.dirname(os.path.abspath(__file__)), 
+                                                           timeout=60)
+                                    
+                                    if process.returncode == 0 and process.stdout:
+                                        try:
+                                            javbus_result = json.loads(process.stdout)
+                                            if javbus_result.get('success') and javbus_result.get('title'):
+                                                # 转换javbus格式为javdb格式
+                                                javdb_result = {
+                                                    'title': javbus_result.get('title', ''),
+                                                    'actors': javbus_result.get('actors', []),
+                                                    'release_date': javbus_result.get('release_date', ''),
+                                                    'duration': javbus_result.get('duration', ''),
+                                                    'director': javbus_result.get('director', ''),
+                                                    'studio': javbus_result.get('studio', ''),
+                                                    'series': javbus_result.get('series', ''),
+                                                    'genres': javbus_result.get('genres', []),
+                                                    'cover_image': javbus_result.get('cover_image', ''),
+                                                    'rating': javbus_result.get('rating', ''),
+                                                    'av_code': av_code
+                                                }
+                                                progress_window.update_status(f"✓ javbus_crawler_single.py获取成功: {av_code}")
+                                            else:
+                                                progress_window.update_status(f"javbus_crawler_single.py信息不完整，尝试JavSP最后备用")
+                                                javdb_result = None
+                                        except json.JSONDecodeError:
+                                            progress_window.update_status(f"javbus_crawler_single.py解析失败，尝试JavSP最后备用")
+                                            javdb_result = None
+                                    else:
+                                        progress_window.update_status(f"javbus_crawler_single.py失败，尝试JavSP最后备用")
+                                        javdb_result = None
+                                except Exception as e:
+                                    progress_window.update_status(f"javbus_crawler_single.py异常，尝试JavSP最后备用: {str(e)}")
+                                    javdb_result = None
+                            
+                            # 如果前两个都失败，最后尝试JavSP
+                            if not javdb_result:
+                                try:
+                                    from javsp_integration import JavSPIntegration
+                                    javsp = JavSPIntegration()
+                                    if javsp.is_available():
+                                        progress_window.update_status(f"使用JavSP最后备用爬虫: {av_code}")
+                                        javdb_result = javsp.search_movie(av_code)
+                                        if javdb_result:
+                                            progress_window.update_status(f"✓ JavSP备用爬虫获取成功: {av_code}")
+                                        else:
+                                            progress_window.update_status(f"JavSP备用爬虫未找到信息: {av_code}")
+                                    else:
+                                        progress_window.update_status(f"JavSP不可用")
+                                except ImportError:
+                                    progress_window.update_status(f"JavSP集成模块不可用")
+                                except Exception as e:
+                                    progress_window.update_status(f"JavSP备用爬虫失败: {str(e)}")
+                            
+                            # 检查最终结果
+                            if not javdb_result or "error" in javdb_result:
+                                error_msg = javdb_result.get('error', 'JAVDB爬取失败') if javdb_result else 'JAVDB爬取失败'
+                                failed_files.append(f"{file_name}: {error_msg}")
                                 progress_window.update_progress(i + 1, file_name, success=False)
-                                progress_window.update_status("失败: JAVDB爬取失败", "red")
+                                progress_window.update_status(f"失败: {error_msg}", "red")
                                 continue
                             
                             # 更新状态 - 保存到数据库
@@ -6345,7 +6418,7 @@ class MediaLibrary:
                                     file_size = os.path.getsize(file_path)
                                     
                                     # 计算MD5哈希值
-                                    md5_hash = self.calculate_file_hash(file_path)
+                                    md5_hash = self.calculate_md5_hash(file_path)
                                     
                                     # 解析文件名获取标题和星级
                                     title = self.parse_title_from_filename(file)
@@ -7372,8 +7445,8 @@ class MediaLibrary:
                             
                             # 计算MD5并检查冲突
                             if self.check_md5.get():
-                                file_hash = self.calculate_file_hash(file_path)
-                                if self.check_md5_conflict(file_hash):
+                                md5_hash = self.calculate_md5_hash(file_path)
+                                if self.check_md5_conflict(md5_hash):
                                     self.root.after(0, lambda f=file_path: progress_window.update_status(f"跳过MD5冲突文件: {os.path.basename(f)}"))
                                     skipped_count += 1
                                     continue
@@ -7443,11 +7516,11 @@ class MediaLibrary:
         except Exception as e:
              return False
     
-    def check_md5_conflict(self, file_hash):
+    def check_md5_conflict(self, md5_hash):
         """检查MD5是否与数据库中的文件冲突"""
         try:
             cursor = self.conn.cursor()
-            cursor.execute("SELECT COUNT(*) FROM videos WHERE md5_hash = ?", (file_hash,))
+            cursor.execute("SELECT COUNT(*) FROM videos WHERE md5_hash = ?", (md5_hash,))
             count = cursor.fetchone()[0]
             return count > 0
         except Exception as e:
@@ -7702,8 +7775,8 @@ class MediaLibrary:
                             continue
                         
                         # 计算MD5
-                        file_hash = self.calculate_file_hash(file_path)
-                        if not file_hash:
+                        md5_hash = self.calculate_md5_hash(file_path)
+                        if not md5_hash:
                             log_message(f"MD5计算失败，跳过: {os.path.basename(file_path)}")
                             file_info_map[file_path] = {'valid': False}
                             continue
@@ -7718,7 +7791,7 @@ class MediaLibrary:
                         stars = self.parse_stars_from_filename(filename)
                         
                         file_info_map[file_path] = {
-                            'hash': file_hash,
+                            'hash': md5_hash,
                             'size': file_size,
                             'created_time': created_time,
                             'stars': stars,
@@ -7736,19 +7809,19 @@ class MediaLibrary:
                 hash_groups = {}
                 for file_path, info in file_info_map.items():
                     if info.get('valid') and info.get('hash'):
-                        file_hash = info['hash']
-                        if file_hash not in hash_groups:
-                            hash_groups[file_hash] = []
-                        hash_groups[file_hash].append(file_path)
+                        md5_hash = info['hash']
+                        if md5_hash not in hash_groups:
+                            hash_groups[md5_hash] = []
+                        hash_groups[md5_hash].append(file_path)
                 
                 # 处理重复文件
                 files_to_process = []  # 最终要处理的文件列表
                 files_to_delete = []   # 要删除的重复文件列表
                 
-                for file_hash, file_paths in hash_groups.items():
+                for md5_hash, file_paths in hash_groups.items():
                     # 检查数据库中是否已存在此MD5
-                    if self.check_duplicate_by_hash(file_hash):
-                        log_message(f"MD5 {file_hash[:8]}... 在数据库中已存在，跳过所有相关文件")
+                    if self.check_duplicate_by_hash(md5_hash):
+                        log_message(f"MD5 {md5_hash[:8]}... 在数据库中已存在，跳过所有相关文件")
                         if delete_duplicate:
                             files_to_delete.extend(file_paths)
                         continue
@@ -7758,7 +7831,7 @@ class MediaLibrary:
                         files_to_process.append(file_paths[0])
                     else:
                         # 有重复文件，需要选择保留哪个
-                        log_message(f"发现 {len(file_paths)} 个重复文件 (MD5: {file_hash[:8]}...)")
+                        log_message(f"发现 {len(file_paths)} 个重复文件 (MD5: {md5_hash[:8]}...)")
                         
                         # 排序规则：1. 星级高的优先 2. 创建时间早的优先
                         def sort_key(path):
@@ -7782,15 +7855,48 @@ class MediaLibrary:
                 invalid_count = 0
                 duplicate_count = 0
                 
+                # 处理无效文件删除，支持用户确认
+                invalid_delete_all = False
+                invalid_skip_all = False
+                
                 for file_path in file_info_map:
                     if not file_info_map[file_path].get('valid'):
                         if delete_invalid:
+                            if invalid_skip_all:
+                                continue
+                                
                             try:
                                 send2trash(file_path)
                                 log_message(f"已删除无效文件: {os.path.basename(file_path)}")
                                 invalid_count += 1
                             except Exception as e:
                                 log_message(f"删除无效文件失败: {os.path.basename(file_path)} - {str(e)}")
+                                
+                                if not invalid_delete_all:
+                                    choice = self.ask_delete_confirmation(file_path, e)
+                                    
+                                    if choice == 'c':  # 取消
+                                        break
+                                    elif choice == 'na':  # 全部跳过
+                                        invalid_skip_all = True
+                                        continue
+                                    elif choice == 'a':  # 全部删除
+                                        invalid_delete_all = True
+                                    elif choice == 'n':  # 跳过此文件
+                                        continue
+                                    # choice == 'y' 继续删除此文件
+                                
+                                if choice == 'y' or invalid_delete_all:
+                                    try:
+                                        os.remove(file_path)
+                                        log_message(f"已直接删除无效文件: {os.path.basename(file_path)}")
+                                        invalid_count += 1
+                                    except Exception as e2:
+                                        log_message(f"直接删除无效文件也失败: {os.path.basename(file_path)} - {str(e2)}")
+                
+                # 处理重复文件删除，支持用户确认
+                delete_all_confirmed = False
+                skip_all_confirmed = False
                 
                 for file_path in files_to_delete:
                     try:
@@ -7798,7 +7904,47 @@ class MediaLibrary:
                         log_message(f"已删除重复文件: {os.path.basename(file_path)}")
                         duplicate_count += 1
                     except Exception as e:
-                        log_message(f"删除重复文件失败: {os.path.basename(file_path)} - {str(e)}")
+                        log_message(f"移至回收站失败: {os.path.basename(file_path)} - {str(e)}")
+                        
+                        # 如果用户已经选择了全部操作，直接执行
+                        if delete_all_confirmed:
+                            try:
+                                os.remove(file_path)
+                                log_message(f"已直接删除重复文件: {os.path.basename(file_path)}")
+                                duplicate_count += 1
+                            except Exception as del_e:
+                                log_message(f"直接删除失败: {os.path.basename(file_path)} - {str(del_e)}")
+                            continue
+                        elif skip_all_confirmed:
+                            log_message(f"跳过删除: {os.path.basename(file_path)}")
+                            continue
+                        
+                        # 询问用户如何处理
+                        choice = self.ask_delete_confirmation(file_path, e)
+                        
+                        if choice == 'y':
+                            try:
+                                os.remove(file_path)
+                                log_message(f"已直接删除重复文件: {os.path.basename(file_path)}")
+                                duplicate_count += 1
+                            except Exception as del_e:
+                                log_message(f"直接删除失败: {os.path.basename(file_path)} - {str(del_e)}")
+                        elif choice == 'n':
+                            log_message(f"跳过删除: {os.path.basename(file_path)}")
+                        elif choice == 'a':
+                            delete_all_confirmed = True
+                            try:
+                                os.remove(file_path)
+                                log_message(f"已直接删除重复文件: {os.path.basename(file_path)}")
+                                duplicate_count += 1
+                            except Exception as del_e:
+                                log_message(f"直接删除失败: {os.path.basename(file_path)} - {str(del_e)}")
+                        elif choice == 'na':
+                            skip_all_confirmed = True
+                            log_message(f"跳过删除: {os.path.basename(file_path)}")
+                        elif choice == 'c':
+                            log_message("用户取消操作，停止删除重复文件")
+                            break
                 
                 # 第三阶段：处理剩余的有效文件
                 log_message(f"开始处理 {len(files_to_process)} 个有效文件...")
@@ -7903,6 +8049,88 @@ class MediaLibrary:
         
         return video_files
     
+    def ask_delete_confirmation(self, file_path, error):
+        """询问用户是否直接删除文件（当send2trash失败时）"""
+        import tkinter.messagebox as msgbox
+        
+        filename = os.path.basename(file_path)
+        message = f"无法将文件移至回收站：\n{filename}\n\n错误信息：{str(error)}\n\n是否直接删除此文件？"
+        
+        # 创建自定义对话框
+        dialog = tk.Toplevel(self.root)
+        dialog.title("删除确认")
+        dialog.geometry("600x400")
+        dialog.transient(self.root)
+        dialog.grab_set()
+        
+        # 居中显示
+        dialog.geometry("+%d+%d" % (self.root.winfo_rootx() + 50, self.root.winfo_rooty() + 50))
+        
+        result = {'choice': 'n'}  # 默认选择不删除
+        
+        # 消息文本
+        msg_frame = ttk.Frame(dialog)
+        msg_frame.pack(fill="both", expand=True, padx=20, pady=20)
+        
+        ttk.Label(msg_frame, text=message, wraplength=450, justify="left").pack()
+        
+        # 按钮框架
+        btn_frame = ttk.Frame(dialog)
+        btn_frame.pack(fill="x", padx=20, pady=(0, 20))
+        
+        def set_choice(choice):
+            result['choice'] = choice
+            dialog.destroy()
+        
+        # 第一行按钮
+        btn_row1 = ttk.Frame(btn_frame)
+        btn_row1.pack(fill="x", pady=5)
+        
+        ttk.Button(btn_row1, text="是(Y) - 删除此文件", 
+                  command=lambda: set_choice('y')).pack(side="left", padx=5)
+        ttk.Button(btn_row1, text="否(N) - 跳过此文件", 
+                  command=lambda: set_choice('n')).pack(side="left", padx=5)
+        ttk.Button(btn_row1, text="取消(C) - 停止操作", 
+                  command=lambda: set_choice('c')).pack(side="left", padx=5)
+        
+        # 第二行按钮
+        btn_row2 = ttk.Frame(btn_frame)
+        btn_row2.pack(fill="x", pady=5)
+        
+        ttk.Button(btn_row2, text="全部删除(A) - 删除所有后续文件", 
+                  command=lambda: set_choice('a')).pack(side="left", padx=5)
+        ttk.Button(btn_row2, text="全部跳过(NA) - 跳过所有后续文件", 
+                  command=lambda: set_choice('na')).pack(side="left", padx=5)
+        
+        # 键盘快捷键
+        def on_key(event):
+            key = event.char.lower()
+            if key == 'y':
+                set_choice('y')
+            elif key == 'n':
+                set_choice('n')
+            elif key == 'a':
+                set_choice('a')
+            elif key == 'c':
+                set_choice('c')
+        
+        # 处理特殊按键组合（如Ctrl+N代表na）
+        def on_key_press(event):
+            if event.state & 0x4:  # Ctrl键被按下
+                if event.keysym.lower() == 'n':
+                    set_choice('na')
+            elif event.keysym == 'Escape':
+                set_choice('n')  # ESC键默认为跳过
+        
+        dialog.bind('<Key>', on_key)
+        dialog.bind('<KeyPress>', on_key_press)
+        dialog.focus_set()
+        
+        # 等待用户选择
+        dialog.wait_window()
+        
+        return result['choice']
+    
     def can_play_video(self, file_path):
         """检查视频文件是否可以播放"""
         try:
@@ -7917,11 +8145,11 @@ class MediaLibrary:
         except Exception:
             return False
     
-    def check_duplicate_by_hash(self, file_hash):
+    def check_duplicate_by_hash(self, md5_hash):
         """检查文件哈希是否已存在于数据库中"""
         try:
             cursor = self.conn.cursor()
-            cursor.execute("SELECT COUNT(*) FROM videos WHERE md5_hash = ?", (file_hash,))
+            cursor.execute("SELECT COUNT(*) FROM videos WHERE md5_hash = ?", (md5_hash,))
             count = cursor.fetchone()[0]
             return count > 0
         except Exception:
@@ -8152,31 +8380,189 @@ class MediaLibrary:
                 return new_path
             counter += 1
     
+    def get_filtered_online_video_ids(self):
+        """获取当前筛选条件下的所有在线视频ID"""
+        try:
+            # 构建查询条件（复用load_videos的筛选逻辑）
+            conditions = []
+            params = []
+            
+            # 检查是否在筛选模式，如果是则添加搜索条件
+            if getattr(self, 'is_filtering', False):
+                # 标题搜索条件
+                title_search_text = self.title_search_var.get().strip()
+                if title_search_text:
+                    conditions.append("(v.title LIKE ? OR v.file_name LIKE ? OR j.javdb_title LIKE ?)")
+                    title_search_param = f"%{title_search_text}%"
+                    params.extend([title_search_param, title_search_param, title_search_param])
+                    
+                # 标签搜索条件
+                tag_search_text = self.tag_search_var.get().strip()
+                if tag_search_text:
+                    conditions.append("(v.tags LIKE ? OR EXISTS (SELECT 1 FROM javdb_tags jt JOIN tags t ON jt.tag_id = t.id WHERE jt.javdb_info_id = j.id AND t.name LIKE ?))")
+                    tag_search_param = f"%{tag_search_text}%"
+                    params.extend([tag_search_param, tag_search_param])
+                    
+                # 演员搜索条件
+                actor_search_text = self.actor_search_var.get().strip()
+                if actor_search_text:
+                    conditions.append("EXISTS (SELECT 1 FROM video_actors va JOIN actors a ON va.actor_id = a.id WHERE va.video_id = v.id AND a.name LIKE ?)")
+                    actor_search_param = f"%{actor_search_text}%"
+                    params.append(actor_search_param)
+                    
+                # 星级筛选
+                star_filter = self.star_filter.get()
+                if star_filter > 0:
+                    conditions.append("stars = ?")
+                    params.append(star_filter)
+                    
+                # 标签筛选
+                selected_tags = [self.tags_listbox.get(i) for i in self.tags_listbox.curselection()]
+                if selected_tags:
+                    tag_conditions = []
+                    for tag in selected_tags:
+                        tag_conditions.append("(v.tags LIKE ? OR EXISTS (SELECT 1 FROM javdb_tags jt JOIN tags t ON jt.tag_id = t.id WHERE jt.javdb_info_id = j.id AND t.name LIKE ?))")
+                        params.extend([f"%{tag}%", f"%{tag}%"])
+                    if tag_conditions:
+                        conditions.append(f"({' OR '.join(tag_conditions)})")
+                        
+                # NAS状态筛选 - 只获取在线的
+                nas_filter = self.nas_filter.get()
+                if nas_filter == "online":
+                    # 获取所有视频的路径并检查是否存在
+                    self.cursor.execute("SELECT DISTINCT source_folder FROM videos WHERE source_folder IS NOT NULL")
+                    all_video_folders = [row[0] for row in self.cursor.fetchall()]
+                    
+                    online_video_folders = []
+                    for folder_path in all_video_folders:
+                        if os.path.exists(folder_path) and os.path.isdir(folder_path):
+                            online_video_folders.append(folder_path)
+                    
+                    if online_video_folders:
+                        folder_conditions = []
+                        for folder_path in online_video_folders:
+                            folder_conditions.append("v.source_folder LIKE ?")
+                            params.append(f"{folder_path}%")
+                        conditions.append(f"({' OR '.join(folder_conditions)})")
+                    else:
+                        # 如果没有在线文件夹，返回空列表
+                        return []
+                elif nas_filter == "offline":
+                    # 如果筛选离线文件，返回空列表（因为我们只要在线的）
+                    return []
+                    
+                # 文件夹来源筛选
+                selected_folder_indices = self.folder_listbox.curselection()
+                if selected_folder_indices and hasattr(self, 'folder_path_mapping'):
+                    selected_folder = self.folder_listbox.get(selected_folder_indices[0])
+                    if selected_folder != "全部" and selected_folder in self.folder_path_mapping:
+                        folder_path = self.folder_path_mapping[selected_folder]
+                        if folder_path:
+                            conditions.append("v.source_folder LIKE ?")
+                            params.append(f"{folder_path}%")
+            
+            # 仅显示在线内容筛选
+            if hasattr(self, 'show_online_only') and self.show_online_only.get():
+                # 获取所有激活的文件夹
+                self.cursor.execute("SELECT folder_path FROM folders WHERE is_active = 1")
+                all_folders = [row[0] for row in self.cursor.fetchall()]
+                
+                # 检查哪些文件夹路径实际存在
+                online_folders = []
+                for folder_path in all_folders:
+                    if os.path.exists(folder_path) and os.path.isdir(folder_path):
+                        online_folders.append(folder_path)
+                
+                if online_folders:
+                    folder_conditions = []
+                    for folder_path in online_folders:
+                        folder_conditions.append("v.source_folder LIKE ?")
+                        params.append(f"{folder_path}%")
+                    conditions.append(f"({' OR '.join(folder_conditions)})")
+                else:
+                    return []
+            else:
+                # 不勾选时显示所有激活文件夹中的视频
+                conditions.append("""
+                    EXISTS (
+                        SELECT 1 FROM folders f
+                        WHERE f.is_active = 1 
+                        AND v.source_folder LIKE f.folder_path || '%'
+                    )
+                """)
+            
+            # 额外添加在线文件检查条件
+            conditions.append("v.file_path IS NOT NULL")
+            
+            # 构建查询
+            if conditions:
+                where_clause = f"WHERE {' AND '.join(conditions)}"
+            else:
+                where_clause = "WHERE v.file_path IS NOT NULL"
+                
+            query = f"SELECT v.id FROM videos v LEFT JOIN javdb_info j ON v.id = j.video_id {where_clause}"
+            self.cursor.execute(query, params)
+            
+            # 返回视频ID列表
+            return [row[0] for row in self.cursor.fetchall()]
+            
+        except Exception as e:
+            print(f"获取筛选视频ID失败: {str(e)}")
+            return []
+    
     def batch_clean_filename_selected_videos(self):
-        """批量清理选中视频的文件名"""
-        selected_items = self.video_tree.selection()
-        if not selected_items:
-            messagebox.showwarning("警告", "请先选择要清理文件名的视频")
+        """批量清理当前筛选条件下所有在线视频的文件名"""
+        # 获取当前筛选条件下的所有在线视频ID
+        video_ids = self.get_filtered_online_video_ids()
+        
+        if not video_ids:
+            messagebox.showwarning("警告", "当前筛选条件下没有找到在线视频")
             return
         
         # 确认操作
-        result = messagebox.askyesno("确认", f"确定要清理 {len(selected_items)} 个视频的文件名吗？")
+        result = messagebox.askyesno("确认", f"确定要清理当前筛选条件下 {len(video_ids)} 个在线视频的文件名吗？\n\n注意：这将同时更新文件名和标题")
         if not result:
             return
         
         success_count = 0
         failed_count = 0
         
-        for item in selected_items:
+        # 创建进度窗口
+        progress_window = tk.Toplevel(self.root)
+        progress_window.title("清理文件名进度")
+        progress_window.geometry("400x150")
+        progress_window.transient(self.root)
+        progress_window.grab_set()
+        
+        progress_label = tk.Label(progress_window, text="正在清理文件名...")
+        progress_label.pack(pady=10)
+        
+        progress_bar = ttk.Progressbar(progress_window, length=300, mode='determinate')
+        progress_bar.pack(pady=10)
+        progress_bar['maximum'] = len(video_ids)
+        
+        status_label = tk.Label(progress_window, text="")
+        status_label.pack(pady=5)
+        
+        # 处理每个视频
+        for i, video_id in enumerate(video_ids):
             try:
-                video_id = self.video_tree.item(item)['tags'][0]
+                # 更新进度
+                progress_bar['value'] = i + 1
+                status_label.config(text=f"处理中: {i + 1}/{len(video_ids)}")
+                progress_window.update()
+                
                 if self.clean_filename_for_video(video_id):
                     success_count += 1
                 else:
                     failed_count += 1
-            except (IndexError, TypeError):
+            except Exception as e:
+                print(f"清理视频ID {video_id} 失败: {str(e)}")
                 failed_count += 1
                 continue
+        
+        # 关闭进度窗口
+        progress_window.destroy()
         
         # 刷新视频列表
         self.load_videos()
@@ -8658,11 +9044,26 @@ class MediaLibrary:
             
             def import_thread():
                 try:
-                    from code_extractor import CodeExtractor
-                    import subprocess
-                    import json
+                    # 尝试使用新的JavSP集成模块
+                    try:
+                        from javsp_integration import get_integration_instance
+                        javsp_integration = get_integration_instance(self.db_path)
+                        use_javsp = javsp_integration.is_available()
+                        if use_javsp:
+                            log_message("使用JavSP爬虫系统进行批量导入")
+                        else:
+                            log_message("JavSP系统不可用，回退到原有方法")
+                    except ImportError:
+                        use_javsp = False
+                        log_message("JavSP集成模块不可用，使用原有方法")
                     
-                    extractor = CodeExtractor()
+                    # 如果JavSP不可用，回退到原有方法
+                    if not use_javsp:
+                        from code_extractor import CodeExtractor
+                        import subprocess
+                        import json
+                        extractor = CodeExtractor()
+                    
                     imported_count = 0
                     skipped_count = 0
                     
@@ -8673,8 +9074,11 @@ class MediaLibrary:
                         progress_bar.config(value=i + 1)
                         progress_label.config(text=f"处理: {file_name} ({i + 1}/{len(videos_without_javdb)})")
                         
-                        # 直接调用现有的番号提取逻辑
-                        av_code = extractor.extract_code_from_filename(file_name)
+                        # 提取番号
+                        if use_javsp:
+                            av_code = javsp_integration.extract_code_from_filename(file_name)
+                        else:
+                            av_code = extractor.extract_code_from_filename(file_name)
                         
                         if not av_code:
                             skipped_count += 1
@@ -8684,28 +9088,43 @@ class MediaLibrary:
                         log_message(f"提取番号: {av_code} <- {file_name}")
                         
                         try:
-                            # 直接调用现有的JAVDB爬虫逻辑
-                            cmd = ["python", "javdb_crawler_single.py", av_code]
-                            process = subprocess.run(cmd, capture_output=True, text=True, 
-                                                   cwd=os.path.dirname(os.path.abspath(__file__)), timeout=60)
-                            
-                            if process.returncode == 0 and process.stdout:
-                                try:
-                                    result = json.loads(process.stdout)
-                                    if "error" not in result:
-                                        # 直接调用现有的保存方法
-                                        self.save_javdb_info_to_db(video_id, result)
+                            if use_javsp:
+                                # 使用JavSP集成模块
+                                result = javsp_integration.search_movie_info(av_code)
+                                if result:
+                                    # 保存到数据库
+                                    if javsp_integration.save_movie_info_to_db(video_id, result):
                                         imported_count += 1
                                         log_message(f"✓ 成功导入: {av_code} - {result.get('title', 'N/A')}")
                                     else:
                                         skipped_count += 1
-                                        log_message(f"✗ JAVDB返回错误: {av_code} - {result.get('error', 'Unknown error')}")
-                                except json.JSONDecodeError:
+                                        log_message(f"✗ 保存失败: {av_code}")
+                                else:
                                     skipped_count += 1
-                                    log_message(f"✗ 解析JAVDB响应失败: {av_code}")
+                                    log_message(f"✗ 未找到信息: {av_code}")
                             else:
-                                skipped_count += 1
-                                log_message(f"✗ JAVDB获取失败: {av_code}")
+                                # 回退到原有的JAVDB爬虫逻辑
+                                cmd = ["python", "javdb_crawler_single.py", av_code]
+                                process = subprocess.run(cmd, capture_output=True, text=True, 
+                                                       cwd=os.path.dirname(os.path.abspath(__file__)), timeout=60)
+                                
+                                if process.returncode == 0 and process.stdout:
+                                    try:
+                                        result = json.loads(process.stdout)
+                                        if "error" not in result:
+                                            # 直接调用现有的保存方法
+                                            self.save_javdb_info_to_db(video_id, result)
+                                            imported_count += 1
+                                            log_message(f"✓ 成功导入: {av_code} - {result.get('title', 'N/A')}")
+                                        else:
+                                            skipped_count += 1
+                                            log_message(f"✗ JAVDB返回错误: {av_code} - {result.get('error', 'Unknown error')}")
+                                    except json.JSONDecodeError:
+                                        skipped_count += 1
+                                        log_message(f"✗ 解析JAVDB响应失败: {av_code}")
+                                else:
+                                    skipped_count += 1
+                                    log_message(f"✗ JAVDB获取失败: {av_code}")
                                 
                         except subprocess.TimeoutExpired:
                             skipped_count += 1
@@ -8872,6 +9291,267 @@ class MediaLibrary:
             
         except Exception as e:
             messagebox.showerror("错误", f"批量生成封面失败: {str(e)}")
+
+    def fix_javdb_error_titles(self):
+        """修正JAVDB错误信息，特别是标题为'官方App下載'的记录"""
+        try:
+            # 查询所有标题为错误信息的记录
+            error_titles = [
+                '官方App下載',
+                '官方App下载', 
+                'Official App Download',
+                'アプリダウンロード',
+                '公式アプリ'
+            ]
+            
+            # 构建查询条件
+            placeholders = ','.join(['?' for _ in error_titles])
+            query = f"""
+                SELECT v.id, v.file_name, v.file_path, j.javdb_title, j.javdb_code
+                FROM videos v 
+                JOIN javdb_info j ON v.id = j.video_id 
+                WHERE j.javdb_title IN ({placeholders})
+            """
+            
+            self.cursor.execute(query, error_titles)
+            error_records = self.cursor.fetchall()
+            
+            if not error_records:
+                messagebox.showinfo("信息", "没有找到需要修正的JAVDB错误信息")
+                return
+            
+            # 显示确认对话框
+            result = messagebox.askyesno(
+                "确认修正", 
+                f"找到 {len(error_records)} 条需要修正的JAVDB错误信息。\n\n"
+                f"这些记录的标题包含错误信息（如'官方App下載'），\n"
+                f"将重新获取正确的JAVDB信息。\n\n"
+                f"是否继续？"
+            )
+            
+            if not result:
+                return
+            
+            # 创建进度窗口
+            progress_window = tk.Toplevel(self.root)
+            progress_window.title("修正JAVDB错误信息")
+            progress_window.geometry("600x400")
+            progress_window.transient(self.root)
+            progress_window.grab_set()
+            
+            # 进度条
+            progress_var = tk.DoubleVar()
+            progress_bar = ttk.Progressbar(progress_window, variable=progress_var, maximum=100)
+            progress_bar.pack(fill=tk.X, padx=10, pady=5)
+            
+            # 状态标签
+            status_var = tk.StringVar(value="准备开始...")
+            status_label = ttk.Label(progress_window, textvariable=status_var)
+            status_label.pack(pady=5)
+            
+            # 日志区域
+            log_frame = ttk.Frame(progress_window)
+            log_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
+            
+            log_text = tk.Text(log_frame, wrap=tk.WORD)
+            log_scrollbar = ttk.Scrollbar(log_frame, orient=tk.VERTICAL, command=log_text.yview)
+            log_text.configure(yscrollcommand=log_scrollbar.set)
+            
+            log_text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+            log_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+            
+            # 取消按钮
+            cancel_var = tk.BooleanVar()
+            cancel_button = ttk.Button(progress_window, text="取消", 
+                                     command=lambda: cancel_var.set(True))
+            cancel_button.pack(pady=5)
+            
+            def log_message(message):
+                """添加日志消息"""
+                log_text.insert(tk.END, f"{message}\n")
+                log_text.see(tk.END)
+                progress_window.update()
+            
+            def fix_records():
+                """在后台线程中修正记录"""
+                try:
+                    # 准备JavSP集成模块作为备用
+                    javsp_available = False
+                    javsp = None
+                    try:
+                        from javsp_integration import JavSPIntegration
+                        javsp = JavSPIntegration()
+                        if javsp.is_available():
+                            javsp_available = True
+                            log_message("JavSP爬虫系统已准备作为备用")
+                        else:
+                            log_message("JavSP不可用")
+                    except ImportError:
+                        log_message("JavSP集成模块不可用")
+                    
+                    log_message("优先使用javdb_crawler_single.py爬虫")
+                    
+                    # 导入番号提取器
+                    try:
+                        from code_extractor import CodeExtractor
+                        extractor = CodeExtractor()
+                    except ImportError:
+                        log_message("警告：无法导入番号提取器，将使用简单的文件名解析")
+                        extractor = None
+                    
+                    success_count = 0
+                    skip_count = 0
+                    
+                    for i, (video_id, file_name, file_path, old_title, old_code) in enumerate(error_records):
+                        if cancel_var.get():
+                            log_message("用户取消操作")
+                            break
+                        
+                        progress = (i / len(error_records)) * 100
+                        progress_var.set(progress)
+                        status_var.set(f"修正 {i+1}/{len(error_records)}: {file_name}")
+                        
+                        log_message(f"\n处理: {file_name}")
+                        log_message(f"原标题: {old_title}")
+                        
+                        # 从文件名提取番号
+                        if extractor:
+                            code = extractor.extract_code_from_filename(file_name)
+                        else:
+                            # 简单的番号提取逻辑
+                            import re
+                            code_match = re.search(r'([A-Z]+-\d+)', file_name.upper())
+                            code = code_match.group(1) if code_match else None
+                        
+                        if not code:
+                            log_message(f"无法从文件名提取番号，跳过: {file_name}")
+                            skip_count += 1
+                            continue
+                        
+                        log_message(f"提取的番号: {code}")
+                        
+                        # 获取新的JAVDB信息 - 三级备用策略
+                        javdb_info = None
+                        
+                        # 首先尝试使用javdb_crawler_single.py
+                        try:
+                            import subprocess
+                            import json
+                            
+                            result = subprocess.run([
+                                'python3', 'javdb_crawler_single.py', code
+                            ], capture_output=True, text=True, timeout=30)
+                            
+                            if result.returncode == 0:
+                                javdb_info = json.loads(result.stdout)
+                                # 检查是否获取到有效信息
+                                if (javdb_info and 
+                                    javdb_info.get('title') and 
+                                    javdb_info['title'] not in error_titles and
+                                    javdb_info.get('actors')):
+                                    log_message("✓ javdb_crawler_single.py获取信息成功")
+                                else:
+                                    log_message("javdb_crawler_single.py获取的信息不完整或被屏蔽")
+                                    javdb_info = None
+                            else:
+                                log_message(f"javdb_crawler_single.py获取失败: {result.stderr}")
+                        except Exception as e:
+                            log_message(f"javdb_crawler_single.py执行失败: {str(e)}")
+                        
+                        # 如果javdb_crawler_single.py失败，尝试javbus_crawler_single.py
+                        if not javdb_info:
+                            try:
+                                log_message("使用javbus_crawler_single.py作为备用爬虫")
+                                result = subprocess.run([
+                                    'python3', 'javbus_crawler_single.py', code
+                                ], capture_output=True, text=True, timeout=60)
+                                
+                                if result.returncode == 0:
+                                    javbus_info = json.loads(result.stdout)
+                                    # 检查是否获取到有效信息
+                                    if (javbus_info and javbus_info.get('success') and
+                                        javbus_info.get('title') and 
+                                        javbus_info['title'] not in error_titles):
+                                        # 转换javbus格式到javdb格式
+                                        javdb_info = {
+                                            'title': javbus_info['title'],
+                                            'actors': javbus_info.get('actors', []),
+                                            'release_date': javbus_info.get('release_date', ''),
+                                            'duration': javbus_info.get('duration', ''),
+                                            'studio': javbus_info.get('studio', ''),
+                                            'tags': javbus_info.get('tags', []),
+                                            'rating': javbus_info.get('rating', ''),
+                                            'cover_image_url': javbus_info.get('cover_image_url', ''),
+                                            'local_image_path': javbus_info.get('cover_image_path', ''),
+                                            'magnet_links': javbus_info.get('magnet_links', []),
+                                            'detail_url': f"https://www.javbus.com/{code}",
+                                            'video_id': code
+                                        }
+                                        log_message("✓ javbus_crawler_single.py获取信息成功")
+                                    else:
+                                        log_message("javbus_crawler_single.py获取的信息不完整")
+                                else:
+                                    log_message(f"javbus_crawler_single.py获取失败: {result.stderr}")
+                            except Exception as e:
+                                log_message(f"javbus_crawler_single.py执行失败: {str(e)}")
+                        
+                        # 如果前两个都失败，使用JavSP作为最后备用
+                        if not javdb_info and javsp_available:
+                            try:
+                                log_message("使用JavSP作为最后备用爬虫")
+                                javdb_info = javsp.search_movie_info(code)
+                                if javdb_info:
+                                    log_message("✓ JavSP备用爬虫获取信息成功")
+                                else:
+                                    log_message("JavSP备用爬虫未找到信息")
+                            except Exception as e:
+                                log_message(f"JavSP备用爬虫获取失败: {str(e)}")
+                        
+                        if javdb_info and javdb_info.get('title') and javdb_info['title'] not in error_titles:
+                            # 更新数据库
+                            try:
+                                self.save_javdb_info_to_db(video_id, javdb_info)
+                                log_message(f"✓ 成功更新: {javdb_info['title']}")
+                                success_count += 1
+                            except Exception as e:
+                                log_message(f"保存到数据库失败: {str(e)}")
+                                skip_count += 1
+                        else:
+                            log_message("未获取到有效信息或信息仍为错误标题，跳过")
+                            skip_count += 1
+                    
+                    # 提交事务
+                    self.conn.commit()
+                    
+                    if not cancel_var.get():
+                        progress_var.set(100)
+                        status_var.set("修正完成")
+                        log_message(f"\n修正完成！")
+                        log_message(f"成功修正: {success_count} 条")
+                        log_message(f"跳过: {skip_count} 条")
+                        
+                        # 刷新视频列表
+                        self.root.after(0, self.load_videos)
+                        
+                        messagebox.showinfo("完成", 
+                            f"JAVDB错误信息修正完成！\n\n"
+                            f"成功修正: {success_count} 条\n"
+                            f"跳过: {skip_count} 条")
+                    
+                except Exception as e:
+                    log_message(f"修正过程出错: {str(e)}")
+                    messagebox.showerror("错误", f"修正JAVDB错误信息时出错: {str(e)}")
+                finally:
+                    progress_window.destroy()
+            
+            # 在后台线程中执行修正
+            import threading
+            thread = threading.Thread(target=fix_records)
+            thread.daemon = True
+            thread.start()
+            
+        except Exception as e:
+            messagebox.showerror("错误", f"修正JAVDB错误信息时出错: {str(e)}")
 
     def __del__(self):
         """析构函数"""
@@ -9156,6 +9836,8 @@ class ActorDetailWindow:
         except Exception as e:
             messagebox.showerror("错误", f"无法打开链接: {str(e)}")
     
+
+
 if __name__ == "__main__":
     app = MediaLibrary()
     app.run()

@@ -38,21 +38,31 @@ class BatchActorUpdater:
             print(f"❌ 爬虫初始化失败: {e}")
             return False
     
-    def get_actors_to_update(self, limit=None):
+    def get_actors_to_update(self, limit=None, only_never_crawled=True):
         """获取需要更新的演员列表"""
         try:
             conn = sqlite3.connect(self.db_path)
             cursor = conn.cursor()
             
-            # 查询所有有profile_url的演员，优先更新从未爬取过的
-            query = """
-            SELECT id, name, profile_url, last_crawled_at 
-            FROM actors 
-            WHERE profile_url IS NOT NULL AND profile_url != ''
-            ORDER BY 
-                CASE WHEN last_crawled_at IS NULL THEN 0 ELSE 1 END,
-                last_crawled_at ASC
-            """
+            if only_never_crawled:
+                # 只查询从未爬取过的演员
+                query = """
+                SELECT id, name, profile_url, last_crawled_at 
+                FROM actors 
+                WHERE profile_url IS NOT NULL AND profile_url != '' 
+                AND last_crawled_at IS NULL
+                ORDER BY id
+                """
+            else:
+                # 查询所有有profile_url的演员，优先更新从未爬取过的
+                query = """
+                SELECT id, name, profile_url, last_crawled_at 
+                FROM actors 
+                WHERE profile_url IS NOT NULL AND profile_url != ''
+                ORDER BY 
+                    CASE WHEN last_crawled_at IS NULL THEN 0 ELSE 1 END,
+                    last_crawled_at ASC
+                """
             
             if limit:
                 query += f" LIMIT {limit}"
@@ -71,9 +81,10 @@ class BatchActorUpdater:
     
 
     
-    def run_batch_update(self, limit=None, delay_range=(2, 5)):
+    def run_batch_update(self, limit=None, delay_range=(2, 5), only_never_crawled=True):
         """运行批量更新"""
-        print("=== 开始批量更新演员信息 ===")
+        mode_text = "从未爬取的演员" if only_never_crawled else "所有演员（包括已爬取的）"
+        print(f"=== 开始批量更新演员信息 ({mode_text}) ===")
         
         # 初始化爬虫
         if not self.setup_driver():
@@ -81,7 +92,7 @@ class BatchActorUpdater:
         
         try:
             # 获取需要更新的演员列表
-            actors = self.get_actors_to_update(limit)
+            actors = self.get_actors_to_update(limit, only_never_crawled)
             self.stats['total'] = len(actors)
             
             if not actors:
@@ -144,6 +155,7 @@ def main():
     parser.add_argument('--limit', type=int, help='限制更新数量')
     parser.add_argument('--min-delay', type=float, default=2.0, help='最小延迟时间（秒）')
     parser.add_argument('--max-delay', type=float, default=5.0, help='最大延迟时间（秒）')
+    parser.add_argument('--all', action='store_true', help='更新所有演员（包括已爬取过的），默认只更新从未爬取的')
     
     args = parser.parse_args()
     
@@ -152,7 +164,8 @@ def main():
     try:
         success = updater.run_batch_update(
             limit=args.limit,
-            delay_range=(args.min_delay, args.max_delay)
+            delay_range=(args.min_delay, args.max_delay),
+            only_never_crawled=not args.all
         )
         
         updater.print_stats()
