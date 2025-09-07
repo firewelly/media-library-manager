@@ -390,12 +390,22 @@ class ActorCrawlerHeadlessDB:
         cursor = conn.cursor()
         
         try:
-            # 检查演员是否已存在
-            cursor.execute("""
-                SELECT id FROM actors WHERE name = ? OR name_common = ? OR name_traditional = ?
-            """, (actor_info['name'], actor_info['name_common'], actor_info['name_traditional']))
+            # 检查演员是否已存在 - 优先通过profile_url匹配
+            profile_url = actor_info.get('profile_url', '')
+            existing_actor = None
             
-            existing_actor = cursor.fetchone()
+            if profile_url:
+                cursor.execute("""
+                    SELECT id FROM actors WHERE profile_url = ?
+                """, (profile_url,))
+                existing_actor = cursor.fetchone()
+            
+            # 如果通过profile_url没找到，再尝试通过姓名匹配
+            if not existing_actor:
+                cursor.execute("""
+                    SELECT id FROM actors WHERE name = ? OR name_common = ? OR name_traditional = ?
+                """, (actor_info['name'], actor_info['name_common'], actor_info['name_traditional']))
+                existing_actor = cursor.fetchone()
             
             if existing_actor:
                 # 更新现有演员信息
@@ -461,6 +471,9 @@ class ActorCrawlerHeadlessDB:
         actor_info = self.crawl_actor_detail(actor_url)
         
         if actor_info:
+            # 将profile_url添加到actor_info中
+            actor_info['profile_url'] = actor_url
+            
             # 保存到数据库
             actor_id = self.save_actor_to_database(actor_info)
             if actor_id:

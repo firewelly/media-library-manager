@@ -72,3 +72,10 @@ coverage.xml
 *.cover
 .hypothesis/
 .pytest_cache/
+
+# DrawIO备份文件
+*.drawio.bkp
+
+# 结果输出文件
+results/
+javdb_selenium_results_*.json

@@ -34,7 +34,7 @@ def init_empty_database():
             file_path TEXT UNIQUE NOT NULL,
             file_name TEXT NOT NULL,
             file_size INTEGER,
-            file_hash TEXT,
+            md5_hash TEXT,
             title TEXT,
             description TEXT,
             genre TEXT,
@@ -75,7 +75,7 @@ def init_empty_database():
     
     # 创建索引以提高查询性能
     cursor.execute('CREATE INDEX IF NOT EXISTS idx_videos_file_path ON videos(file_path)')
-    cursor.execute('CREATE INDEX IF NOT EXISTS idx_videos_file_hash ON videos(file_hash)')
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_videos_md5_hash ON videos(md5_hash)')
     cursor.execute('CREATE INDEX IF NOT EXISTS idx_videos_stars ON videos(stars)')
     cursor.execute('CREATE INDEX IF NOT EXISTS idx_videos_title ON videos(title)')
     cursor.execute('CREATE INDEX IF NOT EXISTS idx_folders_path ON folders(folder_path)')

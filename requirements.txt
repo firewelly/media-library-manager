@@ -8,8 +8,26 @@
 Pillow>=10.0.0
 
 # 网络请求库 / HTTP Requests Library  
-# 用于网络相关功能（如果需要） / For network-related features (if needed)
+# 用于网络相关功能和爬虫系统 / For network-related features and crawler system
 requests>=2.31.0
+requests[socks]>=2.31.0  # SOCKS代理支持 / SOCKS proxy support
+PySocks>=1.7.1  # SOCKS代理依赖 / SOCKS proxy dependency
+
+# HTML解析库 / HTML Parsing Library
+# 用于网页内容解析 / For web content parsing
+lxml>=4.9.0
+
+# CloudFlare绕过 / CloudFlare Bypass
+# 用于绕过CloudFlare保护 / For bypassing CloudFlare protection
+cloudscraper>=1.2.60
+
+# 日志和调试 / Logging and Debugging
+# 用于彩色日志输出 / For colored log output
+coloredlogs>=15.0
+
+# 配置文件处理 / Configuration File Processing
+# 用于YAML配置文件 / For YAML configuration files
+PyYAML>=6.0
 
 # ============ Python内置库 / Built-in Python Libraries ============
 # 以下库为Python标准库，无需单独安装 / The following are Python standard libraries, no separate installation required
