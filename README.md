@@ -1,165 +1,154 @@
-# 媒体库管理系统 / Media Library Management System
+# 智能媒体库管理系统
 
-一个功能强大的本地媒体文件管理系统，支持视频文件的组织、标记、评分和预览功能。
+一个功能强大的跨平台视频媒体库管理软件，支持本地和NAS存储的视频文件智能管理。具备MD5去重、智能更新、演员信息管理、批量操作等高级功能。
 
-A powerful local media file management system that supports organization, tagging, rating, and preview of video files.
+## 🌟 项目特色
 
-## 功能特性 / Features
+- 🧠 **智能化管理** - 自动检测文件移动、智能去重、批量MD5计算
+- 🎭 **演员信息系统** - 完整的演员数据库，支持头像、别名、清理合并
+- 📊 **实时进度显示** - 所有批量操作都有详细的进度和日志显示
+- 🌐 **跨平台支持** - 支持macOS、Windows、Linux系统
+- 💾 **数据安全** - 自动备份、确认机制、完整的错误处理
 
-### 核心功能 / Core Features
-- 📁 **文件扫描与导入 / File Scanning & Import** - 自动扫描指定目录下的视频文件 / Automatically scan video files in specified directories
-- 🏷️ **智能标记系统 / Smart Tagging System** - 支持标题、描述、标签、类型等metadata管理 / Support for title, description, tags, genre and other metadata management
-- ⭐ **星级评分系统 / Star Rating System** - 5星评分，支持点击直接评分 / 5-star rating with click-to-rate functionality
-- 🖼️ **缩略图生成 / Thumbnail Generation** - 自动生成视频缩略图预览 / Automatically generate video thumbnail previews
-- 🔍 **强大的搜索与筛选 / Powerful Search & Filter** - 支持关键词搜索、星级筛选、来源文件夹筛选 / Support keyword search, star rating filter, source folder filter
-- 📊 **表格排序 / Table Sorting** - 点击列标题进行升序/降序排序 / Click column headers for ascending/descending sort
-- 💾 **数据库存储 / Database Storage** - 使用SQLite数据库持久化存储 / Persistent storage using SQLite database
+## 🎯 核心功能
 
-### 界面特性 / UI Features
-- 🎨 **现代化UI / Modern UI** - 基于Tkinter的直观用户界面 / Intuitive user interface based on Tkinter
-- 📱 **响应式布局 / Responsive Layout** - 支持窗口大小调整 / Support window resizing
-- 🌟 **交互式星级 / Interactive Stars** - 在列表和详情面板中直接点击星级评分 / Direct click-to-rate in list and detail panel
-- 📋 **详细信息面板 / Detail Panel** - 显示完整的文件metadata信息 / Display complete file metadata information
+### 📁 文件管理
+- **智能扫描** - 自动扫描指定目录下的视频文件，支持多文件夹管理
+- **文件移动检测** - 通过MD5哈希自动检测文件移动并更新路径
+- **NAS支持** - 支持网络存储设备，实时监控在线状态
+- **批量操作** - 支持批量生成缩略图、计算MD5、导入元数据
 
-### 高级功能 / Advanced Features
-- 🔄 **NAS同步支持 / NAS Sync Support** - 支持网络存储设备文件同步 / Support network storage device file synchronization
-- 📝 **批量操作 / Batch Operations** - 支持批量标记和管理 / Support batch tagging and management
-- 🎯 **智能文件名解析 / Smart Filename Parsing** - 从文件名自动提取星级信息 / Automatically extract star rating from filename
-- 📈 **统计信息 / Statistics** - 显示文件数量、总大小等统计数据 / Display file count, total size and other statistics
+### 🏷️ 媒体信息管理
+- **元数据编辑** - 支持标题、描述、标签、类型、年份等信息管理
+- **智能解析** - 从文件名自动提取星级信息和基本信息
+- **视频信息提取** - 自动获取视频时长、分辨率等技术信息
+- **缩略图生成** - 自动生成视频封面预览
 
-### 最新功能 / Latest Features
-- 🧠 **智能媒体库更新 / Smart Media Library Update** - 自动检测文件移动、添加新文件、更新MD5哈希 / Automatically detect file moves, add new files, update MD5 hashes
-- 🔐 **MD5哈希计算 / MD5 Hash Calculation** - 计算文件前1MB的MD5用于去重和移动检测 / Calculate MD5 of first 1MB for deduplication and move detection
-- 🔍 **智能去重 / Smart Deduplication** - 基于MD5哈希值智能检测和处理重复文件 / Smart detection and handling of duplicate files based on MD5 hash
-- 📁 **文件移动检测 / File Move Detection** - 通过MD5哈希自动检测文件移动并更新路径 / Automatically detect file moves via MD5 hash and update paths
-- 🔄 **批量MD5计算 / Batch MD5 Calculation** - 支持批量计算缺失或重新计算所有文件的MD5 / Support batch calculation of missing or recalculation of all file MD5s
-- 📊 **实时进度显示 / Real-time Progress Display** - 在批量操作时显示详细进度和统计信息 / Display detailed progress and statistics during batch operations
-- 🗂️ **多文件夹管理 / Multi-folder Management** - 支持同时管理多个活跃文件夹 / Support managing multiple active folders simultaneously
-- 🎬 **视频信息提取 / Video Info Extraction** - 自动提取视频时长、分辨率等技术信息 / Automatically extract video duration, resolution and other technical info
+### ⭐ 评分与搜索
+- **星级评分系统** - 5星评分，支持点击直接评分
+- **智能搜索** - 支持关键词搜索、星级筛选、来源文件夹筛选
+- **表格排序** - 点击列标题进行升序/降序排序
+- **实时筛选** - 输入即时显示筛选结果
 
-## 安装要求 / Requirements
+### 🎭 演员信息系统
+- **演员数据库** - 完整的演员信息管理，包括姓名、别名、头像
+- **智能清理** - 自动检测和合并重复演员记录
+- **关联管理** - 演员与视频文件的关联管理
+- **批量处理** - 支持批量导入和清理演员信息
 
-### 系统要求 / System Requirements
+### 🔐 智能去重与安全
+- **MD5哈希计算** - 计算文件哈希值用于去重和移动检测
+- **智能去重** - 基于MD5哈希值智能检测和处理重复文件
+- **数据备份** - 操作前自动备份，确保数据安全
+- **确认机制** - 重要操作前显示预览和确认对话框
+
+## 🚀 快速开始
+
+### 系统要求
 - Python 3.7+
 - macOS / Windows / Linux
+- 推荐使用SSD存储以获得更好的性能
 
-### 依赖包 / Dependencies
-```bash
-pip install -r requirements.txt
-```
+### 安装步骤
 
-主要依赖 / Main Dependencies：
-- `tkinter` - GUI界面 / GUI interface
-- `sqlite3` - 数据库（Python内置）/ Database (Python built-in)
-- `Pillow` - 图像处理 / Image processing
-- `opencv-python` - 视频处理 / Video processing
-- `python-magic` - 文件类型检测 / File type detection
-
-## 快速开始 / Quick Start
-
-### 1. 克隆项目 / Clone Project
+1. **克隆项目**
 ```bash
 git clone <repository-url>
 cd media-library
 ```
 
-### 2. 安装依赖 / Install Dependencies
+2. **安装依赖**
 ```bash
 pip install -r requirements.txt
 ```
 
-### 3. 初始化数据库 / Initialize Database
+3. **初始化数据库**
 ```bash
 python init_database.py
 ```
 
-### 4. 启动应用 / Start Application
+4. **启动应用**
 ```bash
+# 方法1: 直接运行
 python media_library.py
-```
 
-或使用启动脚本 / Or use startup script：
-```bash
+# 方法2: 使用启动脚本
 ./start_media_library.sh
 ```
 
-## 使用说明 / Usage Guide
+### 主要依赖
+- `tkinter` - GUI界面（Python内置）
+- `sqlite3` - 数据库（Python内置）
+- `Pillow` - 图像处理
+- `opencv-python` - 视频处理
+- `python-magic` - 文件类型检测
+- `requests` - 网络请求
+- `beautifulsoup4` - HTML解析
 
-### 首次使用 / First Time Use
-1. 启动应用后，点击"添加文件夹"按钮 / After starting the app, click "Add Folder" button
-2. 选择包含视频文件的目录 / Select directory containing video files
-3. 系统会自动扫描并导入视频文件 / System will automatically scan and import video files
-4. 等待缩略图生成完成 / Wait for thumbnail generation to complete
+## 📖 使用指南
 
-### 文件管理 / File Management
-- **查看文件 / View Files**：在主列表中浏览所有导入的视频文件 / Browse all imported video files in the main list
-- **搜索文件 / Search Files**：使用顶部搜索框输入关键词 / Use the top search box to enter keywords
-- **筛选文件 / Filter Files**：使用星级筛选器和来源文件夹筛选器 / Use star rating filter and source folder filter
-- **排序文件 / Sort Files**：点击列标题进行排序（支持所有列）/ Click column headers to sort (supports all columns)
+### 首次使用
+1. 启动应用后，点击菜单栏 "文件" → "添加文件夹"
+2. 选择包含视频文件的目录（支持本地文件夹和NAS挂载点）
+3. 系统自动扫描并导入视频文件
+4. 等待缩略图生成和MD5计算完成
 
-### 评分系统 / Rating System
-- **快速评分 / Quick Rating**：直接点击列表中的星级进行评分 / Click stars directly in the list to rate
-- **详细评分 / Detailed Rating**：在右侧详情面板中点击星级 / Click stars in the right detail panel
-- **文件名评分 / Filename Rating**：文件名中的感叹号会自动转换为星级 / Exclamation marks in filename automatically convert to star rating
-  - movie!!!.mp4 = 3星 / 3 stars
+### 基本操作
 
-### 信息编辑 / Information Editing
-1. 选择视频文件 / Select video file
-2. 在右侧详情面板中编辑信息 / Edit information in the right detail panel：
-   - 标题 / Title
-   - 描述 / Description
-   - 标签 / Tags
-   - 年份 / Year
-   - 类型 / Genre
-3. 点击"保存修改"按钮 / Click "Save Changes" button
+#### 文件管理
+- **浏览文件** - 在主列表中查看所有导入的视频文件
+- **搜索文件** - 使用顶部搜索框输入关键词进行模糊搜索
+- **筛选文件** - 使用星级筛选器和来源文件夹筛选器
+- **排序文件** - 点击任意列标题进行升序/降序排序
 
-### 播放视频 / Play Video
-- **双击播放 / Double-click Play**：双击列表中的文件名即可播放视频 / Double-click filename in the list to play video
-- **右键播放 / Right-click Play**：右键点击文件，选择"播放"选项 / Right-click file and select "Play" option
-- **按钮播放 / Button Play**：在详情面板中点击"播放视频"按钮 / Click "Play Video" button in detail panel
-- **智能检测 / Smart Detection**：自动检测NAS在线状态和文件存在性 / Automatically detect NAS online status and file existence
-- **跨平台支持 / Cross-platform Support**：支持macOS、Windows、Linux系统 / Support macOS, Windows, Linux systems
+#### 评分系统
+- **快速评分** - 直接点击列表中的星级图标
+- **详细评分** - 在右侧详情面板中点击星级
+- **自动评分** - 文件名中的感叹号自动转换为星级
+  - `!movie.mp4` = 2星
+  - `!!movie.mp4` = 3星
+  - `!!!movie.mp4` = 4星
+  - `!!!!movie.mp4` = 5星
 
-### 演员详情页面 / Actor Detail Page
-- **演员信息展示 / Actor Information Display**：显示演员的详细信息，包括姓名、别名、头像等 / Display detailed actor information including name, aliases, avatar, etc.
-- **影片列表 / Movie List**：展示该演员参演的所有影片 / Show all movies featuring the actor
-- **在线状态显示 / Online Status Display**：实时显示每个视频文件的在线状态（在线/离线）/ Real-time display of online status for each video file (Online/Offline)
-- **双击播放 / Double-click Play**：双击影片列表中的任意影片即可播放 / Double-click any movie in the list to play
-- **文件状态检测 / File Status Detection**：自动检测视频文件是否存在于文件系统中 / Automatically detect if video files exist in the file system
+#### 信息编辑
+1. 选择视频文件
+2. 在右侧详情面板中编辑：
+   - 标题、描述、标签
+   - 年份、类型、评分
+3. 点击"保存修改"按钮
 
-### 智能功能 / Smart Features
+#### 视频播放
+- **双击播放** - 双击文件名直接播放
+- **右键播放** - 右键选择"播放"选项
+- **按钮播放** - 详情面板中的"播放视频"按钮
+- **智能检测** - 自动检测文件存在性和NAS在线状态
 
-#### 智能媒体库更新 / Smart Media Library Update
-- 自动检测文件移动并更新路径 / Automatically detect file moves and update paths
-- 扫描新文件并添加到数据库 / Scan new files and add to database
-- 计算缺失的MD5哈希值 / Calculate missing MD5 hash values
-- 删除无效的文件记录 / Remove invalid file records
+### 高级功能
 
-#### 智能去重 / Smart Deduplication
-- 基于MD5哈希值检测重复文件 / Detect duplicate files based on MD5 hash
-- 提供多种保留策略 / Provide multiple retention strategies：
-  - 保留最新文件 / Keep newest file
-  - 保留最老文件 / Keep oldest file
-  - 保留特定文件夹中的文件 / Keep files in specific folder
+#### 智能媒体库更新
+- 菜单栏 "工具" → "智能媒体库更新"
+- 自动检测文件移动、添加新文件、更新MD5
+- 实时显示进度和详细日志
 
-#### 批量操作 / Batch Operations
-- 批量生成缩略图 / Batch generate thumbnails
-- 批量计算MD5哈希 / Batch calculate MD5 hashes
-- 批量导入元数据 / Batch import metadata
+#### 演员信息管理
+- 菜单栏 "工具" → "清理演员信息"
+- 自动检测和合并重复演员记录
+- 支持基于URL和名称的智能合并
 
-#### 演员信息清理 / Actor Information Cleanup
-- 🎭 **清理演员信息 / Clean Actor Information** - 通过工具菜单一键清理重复演员记录 / One-click cleanup of duplicate actor records via Tools menu
-- 📝 **处理逗号分隔名称 / Handle Comma-separated Names** - 自动分离逗号分隔的演员名称 / Automatically separate comma-separated actor names
-- 🔗 **基于URL合并 / URL-based Merging** - 根据演员URL合并重复记录 / Merge duplicate records based on actor URLs
-- 👤 **基于名称合并 / Name-based Merging** - 根据演员名称合并重复记录 / Merge duplicate records based on actor names
-- 🔄 **完整清理流程 / Complete Cleanup Process** - 执行所有清理步骤的完整流程 / Complete process executing all cleanup steps
-- 📊 **实时进度显示 / Real-time Progress Display** - 清理过程中显示详细进度和日志 / Display detailed progress and logs during cleanup
-- ✅ **安全确认机制 / Safe Confirmation Mechanism** - 操作前显示预览和确认对话框 / Show preview and confirmation dialogs before operations
+#### 批量操作
+- **批量MD5计算** - 计算缺失或重新计算所有文件的MD5
+- **智能去重** - 基于MD5哈希检测和处理重复文件
+- **批量生成缩略图** - 为所有视频生成预览图
 
-## 配置说明 / Configuration
+## ⚙️ 配置说明
 
-### GUI配置 / GUI Configuration
-编辑 `gui_config.json` 文件可以自定义界面显示 / Edit `gui_config.json` file to customize interface display：
+### 数据库配置
+- 数据库文件：`media_library.db`（SQLite格式）
+- 自动备份：每次启动时自动创建备份
+- 位置：项目根目录
+
+### GUI配置
+编辑 `gui_config.json` 文件可以自定义界面显示：
 ```json
 {
   "columns": {
@@ -174,154 +163,115 @@ python media_library.py
 }
 ```
 
-### 文件命名约定 / File Naming Convention
-系统支持从文件名自动解析星级 / System supports automatic star rating parsing from filename：
-- 只有叹号在文件名称的开头才算 / Only exclamation marks at the beginning of the filename are counted
-- `!movie.mp4` → 2星 / 2 stars
-- `!!movie.mp4` → 3星 / 3 stars
-- `!!!movie.mp4` → 4星 / 4 stars
-- `!!!!movie.mp4` → 5星 / 5 stars
-- `movie.mp4` → 0星 / 0 stars (没有叹号 / no exclamation marks)
-- `movie.mp4!` → 0星 / 0 stars (叹号不在开头 / exclamation marks not at the beginning)
+### 文件命名约定
+系统支持从文件名自动解析星级：
+- 只有叹号在文件名称的开头才算
+- `!movie.mp4` → 2星
+- `!!movie.mp4` → 3星
+- `!!!movie.mp4` → 4星
+- `!!!!movie.mp4` → 5星
+- `movie.mp4` → 0星 (没有叹号)
+- `movie.mp4!` → 0星 (叹号不在开头)
 
-## 数据库结构 / Database Structure
+## 🗄️ 数据库结构
 
-系统使用SQLite数据库存储以下信息 / System uses SQLite database to store the following information：
-- 文件基本信息（路径、大小、哈希值等）/ Basic file info (path, size, hash, etc.)
-- 媒体信息（标题、描述、标签、年份、类型等）/ Media info (title, description, tags, year, genre, etc.)
-- 技术信息（时长、分辨率、编码等）/ Technical info (duration, resolution, encoding, etc.)
-- 用户数据（星级评分、缩略图等）/ User data (star rating, thumbnails, etc.)
-- 时间戳（创建时间、更新时间等）/ Timestamps (creation time, update time, etc.)
-- MD5哈希值（用于去重和移动检测）/ MD5 hash (for deduplication and move detection)
+### videos表
+主要字段：`id`, `filename`, `filepath`, `filesize`, `duration`, `resolution`, `title`, `description`, `tags`, `rating`, `year`, `genre`, `thumbnail_path`, `md5_hash`, `created_at`, `updated_at`
 
-## 故障排除 / Troubleshooting
+### actors表
+主要字段：`id`, `name`, `avatar_url`, `video_id`
 
-### 常见问题 / Common Issues
+## 🔧 故障排除
 
-**Q: 缩略图无法生成 / Thumbnails cannot be generated**
-A: 确保安装了opencv-python包，并检查视频文件是否损坏 / Ensure opencv-python package is installed and check if video files are corrupted
+### 常见问题解决
 
-**Q: 文件扫描很慢 / File scanning is slow**
-A: 大量文件的首次扫描需要时间，请耐心等待。后续扫描会跳过已处理的文件 / Initial scanning of large number of files takes time, please be patient. Subsequent scans will skip already processed files
+**视频无法播放**
+- 检查文件是否存在及权限设置
+- 确认文件格式支持（推荐MP4、AVI、MKV）
+- 验证系统默认播放器配置
 
-**Q: 数据库损坏 / Database corrupted**
-A: 使用备份文件恢复，或重新运行init_database.py重建数据库 / Restore from backup file, or re-run init_database.py to rebuild database
+**缩略图生成失败**
+- 确认FFmpeg正确安装并在PATH中
+- 检查视频文件完整性
+- 确保有足够磁盘空间
 
-**Q: 界面显示异常 / Interface display abnormal**
-A: 检查gui_config.json配置文件格式是否正确 / Check if gui_config.json configuration file format is correct
+**性能优化建议**
+- 使用SSD存储提升I/O性能
+- 适当调整并发线程数
+- 定期清理缓存文件
 
-**Q: MD5计算失败 / MD5 calculation failed**
-A: 检查文件是否存在且可读，或文件是否被其他程序占用 / Check if file exists and is readable, or if file is being used by other programs
+### 日志查看
+应用运行时会在界面底部显示日志信息，包括：
+- 文件扫描进度
+- 错误信息
+- 操作状态
 
-**Q: 双击播放无响应 / Double-click play not responding**
-A: 确保没有同时进行拖拽操作，避免在表头区域双击。如果问题持续，请重启应用 / Ensure no dragging operation is in progress, avoid double-clicking in header area. If problem persists, restart the application
+## 🛠️ 开发说明
 
-**Q: 右键菜单没有播放选项 / Right-click menu missing play option**
-A: 确保右键点击的是数据行而不是表头，播放选项只在选中有效视频文件时显示 / Ensure right-clicking on data row not header, play option only shows when valid video file is selected
-
-### 日志查看 / Log Viewing
-应用运行时会在界面底部显示日志信息，包括 / Application displays log information at the bottom of the interface during runtime, including：
-- 文件扫描进度 / File scanning progress
-- 错误信息 / Error messages
-- 操作状态 / Operation status
-
-## 开发说明 / Development Notes
-
-### 项目结构 / Project Structure
+### 项目结构
 ```
 media-library/
-├── media_library.py      # 主程序文件 / Main program file
-├── init_database.py      # 数据库初始化 / Database initialization
-├── gui_config.json       # 界面配置 / Interface configuration
-├── requirements.txt      # 依赖包列表 / Dependencies list
-├── start_media_library.sh # 启动脚本 / Startup script
-└── README.md            # 项目说明 / Project documentation
+├── media_library.py      # 主程序文件
+├── init_database.py      # 数据库初始化
+├── gui_config.json       # 界面配置
+├── requirements.txt      # 依赖包列表
+├── start_media_library.sh # 启动脚本
+└── README.md            # 项目说明
 ```
 
-### 主要类和方法 / Main Classes and Methods
-- `MediaLibrary` - 主应用类 / Main application class
-- `create_gui()` - 创建用户界面 / Create user interface
-- `scan_folder()` - 扫描文件夹 / Scan folder
-- `load_videos()` - 加载视频列表 / Load video list
-- `set_stars()` - 设置星级评分 / Set star rating
-- `save_video_info()` - 保存视频信息 / Save video information
-- `comprehensive_media_update()` - 智能媒体库更新 / Smart media library update
-- `smart_remove_duplicates()` - 智能去重 / Smart deduplication
-- `batch_calculate_md5()` - 批量计算MD5 / Batch calculate MD5
-- `calculate_file_hash()` - 计算文件哈希 / Calculate file hash
-- `clean_actor_data()` - 清理演员信息 / Clean actor information
-- `_execute_actor_cleaning()` - 执行演员清理脚本 / Execute actor cleaning script
+### 主要类和方法
+- `MediaLibrary` - 主应用类
+- `create_gui()` - 创建用户界面
+- `scan_folder()` - 扫描文件夹
+- `load_videos()` - 加载视频列表
+- `set_stars()` - 设置星级评分
+- `save_video_info()` - 保存视频信息
+- `comprehensive_media_update()` - 智能媒体库更新
+- `smart_remove_duplicates()` - 智能去重
+- `batch_calculate_md5()` - 批量计算MD5
+- `calculate_file_hash()` - 计算文件哈希
+- `clean_actor_data()` - 清理演员信息
+- `_execute_actor_cleaning()` - 执行演员清理脚本
 
-## 许可证 / License
+## 📄 许可证
 
 本项目采用 BSD 3-Clause 许可证 - 查看 [LICENSE](LICENSE) 文件了解详情。
 
-This project is licensed under the BSD 3-Clause License - see the [LICENSE](LICENSE) file for details.
-
-## 贡献 / Contributing
+## 🤝 贡献
 
 欢迎提交Issue和Pull Request来改进这个项目！
 
-Welcome to submit Issues and Pull Requests to improve this project!
+## 📝 更新日志
 
-## 更新日志 / Changelog
-
-### v3.3.0 (Latest / 最新版本)
-- 🎬 **演员详情页面增强 / Actor Detail Page Enhancement**
-  - 📊 新增视频在线状态列 / Added video online status column
-  - 🔍 实时检测视频文件存在性 / Real-time detection of video file existence
-  - 💡 直观显示"在线"/"离线"状态 / Intuitive display of "Online"/"Offline" status
-  - ⚡ 优化列宽布局，提升用户体验 / Optimized column width layout for better user experience
-  - 🎯 精确的文件状态检测机制 / Precise file status detection mechanism
+### v3.3.0 (当前版本)
+- 🎬 演员详情页面增强
+- 📊 新增视频在线状态检测
+- 💡 直观显示文件状态
+- ⚡ 优化用户体验
 
 ### v3.2.0
-- 🎭 **新增演员信息清理功能 / Added Actor Information Cleanup Feature**
-  - 🛠️ 在工具菜单中新增"清理演员信息"选项 / Added "Clean Actor Information" option in Tools menu
-  - 📝 支持处理逗号分隔的演员名称 / Support handling comma-separated actor names
-  - 🔗 基于URL合并重复演员记录 / Merge duplicate actor records based on URLs
-  - 👤 基于名称合并重复演员记录 / Merge duplicate actor records based on names
-  - 🔄 提供完整清理流程选项 / Provide complete cleanup process option
-  - 📊 实时显示清理进度和详细日志 / Real-time display of cleanup progress and detailed logs
-  - ✅ 操作前确认机制确保数据安全 / Confirmation mechanism before operations to ensure data safety
-- 📚 **完善文档 / Enhanced Documentation**
-  - 📖 创建详细的演员记录清理合并指南 / Created detailed actor record cleanup and merge guide
-  - 🔧 提供完整的使用说明和故障排除 / Provide complete usage instructions and troubleshooting
+- 🎭 新增演员信息清理功能
+- 🔗 智能合并重复演员记录
+- 📚 完善文档和使用指南
 
 ### v3.1.0
-- 🎯 **重大修复：双击播放功能 / Major Fix: Double-click Play Feature**
-  - 🔧 彻底重构事件处理机制 / Completely refactored event handling mechanism
-  - 🎮 新增统一事件处理器 / Added unified event handlers
-  - 🚫 解决事件冲突问题 / Resolved event conflict issues
-  - ⚡ 优化事件响应性能 / Optimized event response performance
-- 🖱️ **增强右键菜单 / Enhanced Right-click Menu**
-  - ▶️ 新增右键播放选项 / Added right-click play option
-  - 🎯 智能区域检测 / Smart region detection
-  - 🔄 事件阻断机制 / Event blocking mechanism
-- 🎬 **播放功能优化 / Play Feature Optimization**
-  - 🌐 跨平台播放支持 / Cross-platform play support
-  - 📡 NAS在线状态检测 / NAS online status detection
-  - 📁 文件存在性验证 / File existence verification
-  - ⚠️ 完善错误处理 / Improved error handling
+- 🎯 修复双击播放功能
+- 🖱️ 增强右键菜单
+- 🎬 优化播放功能
 
 ### v3.0.0
-- ✨ 新增智能媒体库更新功能 / Added smart media library update feature
-- 🔐 新增MD5哈希计算和文件移动检测 / Added MD5 hash calculation and file move detection
-- 🔍 新增智能去重功能 / Added smart deduplication feature
-- 📊 新增批量操作进度显示 / Added batch operation progress display
-- 🗂️ 新增多文件夹管理支持 / Added multi-folder management support
-- 🎬 改进视频信息提取 / Improved video information extraction
-- 🐛 修复数据库字段不匹配问题 / Fixed database field mismatch issues
+- ✨ 智能媒体库更新
+- 🔐 MD5哈希计算
+- 🔍 智能去重功能
+- 📊 批量操作进度显示
 
 ### v2.0.0
-- ✨ 新增表头点击排序功能 / Added table header click sorting
-- ⭐ 优化星级显示为实心/空心星星组合 / Optimized star display with solid/hollow star combination
-- 🖱️ 支持直接点击星级进行评分 / Support direct click-to-rate stars
-- 📊 增强视频详情面板，显示完整metadata / Enhanced video detail panel with complete metadata
-- 💾 改进数据保存功能 / Improved data saving functionality
+- ✨ 表头点击排序
+- ⭐ 星级评分优化
+- 📊 视频详情面板增强
 
 ### v1.0.0
-- 🎉 初始版本发布 / Initial version release
-- 📁 基础文件扫描和管理功能 / Basic file scanning and management
-- ⭐ 星级评分系统 / Star rating system
-- 🔍 搜索和筛选功能 / Search and filter functionality
-- 🖼️ 缩略图生成 / Thumbnail generation
+- 🎉 初始版本发布
+- 📁 基础文件管理
+- ⭐ 星级评分系统
+- 🖼️ 缩略图生成

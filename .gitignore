@@ -79,3 +79,6 @@ coverage.xml
 # 结果输出文件
 results/
 javdb_selenium_results_*.json
+
+# 第三方库目录
+JavSP/

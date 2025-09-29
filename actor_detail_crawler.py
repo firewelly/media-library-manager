@@ -3,6 +3,27 @@
 """
 演员详细信息爬虫
 使用Selenium + SOCKS5代理爬取JAVDB演员页面的详细信息
+
+演员详细信息爬虫
+使用Selenium + SOCKS5代理爬取JAVDB演员页面的详细信息
+功能说明：
+1. 自动检测并适配 macOS/Windows/Linux 平台，调用对应平台的 Edge WebDriver。
+2. 通过本地 SOCKS5 代理（默认 127.0.0.1:1080）访问 JAVDB，避免直接暴露真实 IP。
+3. 访问指定演员详情页，解析并提取以下字段：
+   - 主名称（日文假名优先）
+   - 繁体中文名
+   - 常用名（日文名）
+   - 所有别名（逗号拼接）
+   - 头像 URL 与二进制数据（自动下载）
+4. 将解析结果写回本地 SQLite 数据库（media_library.db）的 actors 表：
+   - 更新 name_traditional、name_common、aliases、avatar_url、avatar_data
+   - 记录 last_crawled_at 时间戳
+5. 具备反检测能力：禁用 webdriver 标志、随机 User-Agent、禁用图片加载、执行 JS 抹除 navigator 指纹。
+6. 异常处理完善：超时重试、Cloudflare/验证码页面识别、元素缺失容错、浏览器崩溃自动重启。
+7. 提供命令行入口，可批量读取待补全演员 URL，循环爬取并入库。
+8. 日志详细：打印每一步 URL、标题、解析结果、数据库影响行数，方便审计与排错。
+
+
 """
 
 import sqlite3
