@@ -26,6 +26,97 @@ import json
 import time
 import cv2
 from send2trash import send2trash
+# 移除并行处理相关导入，改为串行处理以适应NAS环境
+# from concurrent.futures import ThreadPoolExecutor, as_completed
+# import multiprocessing
+import logging
+
+# 日志级别配置
+class LogLevel:
+    DEBUG = 0
+    INFO = 1
+    WARNING = 2
+    ERROR = 3
+    CRITICAL = 4
+
+# 全局日志配置
+CURRENT_LOG_LEVEL = LogLevel.INFO  # 默认日志级别
+LOG_TO_CONSOLE = True  # 是否输出到控制台
+LOG_TO_GUI = True  # 是否输出到GUI
+
+def set_log_level(level):
+    """设置全局日志级别"""
+    global CURRENT_LOG_LEVEL
+    CURRENT_LOG_LEVEL = level
+
+def log_debug(message, gui_log_func=None):
+    """调试级别日志"""
+    if CURRENT_LOG_LEVEL <= LogLevel.DEBUG:
+        _output_log("DEBUG", message, gui_log_func)
+
+def log_info(message, gui_log_func=None):
+    """信息级别日志"""
+    if CURRENT_LOG_LEVEL <= LogLevel.INFO:
+        _output_log("INFO", message, gui_log_func)
+
+def log_warning(message, gui_log_func=None):
+    """警告级别日志"""
+    if CURRENT_LOG_LEVEL <= LogLevel.WARNING:
+        _output_log("WARNING", message, gui_log_func)
+
+def log_error(message, gui_log_func=None):
+    """错误级别日志"""
+    if CURRENT_LOG_LEVEL <= LogLevel.ERROR:
+        _output_log("ERROR", message, gui_log_func)
+
+def log_critical(message, gui_log_func=None):
+    """严重错误级别日志"""
+    if CURRENT_LOG_LEVEL <= LogLevel.CRITICAL:
+        _output_log("CRITICAL", message, gui_log_func)
+
+def _output_log(level, message, gui_log_func=None):
+    """输出日志的内部函数"""
+    timestamp = datetime.now().strftime('%H:%M:%S')
+    formatted_message = f"[{level}] {message}"
+    
+    # 输出到控制台
+    if LOG_TO_CONSOLE:
+        print(f"{timestamp} - {formatted_message}")
+    
+    # 输出到GUI（如果提供了GUI日志函数）
+    if LOG_TO_GUI and gui_log_func:
+        gui_log_func(formatted_message)
+
+class ProgressUpdateManager:
+    """进度更新管理器，用于控制GUI更新频率"""
+    def __init__(self, update_interval=10):
+        self.update_interval = update_interval  # 每N个项目更新一次
+        self.last_update_count = 0
+        
+    def should_update(self, current_count, total_count=None, force_update=False):
+        """判断是否应该更新进度"""
+        if force_update:
+            return True
+        if total_count and current_count >= total_count:
+            return True  # 最后一个项目总是更新
+        if current_count - self.last_update_count >= self.update_interval:
+            self.last_update_count = current_count
+            return True
+        return False
+    
+    def update_progress(self, progress_var, status_var, current_count, total_count, 
+                       status_text, progress_window=None, update_stats_func=None, *args):
+        """统一的进度更新函数"""
+        if self.should_update(current_count, total_count):
+            if progress_var:
+                progress = (current_count / total_count) * 100 if total_count > 0 else 0
+                progress_var.set(progress)
+            if status_var:
+                status_var.set(status_text)
+            if update_stats_func:
+                update_stats_func(*args)
+            if progress_window:
+                progress_window.update()
 
 class ProgressWindow:
     """进度显示窗口"""
@@ -554,6 +645,21 @@ class MediaLibrary:
             self.save_column_config()
             messagebox.showinfo("重置完成", "界面布局已重置为默认设置")
     
+    def on_log_level_change(self):
+        """日志级别改变时的回调函数"""
+        new_level = self.log_level_var.get()
+        set_log_level(new_level)
+        level_names = {LogLevel.DEBUG: "调试", LogLevel.INFO: "信息", LogLevel.WARNING: "警告", 
+                      LogLevel.ERROR: "错误", LogLevel.CRITICAL: "严重"}
+        log_info(f"日志级别已设置为: {level_names.get(new_level, '未知')}")
+    
+    def on_log_output_change(self):
+        """日志输出选项改变时的回调函数"""
+        global LOG_TO_CONSOLE, LOG_TO_GUI
+        LOG_TO_CONSOLE = self.log_to_console_var.get()
+        LOG_TO_GUI = self.log_to_gui_var.get()
+        log_info(f"日志输出设置已更新 - 控制台: {LOG_TO_CONSOLE}, 界面: {LOG_TO_GUI}")
+    
     def on_closing(self):
         """窗口关闭时保存配置"""
         self.save_column_config()
@@ -804,6 +910,37 @@ class MediaLibrary:
         
         # 加载文件夹列表
         self.load_folder_sources()
+        
+        # 日志级别控制
+        log_frame = ttk.LabelFrame(left_frame, text="日志级别")
+        log_frame.pack(fill=tk.X, pady=(10, 0))
+        
+        self.log_level_var = tk.IntVar(value=CURRENT_LOG_LEVEL)
+        log_levels = [
+            ("调试", LogLevel.DEBUG),
+            ("信息", LogLevel.INFO),
+            ("警告", LogLevel.WARNING),
+            ("错误", LogLevel.ERROR),
+            ("严重", LogLevel.CRITICAL)
+        ]
+        
+        for text, level in log_levels:
+            ttk.Radiobutton(log_frame, text=text, variable=self.log_level_var,
+                           value=level, command=self.on_log_level_change).pack(anchor=tk.W, padx=5)
+        
+        # 日志输出控制
+        log_output_frame = ttk.Frame(log_frame)
+        log_output_frame.pack(fill=tk.X, padx=5, pady=(5, 5))
+        
+        self.log_to_console_var = tk.BooleanVar(value=LOG_TO_CONSOLE)
+        ttk.Checkbutton(log_output_frame, text="控制台输出", 
+                       variable=self.log_to_console_var,
+                       command=self.on_log_output_change).pack(anchor=tk.W)
+        
+        self.log_to_gui_var = tk.BooleanVar(value=LOG_TO_GUI)
+        ttk.Checkbutton(log_output_frame, text="界面输出", 
+                       variable=self.log_to_gui_var,
+                       command=self.on_log_output_change).pack(anchor=tk.W)
         
         # 右侧面板 - 视频列表和详情
         right_frame = ttk.Frame(main_frame)
@@ -1194,7 +1331,7 @@ class MediaLibrary:
                 updated_count = 0
                 skipped_count = 0
                 
-                log_message("开始扫描媒体文件...")
+                log_info("开始扫描媒体文件...", log_message)
                 
                 # 获取所有活跃的文件夹
                 self.cursor.execute("SELECT folder_path, folder_type FROM folders WHERE is_active = 1")
@@ -1227,27 +1364,24 @@ class MediaLibrary:
                                 files_to_process.append((file_path, folder_type))
                                 total_files += 1
                 
-                log_message(f"发现 {total_files} 个视频文件")
+                log_info(f"发现 {total_files} 个视频文件", log_message)
                 
                 if total_files == 0:
-                    log_message("没有找到视频文件")
+                    log_warning("没有找到视频文件", log_message)
                     self.root.after(0, lambda: messagebox.showinfo("信息", "在活跃文件夹中没有找到视频文件"))
                     self.root.after(0, progress_window.destroy)
                     return
                 
                 # 第二阶段：批量处理文件
-                log_message("第二阶段：处理文件...")
+                log_info("第二阶段：处理文件...", log_message)
                 batch_size = 50  # 每批处理50个文件
                 
                 for i, (file_path, folder_type) in enumerate(files_to_process):
                     if cancel_var.get():
-                        log_message("用户取消操作")
+                        log_info("用户取消操作", log_message)
                         break
                     
                     scanned_count += 1
-                    progress = (scanned_count / total_files) * 100
-                    progress_var.set(progress)
-                    status_var.set(f"处理文件 {scanned_count}/{total_files}")
                     
                     try:
                         result = self.add_video_to_db_optimized(file_path, folder_type)
@@ -1259,16 +1393,20 @@ class MediaLibrary:
                             skipped_count += 1
                             
                     except Exception as e:
-                        log_message(f"处理文件失败: {os.path.basename(file_path)} - {str(e)}")
+                        log_error(f"处理文件失败: {os.path.basename(file_path)} - {str(e)}", log_message)
                         skipped_count += 1
                     
-                    # 更新统计信息
-                    update_stats(scanned_count, added_count, updated_count, skipped_count)
+                    # 只在每10个文件或批量提交时更新GUI
+                    if scanned_count % 10 == 0 or scanned_count % batch_size == 0:
+                        progress = (scanned_count / total_files) * 100
+                        progress_var.set(progress)
+                        status_var.set(f"处理文件 {scanned_count}/{total_files}")
+                        update_stats(scanned_count, added_count, updated_count, skipped_count)
                     
                     # 批量提交
                     if scanned_count % batch_size == 0:
                         self.conn.commit()
-                        log_message(f"已处理 {scanned_count} 个文件，批量提交数据库")
+                        log_debug(f"已处理 {scanned_count} 个文件，批量提交数据库", log_message)
                         progress_window.update()
                 
                 # 最终提交
@@ -1277,11 +1415,11 @@ class MediaLibrary:
                 if not cancel_var.get():
                     progress_var.set(100)
                     status_var.set("扫描完成")
-                    log_message(f"\n扫描完成！")
-                    log_message(f"总扫描文件: {scanned_count}")
-                    log_message(f"新增文件: {added_count}")
-                    log_message(f"更新文件: {updated_count}")
-                    log_message(f"跳过文件: {skipped_count}")
+                    log_info(f"\n扫描完成！", log_message)
+                    log_info(f"总扫描文件: {scanned_count}", log_message)
+                    log_info(f"新增文件: {added_count}", log_message)
+                    log_info(f"更新文件: {updated_count}", log_message)
+                    log_info(f"跳过文件: {skipped_count}", log_message)
                     
                     # 先显示完成对话框，避免卡顿
                     self.root.after(0, lambda: messagebox.showinfo("完成", 
@@ -1298,7 +1436,7 @@ class MediaLibrary:
                 
             except Exception as e:
                 error_msg = str(e)
-                log_message(f"扫描失败: {error_msg}")
+                log_error(f"扫描失败: {error_msg}", log_message)
                 self.root.after(0, lambda: messagebox.showerror("错误", f"扫描媒体文件时出错: {error_msg}"))
                 self.root.after(0, progress_window.destroy)
                 
@@ -1476,6 +1614,134 @@ class MediaLibrary:
             return hash_md5.hexdigest()
         except:
             return None
+    
+    def calculate_md5_with_cache(self, file_path, cache_dict):
+        """带缓存的MD5计算"""
+        try:
+            if not os.path.exists(file_path):
+                return None
+            
+            # 生成缓存键（文件路径 + 修改时间 + 文件大小）
+            stat = os.stat(file_path)
+            cache_key = f"{file_path}_{stat.st_mtime}_{stat.st_size}"
+            
+            # 检查缓存
+            if cache_key in cache_dict:
+                return cache_dict[cache_key]
+            
+            # 计算MD5
+            hash_md5 = hashlib.md5()
+            with open(file_path, "rb") as f:
+                for chunk in iter(lambda: f.read(4096), b""):
+                    hash_md5.update(chunk)
+            
+            md5_hash = hash_md5.hexdigest()
+            # 存入缓存
+            cache_dict[cache_key] = md5_hash
+            return md5_hash
+        except:
+            return None
+    
+    def serial_md5_calculation(self, file_paths, cache_dict, progress_callback=None):
+        """串行计算多个文件的MD5值（适用于NAS等IO受限环境）"""
+        results = {}
+        
+        for i, file_path in enumerate(file_paths):
+            try:
+                md5_hash = self.calculate_md5_with_cache(file_path, cache_dict)
+                results[file_path] = md5_hash
+                # 显示完成的文件信息
+                filename = os.path.basename(file_path)
+                log_info(f"MD5计算完成 [{i+1}/{len(file_paths)}]: {filename} -> {md5_hash[:8]}...")
+            except Exception as e:
+                filename = os.path.basename(file_path)
+                log_error(f"计算MD5失败 [{i+1}/{len(file_paths)}]: {filename} - {e}")
+                results[file_path] = None
+            
+            # 更新进度
+            if progress_callback:
+                progress_callback(i + 1, len(file_paths))
+        
+        return results
+    
+    def load_md5_cache(self, cache_file_path):
+        """加载MD5缓存"""
+        try:
+            if os.path.exists(cache_file_path):
+                with open(cache_file_path, 'r', encoding='utf-8') as f:
+                    import json
+                    return json.load(f)
+        except:
+            pass
+        return {}
+    
+    def save_md5_cache(self, cache_dict, cache_file_path):
+        """保存MD5缓存"""
+        try:
+            with open(cache_file_path, 'w', encoding='utf-8') as f:
+                import json
+                json.dump(cache_dict, f, ensure_ascii=False, indent=2)
+        except Exception as e:
+            print(f"保存缓存失败: {e}")
+    
+    def cleanup_md5_cache(self, cache_file_path):
+        """清理MD5缓存文件"""
+        try:
+            if os.path.exists(cache_file_path):
+                os.remove(cache_file_path)
+        except:
+            pass
+    
+    def batch_update_videos(self, update_data):
+        """批量更新视频记录"""
+        if not update_data:
+            return
+        
+        try:
+            self.cursor.executemany(
+                "UPDATE videos SET file_path = ?, file_name = ?, file_size = ?, source_folder = ?, md5_hash = ? WHERE id = ?",
+                update_data
+            )
+        except Exception as e:
+            print(f"批量更新失败: {e}")
+    
+    def batch_update_md5(self, md5_data):
+        """批量更新MD5哈希值"""
+        if not md5_data:
+            return
+        
+        try:
+            self.cursor.executemany(
+                "UPDATE videos SET md5_hash = ? WHERE id = ?",
+                md5_data
+            )
+        except Exception as e:
+            print(f"批量MD5更新失败: {e}")
+    
+    def batch_insert_videos(self, insert_data):
+        """批量插入新视频记录"""
+        if not insert_data:
+            return
+        
+        try:
+            self.cursor.executemany("""
+                INSERT INTO videos (file_path, file_name, title, stars, file_size, source_folder, md5_hash, duration, resolution, file_created_time, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, insert_data)
+        except Exception as e:
+            print(f"批量插入失败: {e}")
+    
+    def batch_delete_videos(self, video_ids):
+        """批量删除视频记录"""
+        if not video_ids:
+            return
+        
+        try:
+            # 将ID列表转换为元组列表，适配executemany
+            id_tuples = [(vid,) for vid in video_ids]
+            self.cursor.executemany("DELETE FROM videos WHERE id = ?", id_tuples)
+        except Exception as e:
+            print(f"批量删除失败: {e}")
             
     def parse_stars_from_filename(self, filename):
         """从文件名解析星级"""
@@ -3161,24 +3427,21 @@ class MediaLibrary:
                     skipped_count = 0
                     
                     total_files = len(videos)
-                    log_message(f"开始{operation_type}，共 {total_files} 个文件")
+                    log_info(f"开始{operation_type}，共 {total_files} 个文件", log_message)
                     
                     batch_size = 20  # 每批处理20个文件
                     start_time = time.time()
                     
                     for i, (video_id, file_path, file_name) in enumerate(videos):
                         if cancel_var.get():
-                            log_message("用户取消操作")
+                            log_info("用户取消操作", log_message)
                             break
                             
                         processed_count += 1
-                        progress = (processed_count / total_files) * 100
-                        progress_var.set(progress)
-                        status_var.set(f"处理文件 {processed_count}/{total_files}: {file_name}")
                         
                         try:
                             if not os.path.exists(file_path):
-                                log_message(f"文件不存在，跳过: {file_name}")
+                                log_warning(f"文件不存在，跳过: {file_name}", log_message)
                                 skipped_count += 1
                                 continue
                             
@@ -3193,17 +3456,21 @@ class MediaLibrary:
                                 calculated_count += 1
                                 
                                 if calculated_count % 10 == 0:  # 每10个文件记录一次日志
-                                    log_message(f"已计算 {calculated_count} 个文件的MD5")
+                                    log_debug(f"已计算 {calculated_count} 个文件的MD5", log_message)
                             else:
-                                log_message(f"MD5计算失败: {file_name}")
+                                log_error(f"MD5计算失败: {file_name}", log_message)
                                 failed_count += 1
                                 
                         except Exception as e:
-                            log_message(f"处理文件失败: {file_name} - {str(e)}")
+                            log_error(f"处理文件失败: {file_name} - {str(e)}", log_message)
                             failed_count += 1
                         
-                        # 更新统计信息
-                        update_stats(processed_count, calculated_count, failed_count, skipped_count)
+                        # 只在每5个文件或批量提交时更新GUI
+                        if processed_count % 5 == 0 or processed_count % batch_size == 0:
+                            progress = (processed_count / total_files) * 100
+                            progress_var.set(progress)
+                            status_var.set(f"处理文件 {processed_count}/{total_files}: {file_name}")
+                            update_stats(processed_count, calculated_count, failed_count, skipped_count)
                         
                         # 批量提交
                         if processed_count % batch_size == 0:
@@ -3211,7 +3478,7 @@ class MediaLibrary:
                             elapsed_time = time.time() - start_time
                             avg_time = elapsed_time / processed_count
                             remaining_time = avg_time * (total_files - processed_count)
-                            log_message(f"已处理 {processed_count} 个文件，预计剩余时间: {remaining_time:.1f}秒")
+                            log_debug(f"已处理 {processed_count} 个文件，预计剩余时间: {remaining_time:.1f}秒", log_message)
                             progress_window.update()
                     
                     # 最终提交
@@ -3222,12 +3489,12 @@ class MediaLibrary:
                         status_var.set("计算完成")
                         
                         total_time = time.time() - start_time
-                        log_message(f"\n{operation_type}完成！")
-                        log_message(f"总处理文件: {processed_count}")
-                        log_message(f"计算成功: {calculated_count}")
-                        log_message(f"失败: {failed_count}")
-                        log_message(f"跳过: {skipped_count}")
-                        log_message(f"总耗时: {total_time:.1f}秒")
+                        log_info(f"\n{operation_type}完成！", log_message)
+                        log_info(f"总处理文件: {processed_count}", log_message)
+                        log_info(f"计算成功: {calculated_count}", log_message)
+                        log_info(f"失败: {failed_count}", log_message)
+                        log_info(f"跳过: {skipped_count}", log_message)
+                        log_info(f"总耗时: {total_time:.1f}秒", log_message)
                         
                         # 先显示完成对话框，避免卡顿
                         messagebox.showinfo("完成", 
@@ -3245,7 +3512,7 @@ class MediaLibrary:
                     
                 except Exception as e:
                     error_msg = str(e)
-                    log_message(f"批量计算MD5失败: {error_msg}")
+                    log_error(f"批量计算MD5失败: {error_msg}", log_message)
                     self.root.after(0, lambda: messagebox.showerror("错误", f"批量计算MD5时出错: {error_msg}"))
                     self.root.after(0, progress_window.close)
                     
@@ -3416,12 +3683,12 @@ class MediaLibrary:
                     selected_folders = [folder for folder, var in folder_vars.items() if var.get()]
                     
                     if not selected_folders:
-                        log_message("错误：请至少选择一个文件夹进行去重")
+                        log_error("错误：请至少选择一个文件夹进行去重", log_message)
                         return
                     
-                    log_message(f"开始智能去重，策略：{strategy}")
-                    log_message(f"选择的文件夹范围：{', '.join(selected_folders)}")
-                    log_message(f"总共需要处理 {total_groups} 组重复文件")
+                    log_info(f"开始智能去重，策略：{strategy}", log_message)
+                    log_info(f"选择的文件夹范围：{', '.join(selected_folders)}", log_message)
+                    log_info(f"总共需要处理 {total_groups} 组重复文件", log_message)
                     
                     # 构建文件夹过滤条件
                     folder_placeholders = ','.join(['?' for _ in selected_folders])
@@ -6465,6 +6732,11 @@ class MediaLibrary:
                 removed_files_count = 0
                 md5_updated_count = 0
                 
+                # 初始化MD5缓存
+                cache_file_path = os.path.join(os.path.dirname(self.db_path), 'md5_cache.json')
+                md5_cache = self.load_md5_cache(cache_file_path)
+                log_message(f"加载MD5缓存，包含 {len(md5_cache)} 个条目")
+                
                 # 获取所有活跃且在线的文件夹（只处理实际存在的文件夹）
                 self.cursor.execute("SELECT folder_path FROM folders WHERE is_active = 1")
                 all_folders = [row[0] for row in self.cursor.fetchall()]
@@ -6516,64 +6788,125 @@ class MediaLibrary:
                 
                 log_message(f"从数据库加载了 {len(existing_md5_map)} 个已有MD5值")
                 
-                # 扫描并建立映射
+                # 第一步：收集所有需要处理的文件
+                all_video_files = []
                 for folder_path in active_folders:
                     log_message(f"扫描文件夹: {folder_path}")
-                    
                     for root, dirs, files in os.walk(folder_path):
                         for file in files:
                             if file.lower().endswith(('.mp4', '.avi', '.mkv', '.mov', '.wmv', '.flv', '.webm', '.m4v')):
                                 file_path = os.path.join(root, file)
-                                scanned_count += 1
-                                
-                                progress = (scanned_count / total_files_to_scan) * 60  # 前60%进度用于扫描文件
-                                progress_var.set(progress)
-                                status_var.set(f"扫描文件 {scanned_count}/{total_files_to_scan}")
-                                update_stats(scanned_count, new_files_count, updated_files_count, removed_files_count, md5_updated_count)
-                                
                                 try:
-                                    # 获取文件信息
                                     file_size = os.path.getsize(file_path)
-                                    
-                                    # 优化：检查是否已有MD5值，避免重复计算
-                                    if file_path in existing_md5_map:
-                                        md5_hash = existing_md5_map[file_path]
-                                        log_message(f"跳过MD5计算（已存在）: {file}")
+                                    # 过滤小文件：忽略2M以下的文件
+                                    if file_size >= 2 * 1024 * 1024:  # 2MB = 2 * 1024 * 1024 bytes
+                                        all_video_files.append((file_path, file_size, file, root))
                                     else:
-                                        # 计算MD5哈希值
-                                        log_message(f"计算MD5: {file}")
-                                        md5_hash = self.calculate_md5_hash(file_path)
-                                    
-                                    # 解析文件名获取标题和星级
-                                    title = self.parse_title_from_filename(file)
-                                    stars = self.parse_stars_from_filename(file)
-                                    
-                                    # 存储文件信息
-                                    active_files_map[file_path] = {
-                                        'size': file_size,
-                                        'md5': md5_hash,
-                                        'filename': file,
-                                        'title': title,
-                                        'stars': stars,
-                                        'source_folder': root
-                                    }
-                                    
-                                    # 建立MD5映射
-                                    if md5_hash not in md5_to_paths_map:
-                                        md5_to_paths_map[md5_hash] = []
-                                    md5_to_paths_map[md5_hash].append(file_path)
-                                    
-                                    # 建立文件名映射
-                                    if file not in filename_to_paths_map:
-                                        filename_to_paths_map[file] = []
-                                    filename_to_paths_map[file].append(file_path)
-                                    
+                                        log_message(f"跳过小文件（{file_size / (1024*1024):.1f}MB < 2MB）: {file}")
                                 except Exception as e:
-                                    log_message(f"处理文件失败: {file} - {str(e)}")
-                                
-                                # 每处理100个文件更新一次界面
-                                if scanned_count % 100 == 0:
-                                    progress_window.update()
+                                    log_message(f"获取文件大小失败: {file} - {str(e)}")
+                
+                log_message(f"发现 {len(all_video_files)} 个有效视频文件")
+                
+                # 第二步：分离需要计算MD5的文件和已有MD5的文件
+                files_need_md5 = []
+                files_with_md5 = []
+                
+                for file_path, file_size, filename, root in all_video_files:
+                    scanned_count += 1
+                    
+                    if file_path in existing_md5_map:
+                        # 已有MD5值
+                        md5_hash = existing_md5_map[file_path]
+                        files_with_md5.append((file_path, file_size, filename, root, md5_hash))
+                        log_message(f"使用已有MD5: {filename}")
+                    else:
+                        # 需要计算MD5
+                        files_need_md5.append(file_path)
+                    
+                    # 只在每50个文件时更新GUI
+                    if scanned_count % 50 == 0:
+                        progress = (scanned_count / len(all_video_files)) * 30  # 前30%进度用于文件分类
+                        progress_var.set(progress)
+                        status_var.set(f"分类文件 {scanned_count}/{len(all_video_files)}")
+                        progress_window.update()
+                
+                log_message(f"需要计算MD5的文件: {len(files_need_md5)} 个")
+                log_message(f"已有MD5的文件: {len(files_with_md5)} 个")
+                
+                # 第三步：并行计算MD5值
+                md5_results = {}
+                if files_need_md5:
+                    log_message("开始串行计算MD5值...")
+                    
+                    def md5_progress_callback(completed, total):
+                        progress = 30 + (completed / total) * 40  # 30%-70%进度用于MD5计算
+                        progress_var.set(progress)
+                        status_var.set(f"计算MD5 {completed}/{total}")
+                        update_stats(scanned_count, new_files_count, updated_files_count, removed_files_count, md5_updated_count)
+                        progress_window.update()
+                    
+                    md5_results = self.serial_md5_calculation(files_need_md5, md5_cache, md5_progress_callback)
+                    
+                    # 保存缓存
+                    self.save_md5_cache(md5_cache, cache_file_path)
+                    log_message(f"MD5计算完成，缓存已保存")
+                
+                # 第四步：建立文件映射
+                log_message("建立文件映射...")
+                
+                # 处理已有MD5的文件
+                for file_path, file_size, filename, root, md5_hash in files_with_md5:
+                    title = self.parse_title_from_filename(filename)
+                    stars = self.parse_stars_from_filename(filename)
+                    
+                    active_files_map[file_path] = {
+                        'size': file_size,
+                        'md5': md5_hash,
+                        'filename': filename,
+                        'title': title,
+                        'stars': stars,
+                        'source_folder': root
+                    }
+                    
+                    # 建立MD5映射
+                    if md5_hash not in md5_to_paths_map:
+                        md5_to_paths_map[md5_hash] = []
+                    md5_to_paths_map[md5_hash].append(file_path)
+                    
+                    # 建立文件名映射
+                    if filename not in filename_to_paths_map:
+                        filename_to_paths_map[filename] = []
+                    filename_to_paths_map[filename].append(file_path)
+                
+                # 处理新计算MD5的文件
+                for file_path, file_size, filename, root in all_video_files:
+                    if file_path in md5_results:
+                        md5_hash = md5_results[file_path]
+                        if md5_hash:  # 确保MD5计算成功
+                            title = self.parse_title_from_filename(filename)
+                            stars = self.parse_stars_from_filename(filename)
+                            
+                            active_files_map[file_path] = {
+                                'size': file_size,
+                                'md5': md5_hash,
+                                'filename': filename,
+                                'title': title,
+                                'stars': stars,
+                                'source_folder': root
+                            }
+                            
+                            # 建立MD5映射
+                            if md5_hash not in md5_to_paths_map:
+                                md5_to_paths_map[md5_hash] = []
+                            md5_to_paths_map[md5_hash].append(file_path)
+                            
+                            # 建立文件名映射
+                            if filename not in filename_to_paths_map:
+                                filename_to_paths_map[filename] = []
+                            filename_to_paths_map[filename].append(file_path)
+                        else:
+                            log_message(f"MD5计算失败，跳过文件: {filename}")
                 
                 log_message(f"文件扫描完成，共处理 {len(active_files_map)} 个有效文件")
                 
@@ -6585,6 +6918,11 @@ class MediaLibrary:
                 total_existing = len(existing_videos)
                 log_message(f"数据库中共有 {total_existing} 个文件记录")
                 
+                # 批量操作数据收集
+                md5_updates = []  # 需要更新MD5的记录
+                path_updates = []  # 需要更新路径的记录
+                records_to_delete = []  # 需要删除的记录ID
+                
                 for i, (video_id, file_path, source_folder, md5_hash) in enumerate(existing_videos):
                     progress = 60 + (i / total_existing) * 20  # 60%-80%进度用于检查现有文件
                     progress_var.set(progress)
@@ -6594,11 +6932,11 @@ class MediaLibrary:
                     if file_path in active_files_map:
                         # 文件仍然存在于活跃文件夹中
                         if not md5_hash:
-                            # 更新MD5哈希值
+                            # 收集需要更新MD5的记录
                             new_md5 = active_files_map[file_path]['md5']
-                            self.cursor.execute("UPDATE videos SET md5_hash = ? WHERE id = ?", (new_md5, video_id))
+                            md5_updates.append((new_md5, video_id))
                             md5_updated_count += 1
-                            log_message(f"更新MD5: {os.path.basename(file_path)}")
+                            log_message(f"准备更新MD5: {os.path.basename(file_path)}")
                         # 从映射中移除，表示已处理
                         del active_files_map[file_path]
                     else:
@@ -6644,25 +6982,22 @@ class MediaLibrary:
                             existing = self.cursor.fetchone()
                             
                             if existing:
-                                # 删除当前记录（避免重复）
-                                self.cursor.execute("DELETE FROM videos WHERE id = ?", (video_id,))
+                                # 收集需要删除的记录（避免重复）
+                                records_to_delete.append(video_id)
                                 removed_files_count += 1
-                                log_message(f"删除重复记录: {file_name}")
+                                log_message(f"准备删除重复记录: {file_name}")
                             else:
-                                # 更新路径和相关信息，保留原有的评分、标签等元数据
+                                # 收集需要更新路径的记录，保留原有的评分、标签等元数据
                                 file_info = active_files_map[found_path]
                                 new_source_folder = file_info['source_folder']
                                 new_md5 = file_info['md5']
                                 new_file_name = file_info['filename']
                                 new_file_size = file_info['size']
                                 
-                                # 只更新文件系统相关的字段，保留用户设置的评分、标签等
-                                self.cursor.execute(
-                                    "UPDATE videos SET file_path = ?, file_name = ?, file_size = ?, source_folder = ?, md5_hash = ? WHERE id = ?",
-                                    (found_path, new_file_name, new_file_size, new_source_folder, new_md5, video_id)
-                                )
+                                # 收集路径更新数据
+                                path_updates.append((found_path, new_file_name, new_file_size, new_source_folder, new_md5, video_id))
                                 updated_files_count += 1
-                                log_message(f"文件移动更新: {file_name} -> {found_path} (保留评分和标签)")
+                                log_message(f"准备文件移动更新: {file_name} -> {found_path} (保留评分和标签)")
                             
                             # 从映射中移除，表示已处理
                             if found_path in active_files_map:
@@ -6674,15 +7009,15 @@ class MediaLibrary:
                             is_from_online_folder = any(file_folder.startswith(online_folder) for online_folder in active_folders)
                             
                             if not is_from_configured_folder:
-                                # 删除不在任何配置文件夹范围内的文件记录
-                                self.cursor.execute("DELETE FROM videos WHERE id = ?", (video_id,))
+                                # 收集需要删除的记录（不在任何配置文件夹范围内）
+                                records_to_delete.append(video_id)
                                 removed_files_count += 1
-                                log_message(f"删除不在配置范围内的记录: {file_name} (路径: {file_path})")
+                                log_message(f"准备删除不在配置范围内的记录: {file_name} (路径: {file_path})")
                             elif is_from_online_folder:
-                                # 删除来自在线文件夹但不存在的文件记录
-                                self.cursor.execute("DELETE FROM videos WHERE id = ?", (video_id,))
+                                # 收集需要删除的记录（来自在线文件夹但不存在）
+                                records_to_delete.append(video_id)
                                 removed_files_count += 1
-                                log_message(f"删除无效记录: {file_name}")
+                                log_message(f"准备删除无效记录: {file_name}")
                             else:
                                 # 跳过离线文件夹中的文件
                                 log_message(f"跳过离线文件夹中的文件: {file_name}")
@@ -6691,6 +7026,27 @@ class MediaLibrary:
                     if i % 100 == 0:
                         self.conn.commit()
                 
+                # 执行批量数据库操作
+                log_message("执行批量数据库更新...")
+                
+                # 批量更新MD5
+                if md5_updates:
+                    self.batch_update_md5(md5_updates)
+                    log_message(f"批量更新了 {len(md5_updates)} 个文件的MD5")
+                
+                # 批量更新文件路径
+                if path_updates:
+                    self.batch_update_videos(path_updates)
+                    log_message(f"批量更新了 {len(path_updates)} 个文件的路径信息")
+                
+                # 批量删除记录
+                if records_to_delete:
+                    self.batch_delete_videos(records_to_delete)
+                    log_message(f"批量删除了 {len(records_to_delete)} 个无效记录")
+                
+                # 提交批量操作
+                self.conn.commit()
+                
                 # 第三阶段：添加剩余的新文件
                 log_message("\n第三阶段：添加新文件...")
                 
@@ -6698,10 +7054,14 @@ class MediaLibrary:
                 total_new_files = len(remaining_files)
                 log_message(f"发现 {total_new_files} 个新文件需要添加到数据库")
                 
+                # 收集批量插入数据
+                insert_data = []
+                batch_size = 100  # 每批处理100个文件
+                
                 for i, file_path in enumerate(remaining_files):
                     progress = 80 + (i / total_new_files) * 20 if total_new_files > 0 else 100  # 80%-100%进度用于添加新文件
                     progress_var.set(progress)
-                    status_var.set(f"添加新文件 {i+1}/{total_new_files}")
+                    status_var.set(f"准备新文件 {i+1}/{total_new_files}")
                     update_stats(scanned_count, new_files_count, updated_files_count, removed_files_count, md5_updated_count)
                     
                     try:
@@ -6718,11 +7078,8 @@ class MediaLibrary:
                         except:
                             pass
                         
-                        # 插入数据库
-                        self.cursor.execute("""
-                            INSERT INTO videos (file_path, file_name, title, stars, file_size, source_folder, md5_hash, duration, resolution, file_created_time, created_at)
-                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                        """, (
+                        # 收集插入数据
+                        insert_data.append((
                             file_path, 
                             file_info['filename'], 
                             file_info['title'], 
@@ -6739,14 +7096,23 @@ class MediaLibrary:
                         new_files_count += 1
                         duration_str = self.format_duration(duration) if duration else "未知"
                         resolution_str = resolution if resolution else "未知"
-                        log_message(f"新增文件: {file_info['filename']} (时长: {duration_str}, 分辨率: {resolution_str})")
+                        log_message(f"准备新增文件: {file_info['filename']} (时长: {duration_str}, 分辨率: {resolution_str})")
+                        
+                        # 每收集batch_size个文件就执行一次批量插入
+                        if len(insert_data) >= batch_size:
+                            self.batch_insert_videos(insert_data)
+                            log_message(f"批量插入了 {len(insert_data)} 个新文件")
+                            self.conn.commit()
+                            insert_data = []  # 清空已处理的数据
                         
                     except Exception as e:
-                        log_message(f"添加文件失败: {file_info['filename']} - {str(e)}")
-                    
-                    # 每处理100个文件提交一次
-                    if i % 100 == 0:
-                        self.conn.commit()
+                        log_message(f"准备文件失败: {file_info['filename']} - {str(e)}")
+                
+                # 处理剩余的文件
+                if insert_data:
+                    self.batch_insert_videos(insert_data)
+                    log_message(f"批量插入了最后 {len(insert_data)} 个新文件")
+                    self.conn.commit()
                 
                 # 最终提交
                 self.conn.commit()
@@ -6778,6 +7144,13 @@ class MediaLibrary:
                 error_msg = str(e)
                 log_message(f"错误: {error_msg}")
                 self.root.after(0, lambda: messagebox.showerror("错误", f"智能媒体库更新时出错: {error_msg}"))
+            finally:
+                # 清理MD5缓存文件
+                try:
+                    self.cleanup_md5_cache(cache_file_path)
+                    log_message("临时缓存文件已清理")
+                except:
+                    pass
         
         # 在新线程中执行更新
         threading.Thread(target=comprehensive_update, daemon=True).start()
@@ -7929,23 +8302,30 @@ class MediaLibrary:
                 # 第二阶段：去重处理
                 log_message("开始去重处理...")
                 
-                # 按MD5分组
-                hash_groups = {}
+                # 按MD5和文件大小分组（双重判定）
+                hash_size_groups = {}
                 for file_path, info in file_info_map.items():
                     if info.get('valid') and info.get('hash'):
                         md5_hash = info['hash']
-                        if md5_hash not in hash_groups:
-                            hash_groups[md5_hash] = []
-                        hash_groups[md5_hash].append(file_path)
+                        file_size = info['size']
+                        # 使用MD5和文件大小的组合作为键
+                        key = f"{md5_hash}_{file_size}"
+                        if key not in hash_size_groups:
+                            hash_size_groups[key] = []
+                        hash_size_groups[key].append(file_path)
                 
                 # 处理重复文件
                 files_to_process = []  # 最终要处理的文件列表
                 files_to_delete = []   # 要删除的重复文件列表
                 
-                for md5_hash, file_paths in hash_groups.items():
-                    # 检查数据库中是否已存在此MD5
-                    if self.check_duplicate_by_hash(md5_hash):
-                        log_message(f"MD5 {md5_hash[:8]}... 在数据库中已存在，跳过所有相关文件")
+                for key, file_paths in hash_size_groups.items():
+                    # 解析MD5和文件大小
+                    md5_hash, file_size_str = key.rsplit('_', 1)
+                    file_size = int(file_size_str)
+                    
+                    # 检查数据库中是否已存在此MD5和文件大小的组合
+                    if self.check_duplicate_by_hash(md5_hash, file_size):
+                        log_message(f"MD5 {md5_hash[:8]}... (大小: {file_size//1024//1024}MB) 在数据库中已存在，跳过所有相关文件")
                         if delete_duplicate:
                             files_to_delete.extend(file_paths)
                         continue
@@ -8256,24 +8636,80 @@ class MediaLibrary:
         return result['choice']
     
     def can_play_video(self, file_path):
-        """检查视频文件是否可以播放"""
+        """检查视频文件是否可以播放（增强版，包含完整性检查）"""
         try:
+            # 检查文件是否存在
+            if not os.path.exists(file_path):
+                return False
+            
             cap = cv2.VideoCapture(file_path)
             if not cap.isOpened():
                 return False
             
             frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+            if frame_count <= 0:
+                cap.release()
+                return False
+            
+            # 进行跳转测试，检测seeking问题
+            has_seeking_issues = self._test_video_seeking(cap, frame_count)
             cap.release()
             
-            return frame_count > 0
-        except Exception:
+            # 如果有跳转问题，将文件移动到回收站并返回False
+            if has_seeking_issues:
+                try:
+                    from send2trash import send2trash
+                    send2trash(file_path)
+                    log_info(f"检测到视频跳转问题，已移至回收站: {os.path.basename(file_path)}")
+                except Exception as e:
+                    log_info(f"移至回收站失败: {os.path.basename(file_path)} - {str(e)}")
+                return False
+            
+            return True
+            
+        except Exception as e:
+            log_info(f"视频检查过程出错: {os.path.basename(file_path)} - {str(e)}")
             return False
     
-    def check_duplicate_by_hash(self, md5_hash):
-        """检查文件哈希是否已存在于数据库中"""
+    def _test_video_seeking(self, cap, frame_count: int, test_points: int = 5) -> bool:
+        """测试视频跳转功能，检测是否有seeking问题"""
+        try:
+            # 测试几个关键位置的跳转
+            test_frames = [
+                int(frame_count * 0.1),   # 10%
+                int(frame_count * 0.3),   # 30%
+                int(frame_count * 0.5),   # 50%
+                int(frame_count * 0.7),   # 70%
+                int(frame_count * 0.9)    # 90%
+            ]
+            
+            for frame_num in test_frames:
+                cap.set(cv2.CAP_PROP_POS_FRAMES, frame_num)
+                ret, frame = cap.read()
+                
+                if not ret or frame is None:
+                    return True  # 跳转失败，存在问题
+                
+                # 检查实际位置是否接近目标位置
+                actual_frame = int(cap.get(cv2.CAP_PROP_POS_FRAMES))
+                if abs(actual_frame - frame_num) > frame_count * 0.05:  # 允许5%的误差
+                    return True  # 跳转不准确，存在问题
+            
+            return False  # 所有测试通过
+            
+        except Exception:
+            return True  # 测试过程出错，认为存在问题
+    
+    def check_duplicate_by_hash(self, md5_hash, file_size=None):
+        """检查文件哈希和大小是否已存在于数据库中（双重判定）"""
         try:
             cursor = self.conn.cursor()
-            cursor.execute("SELECT COUNT(*) FROM videos WHERE md5_hash = ?", (md5_hash,))
+            if file_size is not None:
+                # 同时检查MD5和文件大小
+                cursor.execute("SELECT COUNT(*) FROM videos WHERE md5_hash = ? AND file_size = ?", (md5_hash, file_size))
+            else:
+                # 仅检查MD5（向后兼容）
+                cursor.execute("SELECT COUNT(*) FROM videos WHERE md5_hash = ?", (md5_hash,))
             count = cursor.fetchone()[0]
             return count > 0
         except Exception:
@@ -8671,15 +9107,16 @@ class MediaLibrary:
         # 处理每个视频
         for i, video_id in enumerate(video_ids):
             try:
-                # 更新进度
-                progress_bar['value'] = i + 1
-                status_label.config(text=f"处理中: {i + 1}/{len(video_ids)}")
-                progress_window.update()
-                
                 if self.clean_filename_for_video(video_id):
                     success_count += 1
                 else:
                     failed_count += 1
+                
+                # 只在每10个文件时更新进度
+                if (i + 1) % 10 == 0 or i == len(video_ids) - 1:
+                    progress_bar['value'] = i + 1
+                    status_label.config(text=f"处理中: {i + 1}/{len(video_ids)}")
+                    progress_window.update()
             except Exception as e:
                 print(f"清理视频ID {video_id} 失败: {str(e)}")
                 failed_count += 1

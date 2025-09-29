@@ -1,0 +1,29 @@
+[
+  {
+    "file_path": "/Users/firewell/Downloads/mp42/巨乳大奶女神！不行了，你插的太深了，我受不了了_1.mp4",
+    "file_name": "巨乳大奶女神！不行了，你插的太深了，我受不了了_1.mp4",
+    "check_time": "2025-09-10T18:00:04.153546",
+    "checks": {
+      "file_exists": true,
+      "file_size": 72564474,
+      "opencv_playable": true,
+      "opencv_info": {
+        "frame_count": 33795,
+        "fps": 30.0,
+        "width": 720,
+        "height": 404,
+        "duration": 1126.5
+      },
+      "ffprobe_ok": false
+    },
+    "overall_status": "playable_with_issues",
+    "issues": [
+      "ffprobe失败: ffprobe失败: dyld[73373]: Library not loaded: @rpath/libarchive.19.dylib\n  Referenced from: <4BE74127-C90F-3341-A58D-D8891877ED33> /Users/firewell/anaconda3/lib/libtesseract.5.dylib\n  Reason: tried: '/Users/firewell/anaconda3/lib/libarchive.19.dylib' (no such file), '/Users/firewell/anaconda3/lib/libarchive.19.dylib' (no such file), '/Users/firewell/anaconda3/lib/libarchive.19.dylib' (no such file), '/Users/firewell/anaconda3/bin/../lib/libarchive.19.dylib' (no such file), '/Users/firewell/anaconda3/bin/../lib/libarchive.19.dylib' (no such file), '/usr/local/lib/libarchive.19.dylib' (no such file), '/usr/lib/libarchive.19.dylib' (no such file, not in dyld cache)\n"
+    ],
+    "recommendations": [
+      "建议检查视频质量"
+    ],
+    "video_id": 28616,
+    "title": "巨乳大奶女神！不行了，你插的太深了，我受不了了_1"
+  }
+]
