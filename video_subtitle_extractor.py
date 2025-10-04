@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """
-MLX-Whisper 视频字幕提取脚本
-支持从视频文件中提取音频，识别中文/日文语音，生成中文SRT字幕文件
+视频字幕提取工具
+使用 MLX-Whisper 从视频中提取音频并生成SRT字幕文件
+支持多种语言识别和翻译功能
 """
 
 import os
@@ -13,6 +14,46 @@ from pathlib import Path
 import json
 import re
 from datetime import timedelta
+
+def check_and_activate_venv():
+    """检查并激活虚拟环境"""
+    # 定义虚拟环境路径
+    script_dir = Path(__file__).parent
+    venv_path = script_dir / "mlx_whisper_env"
+    
+    # 检查是否已经在虚拟环境中
+    if hasattr(sys, 'real_prefix') or (hasattr(sys, 'base_prefix') and sys.base_prefix != sys.prefix):
+        print("✅ 已在虚拟环境中运行")
+        return True
+    
+    # 检查虚拟环境是否存在
+    if not venv_path.exists():
+        print(f"❌ 虚拟环境不存在: {venv_path}")
+        print("请先创建虚拟环境:")
+        print(f"python3 -m venv {venv_path}")
+        print(f"source {venv_path}/bin/activate")
+        print("pip install mlx-whisper")
+        return False
+    
+    # 获取虚拟环境的Python路径
+    venv_python = venv_path / "bin" / "python"
+    if not venv_python.exists():
+        print(f"❌ 虚拟环境Python不存在: {venv_python}")
+        return False
+    
+    # 如果不在虚拟环境中，重新启动脚本使用虚拟环境的Python
+    print(f"🔄 使用虚拟环境重新启动脚本: {venv_path}")
+    
+    # 构建新的命令行参数
+    new_args = [str(venv_python)] + sys.argv
+    
+    # 使用虚拟环境的Python重新执行脚本
+    try:
+        result = subprocess.run(new_args, check=False)
+        sys.exit(result.returncode)
+    except Exception as e:
+        print(f"❌ 启动虚拟环境失败: {e}")
+        return False
 
 def check_dependencies():
     """检查必要的依赖是否安装"""
@@ -158,6 +199,48 @@ def translate_to_chinese(text: str, detected_language: str) -> str:
     
     return text
 
+def filter_meaningless_content(text: str) -> bool:
+    """过滤无意义的重复内容"""
+    if not text or len(text.strip()) == 0:
+        return False
+    
+    text = text.strip()
+    
+    # 检查是否为单个字符或词的大量重复
+    words = text.split()
+    if len(words) > 5:  # 如果有超过5个词
+        # 检查是否大部分都是相同的词
+        word_counts = {}
+        for word in words:
+            word_counts[word] = word_counts.get(word, 0) + 1
+        
+        # 如果某个词出现次数超过总词数的70%，认为是重复内容
+        max_count = max(word_counts.values())
+        if max_count / len(words) > 0.7:
+            return False
+    
+    # 检查是否为单个字符的重复（如 "об об об" 或 "可可可"）
+    if len(text) > 10:
+        # 检查是否主要由重复的短字符串组成
+        for i in range(1, min(6, len(text) // 3)):  # 检查1-5个字符的重复模式
+            pattern = text[:i]
+            if text.replace(pattern, '').replace(' ', '') == '':
+                return False
+    
+    # 检查是否为单个英文单词的重复（如 "Remember Remember Remember"）
+    if len(words) > 3:
+        unique_words = set(words)
+        if len(unique_words) == 1:  # 所有词都相同
+            return False
+        elif len(unique_words) <= 2 and len(words) > 6:  # 只有1-2个不同的词但重复很多次
+            return False
+    
+    # 检查是否为过短的内容（少于2个字符）
+    if len(text.replace(' ', '')) < 2:
+        return False
+    
+    return True
+
 def generate_srt(transcription_result: dict, output_path: str, translate: bool = True) -> bool:
     """生成SRT字幕文件"""
     try:
@@ -171,22 +254,37 @@ def generate_srt(transcription_result: dict, output_path: str, translate: bool =
         print(f"正在生成SRT字幕文件: {output_path}")
         print(f"共 {len(segments)} 个片段")
         
+        filtered_count = 0
+        segment_number = 1
+        
         with open(output_path, 'w', encoding='utf-8') as f:
-            for i, segment in enumerate(segments, 1):
+            for segment in segments:
                 start_time = format_timestamp(segment['start'])
                 end_time = format_timestamp(segment['end'])
                 text = segment['text'].strip()
+                
+                if not text:
+                    continue
+                
+                # 过滤无意义的重复内容
+                if not filter_meaningless_content(text):
+                    filtered_count += 1
+                    continue
                 
                 # 如果需要翻译且不是中文
                 if translate and detected_language not in ['zh', 'chinese']:
                     text = translate_to_chinese(text, detected_language)
                 
                 # 写入SRT格式
-                f.write(f"{i}\n")
+                f.write(f"{segment_number}\n")
                 f.write(f"{start_time} --> {end_time}\n")
                 f.write(f"{text}\n\n")
+                segment_number += 1
         
         print(f"✅ SRT字幕文件生成成功: {output_path}")
+        print(f"📊 总共生成 {segment_number - 1} 个字幕片段")
+        if filtered_count > 0:
+            print(f"🧹 已过滤 {filtered_count} 个无意义的重复片段")
         return True
         
     except Exception as e:
@@ -194,6 +292,10 @@ def generate_srt(transcription_result: dict, output_path: str, translate: bool =
         return False
 
 def main():
+    # 首先检查并激活虚拟环境
+    if not check_and_activate_venv():
+        sys.exit(1)
+    
     parser = argparse.ArgumentParser(description='MLX-Whisper 视频字幕提取工具')
     parser.add_argument('video_path', help='输入视频文件路径')
     parser.add_argument('-o', '--output', help='输出SRT文件路径（可选）')

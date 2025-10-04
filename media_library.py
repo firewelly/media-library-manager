@@ -6175,117 +6175,105 @@ class MediaLibrary:
                             # 更新状态 - 开始爬取
                             progress_window.update_status(f"正在爬取JAVDB信息: {av_code}")
                             
-                            # 三级备用策略：优先使用javdb_crawler_single.py，失败时使用javbus_crawler_single.py，最后使用JavSP
+                            # 分级回退：JavDB 优先；若失败或演员为空，转向 JavBus 或 JavSP（不合并字段，使用单一来源）
                             import subprocess
                             import json
-                            javdb_result = None
                             
-                            # 首先尝试javdb_crawler_single.py
+                            def normalize_actors_from_names(names):
+                                if not isinstance(names, list):
+                                    return []
+                                return [{"name": n, "link": ""} for n in names if isinstance(n, str) and n.strip()]
+                            
+                            result_data = None
+                            blocked_titles = ['官方App下載', '官方App下载', 'Official App Download']
+                            cwd_dir = os.path.dirname(os.path.abspath(__file__))
+                            
+                            # ① JavDB 优先
                             try:
                                 cmd = ["python", "javdb_crawler_single.py", av_code]
-                                process = subprocess.run(cmd, capture_output=True, text=True, 
-                                                       cwd=os.path.dirname(os.path.abspath(__file__)), 
-                                                       timeout=60)
-                                
+                                process = subprocess.run(cmd, capture_output=True, text=True, cwd=cwd_dir, timeout=60)
                                 if process.returncode == 0 and process.stdout:
                                     try:
-                                        javdb_result = json.loads(process.stdout)
-                                        # 检查是否有错误或信息不完整
-                                        if ("error" in javdb_result or 
-                                            not javdb_result.get('title') or 
-                                            javdb_result.get('title') in ['官方App下載', '官方App下载', 'Official App Download'] or
-                                            not javdb_result.get('actors')):
-                                            progress_window.update_status(f"javdb_crawler_single.py信息不完整，尝试javbus备用")
-                                            javdb_result = None
+                                        parsed = json.loads(process.stdout)
+                                        if parsed and not parsed.get('error') and parsed.get('title') and parsed.get('title') not in blocked_titles:
+                                            result_data = parsed
+                                            has_actors = isinstance(parsed.get('actors'), list) and len(parsed.get('actors')) > 0
+                                            progress_window.update_status("✓ JavDB成功" if has_actors else "JavDB成功（演员缺失，尝试回退）")
                                         else:
-                                            progress_window.update_status(f"✓ javdb_crawler_single.py获取成功: {av_code}")
+                                            progress_window.update_status("JavDB信息不完整，尝试回退")
                                     except json.JSONDecodeError:
-                                        progress_window.update_status(f"javdb_crawler_single.py解析失败，尝试javbus备用")
-                                        javdb_result = None
+                                        progress_window.update_status("JavDB解析失败，尝试回退")
                                 else:
-                                    progress_window.update_status(f"javdb_crawler_single.py失败，尝试javbus备用")
-                                    javdb_result = None
+                                    progress_window.update_status("JavDB爬虫失败，尝试回退")
                             except Exception as e:
-                                progress_window.update_status(f"javdb_crawler_single.py异常，尝试javbus备用: {str(e)}")
-                                javdb_result = None
+                                progress_window.update_status(f"JavDB异常: {e}，尝试回退")
                             
-                            # 如果javdb_crawler_single.py失败，尝试javbus_crawler_single.py
-                            if not javdb_result:
+                            # ② JavBus/JavSP 回退（仅在JavDB失败或演员缺失时执行，采用单一来源，不做合并）
+                            need_fallback = not result_data or not (isinstance(result_data.get('actors'), list) and len(result_data.get('actors')) > 0)
+                            if need_fallback:
+                                used_source = None
+                                # 先尝试 JavBus
                                 try:
-                                    cmd = ["python", "javbus_crawler_single.py", av_code]
-                                    process = subprocess.run(cmd, capture_output=True, text=True, 
-                                                           cwd=os.path.dirname(os.path.abspath(__file__)), 
-                                                           timeout=60)
-                                    
-                                    if process.returncode == 0 and process.stdout:
+                                    progress_window.update_status("尝试JavBus回退...")
+                                    cmd_bus = ["python", "javbus_crawler_single.py", av_code]
+                                    p_bus = subprocess.run(cmd_bus, capture_output=True, text=True, cwd=cwd_dir, timeout=60)
+                                    if p_bus.returncode == 0 and p_bus.stdout:
                                         try:
-                                            javbus_result = json.loads(process.stdout)
-                                            if javbus_result.get('success') and javbus_result.get('title'):
-                                                # 转换javbus格式为javdb格式
-                                                javdb_result = {
-                                                    'title': javbus_result.get('title', ''),
-                                                    'actors': javbus_result.get('actors', []),
-                                                    'release_date': javbus_result.get('release_date', ''),
-                                                    'duration': javbus_result.get('duration', ''),
-                                                    'director': javbus_result.get('director', ''),
-                                                    'studio': javbus_result.get('studio', ''),
-                                                    'series': javbus_result.get('series', ''),
-                                                    'genres': javbus_result.get('genres', []),
-                                                    'cover_image': javbus_result.get('cover_image', ''),
-                                                    'rating': javbus_result.get('rating', ''),
-                                                    'av_code': av_code
+                                            bus_parsed = json.loads(p_bus.stdout)
+                                            if bus_parsed and not bus_parsed.get('error'):
+                                                # 直接使用 JavBus 结果（不合并）
+                                                result_data = {
+                                                    'title': bus_parsed.get('title'),
+                                                    'video_id': bus_parsed.get('number') or av_code,
+                                                    'detail_url': None,
+                                                    'release_date': bus_parsed.get('release_date'),
+                                                    'duration': None,
+                                                    'rating': None,
+                                                    'tags': bus_parsed.get('tags') or [],
+                                                    'actors': normalize_actors_from_names(bus_parsed.get('actors', [])),
+                                                    'studio': bus_parsed.get('studio'),
+                                                    'cover_image_url': bus_parsed.get('cover_image_url'),
+                                                    'local_image_path': bus_parsed.get('cover_image_path'),
+                                                    'magnet_links': bus_parsed.get('magnet_links', [])
                                                 }
-                                                progress_window.update_status(f"✓ javbus_crawler_single.py获取成功: {av_code}")
+                                                used_source = 'javbus'
+                                                progress_window.update_status("✓ 已切换到 JavBus 数据")
                                             else:
-                                                progress_window.update_status(f"javbus_crawler_single.py信息不完整，尝试JavSP最后备用")
-                                                javdb_result = None
+                                                progress_window.update_status("JavBus无有效数据")
                                         except json.JSONDecodeError:
-                                            progress_window.update_status(f"javbus_crawler_single.py解析失败，尝试JavSP最后备用")
-                                            javdb_result = None
+                                            progress_window.update_status("JavBus解析失败")
                                     else:
-                                        progress_window.update_status(f"javbus_crawler_single.py失败，尝试JavSP最后备用")
-                                        javdb_result = None
-                                except Exception as e:
-                                    progress_window.update_status(f"javbus_crawler_single.py异常，尝试JavSP最后备用: {str(e)}")
-                                    javdb_result = None
-                            
-                            # 如果前两个都失败，最后尝试JavSP
-                            if not javdb_result:
-                                try:
-                                    from javsp_integration import JavSPIntegration
-                                    javsp = JavSPIntegration()
-                                    if javsp.is_available():
-                                        progress_window.update_status(f"使用JavSP最后备用爬虫: {av_code}")
-                                        javdb_result = javsp.search_movie(av_code)
-                                        if javdb_result:
-                                            progress_window.update_status(f"✓ JavSP备用爬虫获取成功: {av_code}")
+                                        progress_window.update_status("JavBus爬虫失败")
+                                except Exception:
+                                    progress_window.update_status("JavBus异常")
+
+                                # 若 JavBus 未成功，尝试 JavSP
+                                if not used_source:
+                                    try:
+                                        progress_window.update_status("尝试JavSP回退...")
+                                        from javsp_integration import search_javdb_info as javsp_search
+                                        sp_result = javsp_search(av_code)
+                                        if sp_result:
+                                            result_data = sp_result  # 直接使用 JavSP 结果
+                                            used_source = 'javsp'
+                                            progress_window.update_status("✓ 已切换到 JavSP 数据")
                                         else:
-                                            progress_window.update_status(f"JavSP备用爬虫未找到信息: {av_code}")
-                                    else:
-                                        progress_window.update_status(f"JavSP不可用")
-                                except ImportError:
-                                    progress_window.update_status(f"JavSP集成模块不可用")
-                                except Exception as e:
-                                    progress_window.update_status(f"JavSP备用爬虫失败: {str(e)}")
+                                            progress_window.update_status("JavSP无有效数据")
+                                    except Exception:
+                                        progress_window.update_status("JavSP异常，回退结束")
                             
-                            # 检查最终结果
-                            if not javdb_result or "error" in javdb_result:
-                                error_msg = javdb_result.get('error', 'JAVDB爬取失败') if javdb_result else 'JAVDB爬取失败'
+                            # 最终检查与保存
+                            if not result_data or (result_data.get('title') in blocked_titles):
+                                error_msg = 'JAVDB爬取失败' if not result_data else '信息被屏蔽'
                                 failed_files.append(f"{file_name}: {error_msg}")
                                 progress_window.update_progress(i + 1, file_name, success=False)
                                 progress_window.update_status(f"失败: {error_msg}", "red")
                                 continue
                             
-                            # 更新状态 - 保存到数据库
+                            # 保存到数据库
                             progress_window.update_status(f"正在保存到数据库: {av_code}")
-                            
-                            # 立即保存JAVDB信息到数据库
-                            self.save_javdb_info_to_db(video_id, javdb_result)
-                            
-                            # 立即提交数据库事务
+                            self.save_javdb_info_to_db(video_id, result_data)
                             self.conn.commit()
-                            
-                            # 更新成功状态
                             progress_window.update_progress(i + 1, file_name, success=True)
                             progress_window.update_status(f"成功保存: {av_code}", "green")
                             
@@ -7665,95 +7653,181 @@ class MediaLibrary:
             if not result:
                 messagebox.showerror("错误", "未找到视频记录")
                 return
-                
+
             file_path, file_name = result
-            
+
             # 导入番号提取器
             from code_extractor import CodeExtractor
-            
+
             # 提取番号
             extractor = CodeExtractor()
             av_code = extractor.extract_code_from_filename(file_name)
-            
+
             if not av_code:
                 messagebox.showwarning("警告", f"无法从文件名 '{file_name}' 中提取番号")
                 return
-            
+
             # 确认对话框
             if not messagebox.askyesno("确认", f"检测到番号: {av_code}\n\n是否获取JAVDB信息？"):
                 return
-            
+
             # 创建进度窗口
             progress_window = tk.Toplevel(self.root)
             progress_window.title("JAVDB信息获取")
-            progress_window.geometry("400x200")
+            progress_window.geometry("420x220")
             progress_window.transient(self.root)
             progress_window.grab_set()
-            
+
             # 进度显示
             progress_label = ttk.Label(progress_window, text=f"正在获取 {av_code} 的信息...")
             progress_label.pack(pady=20)
-            
-            progress_bar = ttk.Progressbar(progress_window, length=300, mode='indeterminate')
+
+            progress_bar = ttk.Progressbar(progress_window, length=320, mode='indeterminate')
             progress_bar.pack(pady=10)
             progress_bar.start()
-            
+
             status_label = ttk.Label(progress_window, text="初始化...")
             status_label.pack(pady=10)
-            
+
             def fetch_thread():
                 try:
-                    # 更新状态
-                    self.root.after(0, lambda: status_label.config(text="正在搜索视频..."))
-                    
-                    # 调用javdb_crawler_single.py获取信息
                     import subprocess
                     import json
-                    
-                    # 执行javdb_crawler_single.py
-                    cmd = ["python", "javdb_crawler_single.py", av_code]
-                    process = subprocess.run(cmd, capture_output=True, text=True, cwd=os.path.dirname(os.path.abspath(__file__)))
-                    
-                    if process.returncode == 0 and process.stdout:
+                    cwd_dir = os.path.dirname(os.path.abspath(__file__))
+
+                    # 一级：JavDB 优先获取
+                    self.root.after(0, lambda: status_label.config(text="使用JavDB爬虫获取..."))
+                    result_data = None
+                    try:
+                        cmd = ["python", "javdb_crawler_single.py", av_code]
+                        process = subprocess.run(cmd, capture_output=True, text=True, cwd=cwd_dir, timeout=60)
+                        if process.returncode == 0 and process.stdout:
+                            try:
+                                parsed = json.loads(process.stdout)
+                                # 过滤被屏蔽或不完整信息
+                                blocked_titles = ['官方App下載', '官方App下载', 'Official App Download']
+                                if parsed and not parsed.get('error') and parsed.get('title') and parsed.get('title') not in blocked_titles:
+                                    result_data = parsed
+                                    has_actors = isinstance(parsed.get('actors'), list) and len(parsed.get('actors')) > 0
+                                    self.root.after(0, lambda: status_label.config(text="✓ JavDB成功" if has_actors else "JavDB成功（演员缺失，尝试回退）"))
+                                else:
+                                    self.root.after(0, lambda: status_label.config(text="JavDB信息不完整，尝试回退"))
+                            except json.JSONDecodeError:
+                                self.root.after(0, lambda: status_label.config(text="JavDB解析失败，尝试回退"))
+                        else:
+                            self.root.after(0, lambda: status_label.config(text="JavDB爬虫失败，尝试回退"))
+                    except Exception as e:
+                        err_msg = f"JavDB异常: {e}，尝试回退"
+                        self.root.after(0, lambda msg=err_msg: status_label.config(text=msg))
+
+                    # 二级：JavBus/JavSP 回退（仅在JavDB失败或演员缺失时执行，采用单一来源，不做合并）
+                    def normalize_actors(maybe_list):
+                        """将不同来源的演员列表统一为 [{name, link}] 格式。
+                        支持 list[str] 或 list[dict]({name, link}). 其他类型将被忽略。
+                        """
+                        normalized = []
+                        if isinstance(maybe_list, list):
+                            for item in maybe_list:
+                                if isinstance(item, dict):
+                                    name = (item.get('name') or '').strip()
+                                    link = item.get('link') or ''
+                                    if name:
+                                        normalized.append({'name': name, 'link': link})
+                                elif isinstance(item, str):
+                                    name = item.strip()
+                                    if name:
+                                        normalized.append({'name': name, 'link': ''})
+                        return normalized
+
+                    need_fallback = not result_data or not (isinstance(result_data.get('actors'), list) and len(result_data.get('actors')) > 0)
+                    if need_fallback:
+                        used_source = None
+                        # 尝试 JavBus
                         try:
-                            result = json.loads(process.stdout)
-                            # 检查是否有错误
-                            if "error" in result:
-                                result = None
-                        except json.JSONDecodeError:
-                            result = None
-                    else:
-                        result = None
-                    
-                    if result:
+                            self.root.after(0, lambda: status_label.config(text="尝试JavBus回退..."))
+                            cmd_bus = ["python", "javbus_crawler_single.py", av_code]
+                            p_bus = subprocess.run(cmd_bus, capture_output=True, text=True, cwd=cwd_dir, timeout=60)
+                            if p_bus.returncode == 0 and p_bus.stdout:
+                                try:
+                                    bus_parsed = json.loads(p_bus.stdout)
+                                    if bus_parsed and not bus_parsed.get('error'):
+                                        # 直接使用 JavBus 结果（不合并）
+                                        result_data = {
+                                            'title': bus_parsed.get('title'),
+                                            'video_id': bus_parsed.get('number') or av_code,
+                                            'detail_url': None,
+                                            'release_date': bus_parsed.get('release_date'),
+                                            'duration': None,
+                                            'rating': None,
+                                            'tags': bus_parsed.get('tags') or [],
+                                            # 兼容 JavBus 返回的演员结构（通常是 list[dict]）
+                                            'actors': normalize_actors(bus_parsed.get('actors', [])),
+                                            'studio': bus_parsed.get('studio'),
+                                            'cover_image_url': bus_parsed.get('cover_image_url'),
+                                            'local_image_path': bus_parsed.get('cover_image_path'),
+                                            'magnet_links': bus_parsed.get('magnet_links', [])
+                                        }
+                                        used_source = 'javbus'
+                                        self.root.after(0, lambda: status_label.config(text="✓ 已切换到 JavBus 数据"))
+                                    else:
+                                        self.root.after(0, lambda: status_label.config(text="JavBus无有效数据"))
+                                except json.JSONDecodeError:
+                                    self.root.after(0, lambda: status_label.config(text="JavBus解析失败"))
+                            else:
+                                self.root.after(0, lambda: status_label.config(text="JavBus爬虫失败"))
+                        except Exception:
+                            self.root.after(0, lambda: status_label.config(text="JavBus异常"))
+
+                        # 若 JavBus 未成功，尝试 JavSP
+                        if not used_source:
+                            try:
+                                self.root.after(0, lambda: status_label.config(text="尝试JavSP回退..."))
+                                from javsp_integration import search_javdb_info as javsp_search
+                                sp_result = javsp_search(av_code)
+                                if sp_result:
+                                    result_data = sp_result  # 直接使用 JavSP 结果
+                                    used_source = 'javsp'
+                                    self.root.after(0, lambda: status_label.config(text="✓ 已切换到 JavSP 数据"))
+                                else:
+                                    self.root.after(0, lambda: status_label.config(text="JavSP无有效数据"))
+                            except Exception:
+                                self.root.after(0, lambda: status_label.config(text="JavSP异常，回退结束"))
+
+                    # 结果处理
+                    if result_data:
                         self.root.after(0, lambda: status_label.config(text="正在保存到数据库..."))
-                        
-                        # 保存JAVDB信息到数据库
-                        self.save_javdb_info_to_db(video_id, result)
-                        
-                        self.root.after(0, lambda: status_label.config(text="获取完成"))
-                        time.sleep(1)
-                        
-                        # 关闭进度窗口并显示结果
-                        self.root.after(0, progress_window.destroy)
-                        self.root.after(100, lambda: messagebox.showinfo("完成", f"已成功获取并保存 {av_code} 的JAVDB信息\n\n标题: {result.get('title', 'N/A')}\n发行日期: {result.get('release_date', 'N/A')}\n评分: {result.get('rating', 'N/A')}"))
-                        
-                        # 刷新视频列表和详情显示
-                        self.root.after(200, self.load_videos)
-                        self.root.after(300, lambda: self.load_javdb_details(video_id))
+                        try:
+                            self.save_javdb_info_to_db(video_id, result_data)
+                            self.root.after(0, lambda: status_label.config(text="获取完成"))
+                            time.sleep(0.6)
+                            # 关闭进度窗口并显示结果
+                            self.root.after(0, progress_window.destroy)
+                            self.root.after(100, lambda: messagebox.showinfo(
+                                "完成",
+                                f"已成功获取并保存 {av_code} 的JAVDB信息\n\n标题: {result_data.get('title', 'N/A')}\n发行日期: {result_data.get('release_date', 'N/A')}\n评分: {result_data.get('rating', 'N/A')}"
+                            ))
+                            # 刷新
+                            self.root.after(200, self.load_videos)
+                            self.root.after(300, lambda: self.load_javdb_details(video_id))
+                        except Exception as e:
+                            err_msg = f"保存到数据库失败: {e}"
+                            self.root.after(0, progress_window.destroy)
+                            self.root.after(100, lambda msg=err_msg: messagebox.showerror("错误", msg))
                     else:
                         self.root.after(0, progress_window.destroy)
-                        self.root.after(100, lambda: messagebox.showwarning("警告", f"未能获取到番号 {av_code} 的信息\n\n可能原因：\n1. 网络连接问题\n2. JAVDB上没有该番号\n3. 需要登录验证"))
-                    
+                        self.root.after(100, lambda: messagebox.showwarning(
+                            "警告",
+                            f"未能获取到番号 {av_code} 的信息\n\n可能原因：\n1. 网络连接问题\n2. 站点没有该番号\n3. 需要登录验证或被屏蔽"
+                        ))
                 except Exception as e:
-                    error_msg = f"获取JAVDB信息失败: {str(e)}"
+                    err_msg = f"获取JAVDB信息失败: {e}"
                     self.root.after(0, progress_window.destroy)
-                    self.root.after(100, lambda: messagebox.showerror("错误", error_msg))
-            
-            # 在后台线程中执行获取
+                    self.root.after(100, lambda msg=err_msg: messagebox.showerror("错误", msg))
+
+            # 后台线程执行
             thread = threading.Thread(target=fetch_thread, daemon=True)
             thread.start()
-            
+
         except ImportError:
             messagebox.showerror("错误", "无法导入番号提取器模块")
         except Exception as e:

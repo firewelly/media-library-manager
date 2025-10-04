@@ -141,7 +141,7 @@ def download_image(img_url, filename):
         return img_path
         
     except Exception as e:
-        print(f"Image download failed {img_url}: {e}")
+        print(f"Image download failed {img_url}: {e}", file=sys.stderr)
         return None
 
 def search_video_by_code(driver, video_code):
@@ -392,13 +392,13 @@ def parse_detail(driver, detail_url, max_retries=2):
             }
 
         except Exception as e:
-            print(f"Error parsing detail page (Attempt {attempt + 1}/{max_retries}): {e}")
+            print(f"Error parsing detail page (Attempt {attempt + 1}/{max_retries}): {e}", file=sys.stderr)
             if attempt < max_retries - 1:
-                print("Waiting to retry...")
+                print("Waiting to retry...", file=sys.stderr)
                 random_delay(3, 5)
                 continue
             else:
-                print("All retries failed. Recording as unable to parse.")
+                print("All retries failed. Recording as unable to parse.", file=sys.stderr)
                 # Return default failure object
                 return {
                     'title': 'N/A',
