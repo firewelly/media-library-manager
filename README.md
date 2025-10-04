@@ -249,6 +249,12 @@ media-library/
 - 💡 直观显示文件状态
 - ⚡ 优化用户体验
 
+## 🧹 维护与清理
+
+- 已移除无用测试文件与目录（例如 `test/` 及顶层 `test_*.py`、示例测试脚本），避免影响仓库体积与扫描效率。
+- 已删除无用的工作区配置文件（`media.code-workspace`、`media2.code-workspace`）。
+- 使用与调试建议：请直接运行 `media_library.py` 或使用 `./start_media_library.sh` 启动应用。如需批量或专项处理，使用仓库内对应脚本（例如 `smart_video_updater.py`、`unified_video_updater.py` 等）。
+
 ### v3.2.0
 - 🎭 新增演员信息清理功能
 - 🔗 智能合并重复演员记录
