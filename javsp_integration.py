@@ -347,14 +347,41 @@ class JavSPIntegration:
                     score = float(movie_info['rating'])
                 except (ValueError, TypeError):
                     score = None
+
+            # 读取本地封面为二进制数据
+            cover_image_data = None
+            local_image_path = movie_info.get('local_image_path', '')
+
+            def _read_image(path: str):
+                try:
+                    with open(path, 'rb') as f:
+                        return f.read()
+                except Exception as e:
+                    self.logger.warning(f"读取封面文件失败 {path}: {e}")
+                    return None
+
+            if local_image_path:
+                try:
+                    if not os.path.isabs(local_image_path):
+                        base_dir = os.path.dirname(os.path.abspath(__file__))
+                        candidate = os.path.join(base_dir, local_image_path)
+                        if os.path.exists(candidate):
+                            cover_image_data = _read_image(candidate)
+                        elif os.path.exists(local_image_path):
+                            cover_image_data = _read_image(local_image_path)
+                    else:
+                        if os.path.exists(local_image_path):
+                            cover_image_data = _read_image(local_image_path)
+                except Exception:
+                    pass
             
             # 插入或更新记录
             cursor.execute("""
                 INSERT OR REPLACE INTO javdb_info 
                 (video_id, javdb_code, javdb_url, javdb_title, release_date, duration, 
-                 studio, series, score, cover_url, local_cover_path, magnet_links, 
+                 studio, series, score, cover_url, local_cover_path, cover_image_data, magnet_links, 
                  tags, actors, source, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
             """, (
                 video_id,
                 movie_info.get('video_id', ''),
@@ -367,6 +394,7 @@ class JavSPIntegration:
                 score,
                 movie_info.get('cover_image_url', ''),
                 movie_info.get('local_image_path', ''),
+                cover_image_data,
                 json.dumps(movie_info.get('magnet_links', []), ensure_ascii=False),
                 json.dumps(movie_info.get('tags', []), ensure_ascii=False),
                 json.dumps(movie_info.get('actors', []), ensure_ascii=False),
