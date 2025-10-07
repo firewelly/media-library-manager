@@ -89,6 +89,11 @@
       "width": 200,
       "position": 17,
       "text": "JAVDB标签"
+    },
+    "source_folder": {
+      "width": 150,
+      "position": 7,
+      "text": "来源文件夹"
     }
   }
 }
