@@ -102,14 +102,29 @@ class ResumableSmartImporter:
             return "file_name"
     
     def load_cache(self) -> Dict:
-        """加载缓存数据"""
-        if os.path.exists(self.cache_file):
+        """加载缓存数据（支持备份回退）"""
+        cache_path = self.cache_file
+        backup_path = f"{self.cache_file}.bak"
+
+        # 优先尝试主缓存
+        if os.path.exists(cache_path):
             try:
-                with open(self.cache_file, 'r', encoding='utf-8') as f:
+                with open(cache_path, 'r', encoding='utf-8') as f:
                     return json.load(f)
             except Exception as e:
-                print(f"加载缓存文件失败: {e}")
-                return self.create_empty_cache()
+                print(f"加载缓存文件失败（将尝试备份回退）: {e}")
+
+        # 备份回退
+        if os.path.exists(backup_path):
+            try:
+                with open(backup_path, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+                    print("已从备份缓存恢复")
+                    return data
+            except Exception as e:
+                print(f"加载备份缓存失败: {e}")
+
+        # 均失败则返回空缓存
         return self.create_empty_cache()
     
     def create_empty_cache(self) -> Dict:
@@ -133,13 +148,43 @@ class ResumableSmartImporter:
         }
     
     def save_cache(self):
-        """保存缓存数据"""
+        """保存缓存数据（原子写入 + 备份回退）"""
         try:
             self.cache_data["last_updated"] = datetime.now().isoformat()
-            with open(self.cache_file, 'w', encoding='utf-8') as f:
+
+            cache_path = self.cache_file
+            tmp_path = f"{self.cache_file}.tmp"
+            backup_path = f"{self.cache_file}.bak"
+
+            # 确保目录存在
+            cache_dir = os.path.dirname(cache_path) or "."
+            try:
+                os.makedirs(cache_dir, exist_ok=True)
+            except Exception:
+                pass
+
+            # 写入临时文件
+            with open(tmp_path, 'w', encoding='utf-8') as f:
                 json.dump(self.cache_data, f, ensure_ascii=False, indent=2)
+                f.flush()
+                try:
+                    os.fsync(f.fileno())
+                except Exception:
+                    # 某些文件系统可能不支持 fsync
+                    pass
+
+            # 创建备份（如果主缓存存在）
+            if os.path.exists(cache_path):
+                try:
+                    shutil.copyfile(cache_path, backup_path)
+                except Exception:
+                    # 备份失败不应阻止主流程
+                    pass
+
+            # 原子替换
+            os.replace(tmp_path, cache_path)
         except Exception as e:
-            print(f"保存缓存文件失败: {e}")
+            print(f"保存缓存文件失败（已保留旧文件）: {e}")
     
     def get_active_folders(self) -> List[str]:
         """获取所有活跃且在线的文件夹路径"""
@@ -164,26 +209,43 @@ class ResumableSmartImporter:
     def collect_video_files(self, sources: List[str]) -> List[str]:
         """收集所有视频文件"""
         all_files = []
-        
+
         for source in sources:
             try:
                 # 首先检查路径是否存在
                 if not os.path.exists(source):
                     print(f"警告: 路径不存在: {source}")
                     continue
-                
+
                 source_path = Path(source)
                 if source_path.is_file():
                     if source_path.suffix.lower() in self.video_extensions:
-                        all_files.append(str(source_path.absolute()))
+                        # 单文件模式：跳过隐藏/回收站文件与小文件
+                        try:
+                            size_bytes = source_path.stat().st_size
+                        except Exception:
+                            size_bytes = 0
+                        path_str = str(source_path)
+                        if self._should_skip_path(path_str):
+                            continue
+                        if size_bytes >= 10 * 1024 * 1024:
+                            all_files.append(str(source_path.absolute()))
                 elif source_path.is_dir():
                     print(f"正在扫描文件夹: {source}")
                     try:
                         for file_path in source_path.rglob('*'):
                             try:
                                 if file_path.is_file() and file_path.suffix.lower() in self.video_extensions:
-                                    # 过滤小于2MB的文件
-                                    if file_path.stat().st_size >= 2 * 1024 * 1024:
+                                    # 过滤回收站/缩略图/隐藏文件与小于10MB的文件
+                                    path_str = str(file_path)
+                                    if self._should_skip_path(path_str) or file_path.name.startswith('._'):
+                                        continue
+                                    size_bytes = 0
+                                    try:
+                                        size_bytes = file_path.stat().st_size
+                                    except Exception:
+                                        pass
+                                    if size_bytes >= 10 * 1024 * 1024:
                                         all_files.append(str(file_path.absolute()))
                             except (OSError, PermissionError) as e:
                                 # 跳过无法访问的文件
@@ -196,8 +258,26 @@ class ResumableSmartImporter:
             except Exception as e:
                 print(f"警告: 处理路径 {source} 时出错: {e}")
                 continue
-        
+
         return all_files
+
+    def _should_skip_path(self, path_str: str) -> bool:
+        """判定是否跳过路径：回收站、缩略图、NAS特殊目录等。"""
+        # 常见回收站/缩略图/系统目录：Synology/#recycle, .@__thumb, @eaDir, .Trashes, .Trash-
+        skip_tokens = [
+            '/#recycle/',
+            '/.@__thumb/',
+            '/@eaDir/',
+            '/.Trashes/',
+            '/.Trash-',
+        ]
+        # 也排除以 "/#recycle" 结尾的目录路径匹配
+        if path_str.endswith('/#recycle'):
+            return True
+        for token in skip_tokens:
+            if token in path_str:
+                return True
+        return False
     
     def calculate_md5_with_cache(self, file_path: str) -> Optional[str]:
         """带缓存的MD5计算"""

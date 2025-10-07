@@ -261,6 +261,7 @@ class MediaLibrary:
             'size': {'width': 80, 'position': 4, 'text': '大小'},
             'status': {'width': 60, 'position': 5, 'text': '状态'},
             'device': {'width': 120, 'position': 6, 'text': '设备'},
+            'source_folder': {'width': 150, 'position': 7, 'text': '来源文件夹'},
             'duration': {'width': 120, 'position': 7, 'text': '时长'},
             'resolution': {'width': 150, 'position': 8, 'text': '分辨率'},
             'file_created_time': {'width': 120, 'position': 9, 'text': '创建时间'},
@@ -304,6 +305,10 @@ class MediaLibrary:
                 with open(self.config_path, 'r', encoding='utf-8') as f:
                     saved_config = json.load(f)
                     self.column_config = saved_config.get('columns', self.default_columns.copy())
+                    # 合并默认列中新增的列（例如来源文件夹），确保新列能够显示
+                    for key, default in self.default_columns.items():
+                        if key not in self.column_config:
+                            self.column_config[key] = default
             else:
                 self.column_config = self.default_columns.copy()
         except Exception as e:
@@ -1779,6 +1784,30 @@ class MediaLibrary:
             return platform.node()  # 获取计算机名称
         except:
             return "Unknown Device"
+
+    def get_device_display(self, folder_path, folder_type, device_name):
+        """统一生成设备显示名称，保持与'文件夹管理'中的设备列一致"""
+        try:
+            if folder_type == "nas":
+                if folder_path.startswith("smb://"):
+                    import re
+                    # 优先提取域名或IP
+                    host_match = re.search(r'smb://(?:[^@]+@)?([^/]+)/', folder_path)
+                    if host_match:
+                        return host_match.group(1)
+                    return "NAS"
+                elif folder_path.startswith("/Volumes/"):
+                    parts = folder_path.split('/')
+                    return parts[2] if len(parts) > 2 and parts[2] else "NAS"
+                else:
+                    return "NAS"
+            else:
+                # 本地设备：优先显示数据库中的设备名称，否则回退为Unknown
+                if device_name and isinstance(device_name, str) and device_name.strip() and device_name != "Unknown":
+                    return device_name.strip()
+                return "Unknown"
+        except Exception:
+            return device_name or "Unknown"
     
     def is_video_online(self, video_id):
         """判断视频是否在线（基于文件路径存在性）"""
@@ -2433,33 +2462,10 @@ class MediaLibrary:
                         """, (source_folder,))
                         folder_info = self.cursor.fetchone()
                         
-                        if folder_info:
-                            folder_type, device_name = folder_info
-                            
-                            if folder_type == "nas":
-                                # NAS设备：显示IP或域名
-                                if source_folder.startswith("smb://"):
-                                    # 从smb://username@192.168.1.100/folder格式中提取IP
-                                    import re
-                                    ip_match = re.search(r'@([0-9.]+)/', source_folder)
-                                    if ip_match:
-                                        device_display = ip_match.group(1)
-                                    else:
-                                        # 尝试提取域名
-                                        domain_match = re.search(r'smb://(?:[^@]+@)?([^/]+)/', source_folder)
-                                        if domain_match:
-                                            device_display = domain_match.group(1)
-                                        else:
-                                            device_display = "NAS"
-                                elif source_folder.startswith("/Volumes/"):
-                                    # macOS挂载的网络驱动器，尝试从路径提取名称
-                                    volume_name = source_folder.split('/')[2] if len(source_folder.split('/')) > 2 else "NAS"
-                                    device_display = volume_name
-                                else:
-                                    device_display = "NAS"
-                            else:
-                                # 本地设备：显示设备名称
-                                device_display = device_name if device_name and device_name != "Unknown" else "Unknown"
+                    if folder_info:
+                        folder_type, device_name = folder_info
+                        # 与“文件夹管理”一致的设备显示
+                        device_display = self.get_device_display(source_folder, folder_type, device_name)
                 
                 # 查询JAVDB信息
                 javdb_code = ""
@@ -2532,6 +2538,7 @@ class MediaLibrary:
                     'actors': actors_display,
                     'status': status_display,
                     'device': device_display,
+                    'source_folder': f"{device_display}@{top_folder_display}" if device_display and top_folder_display else top_folder_display or device_display,
                     'duration': duration_display,
                     'resolution': resolution_display,
                     'file_created_time': file_created_display,
@@ -2644,28 +2651,9 @@ class MediaLibrary:
             
             for folder_path, folder_type, device_name in folders:
                 folder_name = os.path.basename(folder_path)
-                
-                # 根据文件夹类型生成显示名称
-                if folder_type == "nas":
-                    # NAS文件夹：提取IP地址
-                    if folder_path.startswith("smb://"):
-                        # 从smb://username@192.168.1.100/folder格式中提取IP
-                        import re
-                        ip_match = re.search(r'@([0-9.]+)/', folder_path)
-                        if ip_match:
-                            nas_ip = ip_match.group(1)
-                            display_name = f"{nas_ip}@{folder_name}"
-                        else:
-                            display_name = f"NAS@{folder_name}"
-                    elif folder_path.startswith("/Volumes/"):
-                        # macOS挂载的网络驱动器
-                        display_name = f"NAS@{folder_name}"
-                    else:
-                        display_name = f"NAS@{folder_name}"
-                else:
-                    # 本地文件夹：显示设备名称
-                    device_display = device_name if device_name and device_name.strip() else "本地"
-                    display_name = f"{device_display}@{folder_name}"
+                # 与“文件夹管理”一致的设备显示
+                device_display = self.get_device_display(folder_path, folder_type, device_name)
+                display_name = f"{device_display}@{folder_name}"
                 
                 self.folder_listbox.insert(tk.END, display_name)
                 self.folder_path_mapping[display_name] = folder_path
@@ -2877,13 +2865,41 @@ class MediaLibrary:
                     self.cover_var.set("JAVDB数据库封面")
                     # 显示数据库中的图片
                     self.display_thumbnail(cover_image_data)
-                elif cover_url:
-                    self.cover_var.set(f"JAVDB在线封面: {cover_url}")
-                    # 可以考虑下载并显示在线图片，这里暂时不显示
-                    self.display_thumbnail(None)
                 else:
-                    self.cover_var.set("无封面")
-                    self.display_thumbnail(None)
+                    # 尝试使用本地封面路径作为回退
+                    shown = False
+                    try:
+                        if local_cover_path:
+                            # 解析相对路径为当前脚本目录
+                            base_dir = os.path.dirname(os.path.abspath(__file__))
+                            candidate = local_cover_path
+                            if not os.path.isabs(local_cover_path):
+                                candidate = os.path.join(base_dir, local_cover_path)
+                            if os.path.exists(candidate):
+                                with open(candidate, 'rb') as f:
+                                    img_bytes = f.read()
+                                # 显示并回写数据库，便于后续直接使用BLOB
+                                self.display_thumbnail(img_bytes)
+                                try:
+                                    self.cursor.execute(
+                                        "UPDATE javdb_info SET cover_image_data = ?, updated_at = datetime('now') WHERE video_id = ?",
+                                        (img_bytes, video_id)
+                                    )
+                                    self.conn.commit()
+                                except Exception:
+                                    pass
+                                self.cover_var.set("JAVDB本地封面")
+                                shown = True
+                    except Exception:
+                        pass
+                    if not shown:
+                        if cover_url:
+                            self.cover_var.set(f"JAVDB在线封面: {cover_url}")
+                            # 可以考虑下载并显示在线图片，这里暂时不显示
+                            self.display_thumbnail(None)
+                        else:
+                            self.cover_var.set("无封面")
+                            self.display_thumbnail(None)
                 
                 # 显示下载链接
                 self.display_magnet_links(magnet_links)
@@ -7127,16 +7143,23 @@ class MediaLibrary:
                 
                 # 在对话框显示后异步刷新视频列表
                 self.root.after(100, self.load_videos)
+                # 成功标记，用于 finally 的缓存清理判断
+                success = True
                 
             except Exception as e:
                 error_msg = str(e)
                 log_message(f"错误: {error_msg}")
                 self.root.after(0, lambda: messagebox.showerror("错误", f"智能媒体库更新时出错: {error_msg}"))
+                # 标记失败以便 finally 不清理缓存
+                success = False
             finally:
-                # 清理MD5缓存文件
+                # 仅在成功完成时清理MD5缓存文件；失败或中断保留以支持断点续跑
                 try:
-                    self.cleanup_md5_cache(cache_file_path)
-                    log_message("临时缓存文件已清理")
+                    if 'success' in locals() and success:
+                        self.cleanup_md5_cache(cache_file_path)
+                        log_message("临时缓存文件已清理")
+                    else:
+                        log_message("检测到中断或错误，保留MD5缓存以支持断点续跑")
                 except:
                     pass
         
@@ -7510,13 +7533,29 @@ class MediaLibrary:
             # 读取本地图片文件并转换为二进制数据
             cover_image_data = None
             local_image_path = javdb_info.get('local_image_path', '')
-            if local_image_path and os.path.exists(local_image_path):
+            # 优先尝试绝对/原始路径
+            def _read_image(path):
                 try:
-                    with open(local_image_path, 'rb') as f:
-                        cover_image_data = f.read()
-                    print(f"Successfully read image data from: {local_image_path}")
+                    with open(path, 'rb') as f:
+                        return f.read()
                 except Exception as e:
-                    print(f"Failed to read image file {local_image_path}: {e}")
+                    print(f"Failed to read image file {path}: {e}")
+                    return None
+
+            if local_image_path:
+                # 如果是相对路径，尝试以脚本目录为基准
+                if not os.path.isabs(local_image_path):
+                    base_dir = os.path.dirname(os.path.abspath(__file__))
+                    candidate = os.path.join(base_dir, local_image_path)
+                    if os.path.exists(candidate):
+                        cover_image_data = _read_image(candidate)
+                    elif os.path.exists(local_image_path):
+                        cover_image_data = _read_image(local_image_path)
+                else:
+                    if os.path.exists(local_image_path):
+                        cover_image_data = _read_image(local_image_path)
+                if cover_image_data:
+                    print(f"Successfully read image data from: {local_image_path}")
             
             # 检查是否已存在该video_id的JAVDB信息
             self.cursor.execute("SELECT id FROM javdb_info WHERE video_id = ?", (video_id,))
@@ -9679,106 +9718,168 @@ class MediaLibrary:
             
             def import_thread():
                 try:
-                    # 尝试使用新的JavSP集成模块
+                    # 优先级说明：JavDB → JavBus → JavSP
+                    from code_extractor import CodeExtractor
+                    import subprocess
+                    import json
+                    cwd_dir = os.path.dirname(os.path.abspath(__file__))
+                    blocked_titles = ['官方App下載', '官方App下载', 'Official App Download']
+
+                    # 尝试加载 JavSP，仅用于最后的回退
+                    javsp_available = False
+                    javsp_integration = None
                     try:
-                        from javsp_integration import get_integration_instance
+                        from javsp_integration import get_integration_instance, search_javdb_info as javsp_search
                         javsp_integration = get_integration_instance(self.db_path)
-                        use_javsp = javsp_integration.is_available()
-                        if use_javsp:
-                            log_message("使用JavSP爬虫系统进行批量导入")
+                        javsp_available = javsp_integration.is_available()
+                        if javsp_available:
+                            log_message("JavSP系统可用（在JavDB/JavBus失败时使用回退）")
                         else:
-                            log_message("JavSP系统不可用，回退到原有方法")
-                    except ImportError:
-                        use_javsp = False
-                        log_message("JavSP集成模块不可用，使用原有方法")
-                    
-                    # 如果JavSP不可用，回退到原有方法
-                    if not use_javsp:
-                        from code_extractor import CodeExtractor
-                        import subprocess
-                        import json
-                        extractor = CodeExtractor()
-                    
+                            log_message("JavSP系统不可用，将尝试JavDB与JavBus")
+                    except Exception:
+                        log_message("无法加载JavSP集成模块，将仅尝试JavDB与JavBus")
+
+                    extractor = CodeExtractor()
                     imported_count = 0
                     skipped_count = 0
-                    
+
                     for i, (video_id, file_path, file_name) in enumerate(videos_without_javdb):
                         if self.cancel_import:
                             break
-                            
+
                         progress_bar.config(value=i + 1)
                         progress_label.config(text=f"处理: {file_name} ({i + 1}/{len(videos_without_javdb)})")
-                        
+
                         # 提取番号
-                        if use_javsp:
-                            av_code = javsp_integration.extract_code_from_filename(file_name)
-                        else:
-                            av_code = extractor.extract_code_from_filename(file_name)
-                        
+                        av_code = extractor.extract_code_from_filename(file_name)
                         if not av_code:
                             skipped_count += 1
                             log_message(f"- 无法提取番号: {file_name}")
                             continue
-                            
+
                         log_message(f"提取番号: {av_code} <- {file_name}")
-                        
+
                         try:
-                            if use_javsp:
-                                # 使用JavSP集成模块
-                                result = javsp_integration.search_movie_info(av_code)
-                                if result:
-                                    # 保存到数据库
-                                    if javsp_integration.save_movie_info_to_db(video_id, result):
-                                        imported_count += 1
-                                        log_message(f"✓ 成功导入: {av_code} - {result.get('title', 'N/A')}")
-                                    else:
-                                        skipped_count += 1
-                                        log_message(f"✗ 保存失败: {av_code}")
-                                else:
-                                    skipped_count += 1
-                                    log_message(f"✗ 未找到信息: {av_code}")
-                            else:
-                                # 回退到原有的JAVDB爬虫逻辑
+                            result_data = None
+                            used_source = 'javdb'
+                            # ① JavDB 优先
+                            try:
                                 cmd = ["python", "javdb_crawler_single.py", av_code]
-                                process = subprocess.run(cmd, capture_output=True, text=True, 
-                                                       cwd=os.path.dirname(os.path.abspath(__file__)), timeout=60)
-                                
+                                process = subprocess.run(cmd, capture_output=True, text=True, cwd=cwd_dir, timeout=60)
                                 if process.returncode == 0 and process.stdout:
                                     try:
-                                        result = json.loads(process.stdout)
-                                        if "error" not in result:
-                                            # 直接调用现有的保存方法
-                                            self.save_javdb_info_to_db(video_id, result)
-                                            imported_count += 1
-                                            log_message(f"✓ 成功导入: {av_code} - {result.get('title', 'N/A')}")
+                                        parsed = json.loads(process.stdout)
+                                        if parsed and not parsed.get('error') and parsed.get('title') and parsed.get('title') not in blocked_titles:
+                                            result_data = parsed
+                                            has_actors = isinstance(parsed.get('actors'), list) and len(parsed.get('actors')) > 0
+                                            log_message("✓ JavDB成功" if has_actors else "JavDB成功（演员缺失，尝试回退）")
                                         else:
-                                            skipped_count += 1
-                                            log_message(f"✗ JAVDB返回错误: {av_code} - {result.get('error', 'Unknown error')}")
+                                            log_message("JavDB信息不完整，尝试回退")
                                     except json.JSONDecodeError:
-                                        skipped_count += 1
-                                        log_message(f"✗ 解析JAVDB响应失败: {av_code}")
+                                        log_message("JavDB解析失败，尝试回退")
                                 else:
+                                    log_message("JavDB爬虫失败，尝试回退")
+                            except Exception as e:
+                                log_message(f"JavDB异常: {e}，尝试回退")
+
+                            # ② JavBus 回退
+                            need_fallback = not result_data or not (isinstance(result_data.get('actors'), list) and len(result_data.get('actors')) > 0)
+                            if need_fallback:
+                                try:
+                                    log_message("尝试JavBus回退...")
+                                    cmd_bus = ["python", "javbus_crawler_single.py", av_code]
+                                    p_bus = subprocess.run(cmd_bus, capture_output=True, text=True, cwd=cwd_dir, timeout=60)
+                                    if p_bus.returncode == 0 and p_bus.stdout:
+                                        try:
+                                            bus_parsed = json.loads(p_bus.stdout)
+                                            if bus_parsed and not bus_parsed.get('error'):
+                                                # 统一结构
+                                                def normalize_actors(maybe_list):
+                                                    normalized = []
+                                                    if isinstance(maybe_list, list):
+                                                        for item in maybe_list:
+                                                            if isinstance(item, dict):
+                                                                name = (item.get('name') or '').strip()
+                                                                link = item.get('link') or ''
+                                                                if name:
+                                                                    normalized.append({'name': name, 'link': link})
+                                                            elif isinstance(item, str):
+                                                                name = item.strip()
+                                                                if name:
+                                                                    normalized.append({'name': name, 'link': ''})
+                                                    return normalized
+
+                                                result_data = {
+                                                    'title': bus_parsed.get('title'),
+                                                    'video_id': bus_parsed.get('number') or av_code,
+                                                    'detail_url': None,
+                                                    'release_date': bus_parsed.get('release_date'),
+                                                    'duration': None,
+                                                    'rating': None,
+                                                    'tags': bus_parsed.get('tags') or [],
+                                                    'actors': normalize_actors(bus_parsed.get('actors', [])),
+                                                    'studio': bus_parsed.get('studio'),
+                                                    'cover_image_url': bus_parsed.get('cover_image_url'),
+                                                    'local_image_path': bus_parsed.get('cover_image_path'),
+                                                    'magnet_links': bus_parsed.get('magnet_links', [])
+                                                }
+                                                used_source = 'javbus'
+                                                log_message("✓ 已切换到 JavBus 数据")
+                                            else:
+                                                log_message("JavBus无有效数据")
+                                        except json.JSONDecodeError:
+                                            log_message("JavBus解析失败")
+                                    else:
+                                        log_message("JavBus爬虫失败")
+                                except Exception:
+                                    log_message("JavBus异常")
+
+                            # ③ JavSP 回退（仅在前两者失败时）
+                            if not result_data and javsp_available:
+                                try:
+                                    log_message("尝试JavSP回退...")
+                                    sp_result = javsp_search(av_code) if javsp_integration else None
+                                    if sp_result:
+                                        result_data = sp_result
+                                        used_source = 'javsp'
+                                        log_message("✓ 已切换到 JavSP 数据")
+                                    else:
+                                        log_message("JavSP无有效数据")
+                                except Exception:
+                                    log_message("JavSP异常，回退结束")
+
+                            # 最终保存或记录失败
+                            if result_data and (result_data.get('title') not in blocked_titles):
+                                try:
+                                    self.save_javdb_info_to_db(video_id, result_data)
+                                    imported_count += 1
+                                    log_message(f"✓ 成功导入: {av_code} - {result_data.get('title', 'N/A')}")
+                                except Exception as e:
                                     skipped_count += 1
-                                    log_message(f"✗ JAVDB获取失败: {av_code}")
-                                
+                                    log_message(f"✗ 保存失败: {av_code} - {e}")
+                            else:
+                                skipped_count += 1
+                                error_msg = 'JAVDB爬取失败' if not result_data else '信息被屏蔽'
+                                log_message(f"✗ {error_msg}: {av_code}")
+
                         except subprocess.TimeoutExpired:
                             skipped_count += 1
                             log_message(f"✗ 获取超时: {av_code}")
                         except Exception as e:
                             skipped_count += 1
                             log_message(f"✗ 处理错误: {av_code} - {str(e)}")
-                    
+
                     # 完成
                     progress_label.config(text="导入完成")
                     log_message(f"\n=== 导入完成 ===")
                     log_message(f"成功导入: {imported_count} 个")
                     log_message(f"跳过: {skipped_count} 个")
-                    
+
                     cancel_button.config(text="关闭", command=progress_window.destroy)
-                    
+
                     # 刷新视频列表
                     self.root.after(100, self.load_videos)
-                    
+
                 except ImportError:
                     log_message("错误: 无法导入番号提取器模块")
                     cancel_button.config(text="关闭", command=progress_window.destroy)
