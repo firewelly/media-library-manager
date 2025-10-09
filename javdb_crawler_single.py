@@ -14,6 +14,7 @@ from selenium.webdriver.edge.options import Options
 from selenium.common.exceptions import TimeoutException, WebDriverException
 import socks
 import socket
+import subprocess
 from config import SOCKS5_PROXY_HOST, SOCKS5_PROXY_PORT, BASE_URL, LOGIN_EMAIL, LOGIN_PASSWORD, MIN_DELAY, MAX_DELAY
 
 # Create results directory
@@ -23,6 +24,35 @@ if not os.path.exists('results'):
 # Create images directory
 if not os.path.exists('results/images'):
     os.makedirs('results/images')
+
+# Absolute covers directory (unified path)
+COVERS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'results', 'images')
+os.makedirs(COVERS_DIR, exist_ok=True)
+
+def get_dedicated_edge_user_data_dir():
+    """Return and create a dedicated Edge user data dir to persist login state"""
+    try:
+        base = os.path.dirname(os.path.abspath(__file__))
+        d = os.path.join(base, '.edge_driver_user_data')
+        os.makedirs(d, exist_ok=True)
+        return d
+    except Exception:
+        try:
+            d = os.path.join(os.getcwd(), '.edge_driver_user_data')
+            os.makedirs(d, exist_ok=True)
+            return d
+        except Exception:
+            return None
+
+def is_login_page(driver):
+    """Heuristically detect if the current page is a login page"""
+    try:
+        email_inputs = driver.find_elements(By.CSS_SELECTOR, 'input[type="email"], input[name="email"]')
+        password_inputs = driver.find_elements(By.CSS_SELECTOR, 'input[type="password"], input[name="password"]')
+        buttons = driver.find_elements(By.CSS_SELECTOR, 'button[type="submit"], input[type="submit"], .btn-primary')
+        return (len(email_inputs) > 0 and len(password_inputs) > 0 and len(buttons) > 0)
+    except Exception:
+        return False
 
 def setup_socks5_proxy():
     """Setup SOCKS5 proxy for requests"""
@@ -40,28 +70,32 @@ def restore_socket(original_socket):
     socket.socket = original_socket
 
 def setup_driver():
-    """Setup MS Edge browser driver with SOCKS5 proxy"""
+    """Setup MS Edge browser driver with SOCKS5 proxy and persistent user data"""
     import platform
-    
+
     edge_options = Options()
-    
-    # Set page load strategy to "eager", not waiting for images and other resources
     edge_options.page_load_strategy = 'eager'
 
-    # Add various options to simulate real users
+    # Simulate real users
     edge_options.add_argument('--no-sandbox')
     edge_options.add_argument('--disable-dev-shm-usage')
     edge_options.add_argument('--disable-blink-features=AutomationControlled')
     edge_options.add_experimental_option("excludeSwitches", ["enable-automation"])
     edge_options.add_experimental_option('useAutomationExtension', False)
     edge_options.add_argument('--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36')
-    
-    # Set up SOCKS5 proxy for Edge
+
+    # SOCKS5 proxy
     edge_options.add_argument(f'--proxy-server=socks5://{SOCKS5_PROXY_HOST}:{SOCKS5_PROXY_PORT}')
-    
-    # Add headless mode
+
+    # Persistent user data dir
+    user_data_dir = get_dedicated_edge_user_data_dir()
+    if user_data_dir:
+        edge_options.add_argument(f'--user-data-dir={user_data_dir}')
+        edge_options.add_argument('--profile-directory=Default')
+
+    # Headless mode
     edge_options.add_argument('--headless')
-    
+
     try:
         # Determine EdgeDriver path based on system
         system = platform.system().lower()
@@ -77,18 +111,15 @@ def setup_driver():
             driver_path = "/usr/local/bin/edgedriver_linux64/msedgedriver"
         else:
             driver_path = "/usr/local/bin/edgedriver_mac64/msedgedriver"
-        
-        # Check if user directory driver exists
-        import os
+
+        # Prefer user driver path if exists
         user_driver_path = os.path.expanduser("~/bin/edgedriver_mac64_m1/msedgedriver")
         if os.path.exists(user_driver_path):
             driver_path = user_driver_path
-        
+
         driver = webdriver.Edge(service=webdriver.edge.service.Service(driver_path), options=edge_options)
-        # Set page load timeout and script timeout
         driver.set_page_load_timeout(60)
         driver.set_script_timeout(30)
-        # Hide webdriver features
         driver.execute_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
         return driver
     except Exception as e:
@@ -114,32 +145,43 @@ def safe_filename(filename):
     return filename
 
 def download_image(img_url, filename):
-    """Download image to local and return path"""
+    """Download image to local and return absolute path with inferred extension"""
     try:
-        # Setup proxy for image download
         proxies = {
             'http': f'socks5://{SOCKS5_PROXY_HOST}:{SOCKS5_PROXY_PORT}',
             'https': f'socks5://{SOCKS5_PROXY_HOST}:{SOCKS5_PROXY_PORT}'
         }
-        
+
         headers = {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
             'Referer': BASE_URL
         }
-        
-        response = requests.get(img_url, headers=headers, proxies=proxies, timeout=30)
-        response.raise_for_status()
-        
-        # Ensure images directory exists
-        os.makedirs('results/images', exist_ok=True)
-        
-        # Save image to file
-        img_path = os.path.join('results/images', filename)
+
+        try:
+            response = requests.get(img_url, headers=headers, proxies=proxies, timeout=30)
+            response.raise_for_status()
+        except Exception:
+            # Fallback without proxy
+            response = requests.get(img_url, headers=headers, timeout=30)
+            response.raise_for_status()
+
+        os.makedirs(COVERS_DIR, exist_ok=True)
+        content_type = (response.headers.get('Content-Type') or '').lower()
+        if 'image/jpeg' in content_type or 'image/jpg' in content_type:
+            ext = '.jpg'
+        elif 'image/png' in content_type:
+            ext = '.png'
+        elif 'image/webp' in content_type:
+            ext = '.webp'
+        else:
+            parsed_path = urlparse(img_url).path
+            ext = os.path.splitext(parsed_path)[1] or '.jpg'
+
+        safe_name = safe_filename(filename)
+        img_path = os.path.join(COVERS_DIR, f"{safe_name}{ext}")
         with open(img_path, 'wb') as f:
             f.write(response.content)
-        
-        return img_path
-        
+        return os.path.abspath(img_path)
     except Exception as e:
         print(f"Image download failed {img_url}: {e}", file=sys.stderr)
         return None
@@ -266,7 +308,22 @@ def parse_detail(driver, detail_url, max_retries=2):
                     rating_match = re.search(r'(\d+\.\d+)', rating_text)
                     rating = rating_match.group(1) if rating_match else rating_text
                 except:
-                    pass
+                    # Fallback: try rating-stars container attributes or generic score elements
+                    try:
+                        stars = driver.find_element(By.CSS_SELECTOR, '.rating-stars')
+                        score_attr = (stars.get_attribute('data-score') or stars.get_attribute('aria-label') or '').strip()
+                        m = re.search(r'(\d+(?:\.\d+)?)', score_attr)
+                        if m:
+                            rating = m.group(1)
+                    except:
+                        try:
+                            score_elem = driver.find_element(By.CSS_SELECTOR, '.score, .rating .score, .rating .value')
+                            txt = score_elem.text.strip()
+                            m = re.search(r'(\d+(?:\.\d+)?)', txt)
+                            if m:
+                                rating = m.group(1)
+                        except:
+                            pass
 
             # Get tags
             tags = []
@@ -278,7 +335,15 @@ def parse_detail(driver, detail_url, max_retries=2):
                     tag_elements = driver.find_elements(By.XPATH, "//strong[text()='Tags:']/following-sibling::span[1]/a")
                     tags = [tag.text.strip() for tag in tag_elements]
                 except:
-                    pass
+                    # Fallback: look for tag links in common containers
+                    try:
+                        tag_elements = driver.find_elements(By.CSS_SELECTOR, '.panel-info a[href*="/tags/"], .genres a, .tags a')
+                        tags = [t.text.strip() for t in tag_elements if t.text.strip()]
+                        # Deduplicate while preserving order
+                        seen = set()
+                        tags = [x for x in tags if not (x in seen or seen.add(x))]
+                    except:
+                        pass
 
             # Get actors (only female actors)
             actors = []
@@ -340,19 +405,33 @@ def parse_detail(driver, detail_url, max_retries=2):
                     except:
                         pass
 
-            # Get cover image
+            # Get cover image (prefer high-res via srcset or data-src)
             img_url = ''
             img_selectors = [
                 'div.cover img', '.cover img', 'img.video-cover', 'img[src*="cover"]', 
                 'img[src*="thumb"]', '.movie-panel img'
             ]
+            img_element_for_screenshot = None
             for selector in img_selectors:
                 try:
                     img_element = driver.find_element(By.CSS_SELECTOR, selector)
                     if img_element:
-                        img_url = img_element.get_attribute('src')
+                        srcset = img_element.get_attribute('srcset')
+                        data_src = img_element.get_attribute('data-src')
+                        src = img_element.get_attribute('src')
+                        if srcset:
+                            try:
+                                parts = [p.strip() for p in srcset.split(',') if p.strip()]
+                                last = parts[-1]
+                                candidate = last.split(' ')[0]
+                                img_url = candidate
+                            except Exception:
+                                img_url = src or data_src or ''
+                        else:
+                            img_url = src or data_src or ''
                         if img_url and not img_url.startswith('http'):
                             img_url = urljoin(BASE_URL, img_url)
+                        img_element_for_screenshot = img_element
                         break
                 except:
                     continue
@@ -369,11 +448,14 @@ def parse_detail(driver, detail_url, max_retries=2):
                 except Exception:
                     pass  # Allow magnet links to be empty
 
-            # Download cover image
+            # Download cover image (no screenshot fallback)
             local_img_path = None
             if img_url and title != 'N/A':
                 filename = f"{video_id}_{title}" if video_id != 'N/A' else title
-                local_img_path = download_image(img_url, filename)
+                try:
+                    local_img_path = download_image(img_url, filename)
+                except Exception as e:
+                    print(f"Image download failed: {e}", file=sys.stderr)
             
             # print(f"Parse successful - Title: {title[:50]}..., ID: {video_id}")
             return {
@@ -481,15 +563,20 @@ def crawl_single_video(video_code):
         driver.get(BASE_URL)
         random_delay(2, 4)
         
+        # If login page detected, invoke login helper to let user login persistently
         try:
-            if driver.find_elements(By.CSS_SELECTOR, 'input[type="email"], input[name="email"]'):
-                # print("Login window detected, manual login required...")
-                handle_login(driver)
-                # print("Waiting 30 seconds, please complete captcha input and login...")
-                time.sleep(30)
-                random_delay(2, 4)
-        except Exception as e:
-            # print(f"Login process exception: {e}")
+            if is_login_page(driver):
+                print("登录状态缺失，调用登录助手以持久化登录态...")
+                cwd_dir = os.path.dirname(os.path.abspath(__file__))
+                try:
+                    subprocess.run(['python3', 'javdb_login_helper.py'], cwd=cwd_dir, check=True)
+                except Exception as e:
+                    print(f"登录助手运行失败: {e}", file=sys.stderr)
+                    return None
+                # After helper, refresh base
+                driver.get(BASE_URL)
+                random_delay(1, 2)
+        except Exception:
             pass
         
         # Search video
@@ -497,6 +584,23 @@ def crawl_single_video(video_code):
         if not detail_url:
             # print(f"Detail page not found for video code {video_code}")
             return None
+        
+        # Visit detail and check for login gate
+        driver.get(detail_url)
+        random_delay(1, 2)
+        if is_login_page(driver):
+            print("访问详情页需要登录，启动登录助手后重试...")
+            cwd_dir = os.path.dirname(os.path.abspath(__file__))
+            try:
+                subprocess.run(['python3', 'javdb_login_helper.py'], cwd=cwd_dir, check=True)
+            except Exception as e:
+                print(f"登录助手运行失败: {e}", file=sys.stderr)
+                return None
+            driver.get(detail_url)
+            random_delay(1, 2)
+            if is_login_page(driver):
+                print("登录仍未成功，请手动登录后重试。", file=sys.stderr)
+                return None
             
         # Parse detail page
         result = parse_detail(driver, detail_url)

@@ -313,7 +313,7 @@ class JavSPIntegration:
             conn = sqlite3.connect(self.db_path)
             cursor = conn.cursor()
             
-            # 检查javdb_info表是否存在，如果不存在则创建
+            # 检查并创建javdb_info表（移除tags/actors/source；新增rating/preview_images）
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS javdb_info (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -325,20 +325,68 @@ class JavSPIntegration:
                     duration TEXT,
                     studio TEXT,
                     series TEXT,
+                    rating TEXT,
                     score REAL,
                     cover_url TEXT,
                     local_cover_path TEXT,
                     cover_image_data BLOB,
                     magnet_links TEXT,
-                    tags TEXT,
-                    actors TEXT,
-                    source TEXT DEFAULT 'javsp',
+                    preview_images TEXT,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     FOREIGN KEY (video_id) REFERENCES videos (id) ON DELETE CASCADE,
                     UNIQUE(video_id)
                 )
             """)
+
+            # 关系型表：JAVDB标签与关联、演员与视频-演员关联
+            cursor.execute(
+                """
+                CREATE TABLE IF NOT EXISTS javdb_tags (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    tag_name TEXT UNIQUE NOT NULL,
+                    tag_type TEXT DEFAULT 'general',
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+                """
+            )
+            cursor.execute(
+                """
+                CREATE TABLE IF NOT EXISTS javdb_info_tags (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    javdb_info_id INTEGER NOT NULL,
+                    tag_id INTEGER NOT NULL,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (javdb_info_id) REFERENCES javdb_info (id) ON DELETE CASCADE,
+                    FOREIGN KEY (tag_id) REFERENCES javdb_tags (id) ON DELETE CASCADE,
+                    UNIQUE(javdb_info_id, tag_id)
+                )
+                """
+            )
+            cursor.execute(
+                """
+                CREATE TABLE IF NOT EXISTS actors (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    name TEXT UNIQUE NOT NULL,
+                    profile_url TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+                """
+            )
+            cursor.execute(
+                """
+                CREATE TABLE IF NOT EXISTS video_actors (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    video_id INTEGER NOT NULL,
+                    actor_id INTEGER NOT NULL,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (video_id) REFERENCES videos (id) ON DELETE CASCADE,
+                    FOREIGN KEY (actor_id) REFERENCES actors (id) ON DELETE CASCADE,
+                    UNIQUE(video_id, actor_id)
+                )
+                """
+            )
             
             # 处理评分
             score = None
@@ -375,31 +423,110 @@ class JavSPIntegration:
                 except Exception:
                     pass
             
-            # 插入或更新记录
-            cursor.execute("""
+            # 插入或更新记录（仅写入基础字段与JSON磁链；标签与演员用关系表维护）
+            cursor.execute(
+                """
                 INSERT OR REPLACE INTO javdb_info 
-                (video_id, javdb_code, javdb_url, javdb_title, release_date, duration, 
-                 studio, series, score, cover_url, local_cover_path, cover_image_data, magnet_links, 
-                 tags, actors, source, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
-            """, (
-                video_id,
-                movie_info.get('video_id', ''),
-                movie_info.get('detail_url', ''),
-                movie_info.get('title', ''),
-                movie_info.get('release_date', ''),
-                movie_info.get('duration', ''),
-                movie_info.get('studio', ''),
-                movie_info.get('series', ''),
-                score,
-                movie_info.get('cover_image_url', ''),
-                movie_info.get('local_image_path', ''),
-                cover_image_data,
-                json.dumps(movie_info.get('magnet_links', []), ensure_ascii=False),
-                json.dumps(movie_info.get('tags', []), ensure_ascii=False),
-                json.dumps(movie_info.get('actors', []), ensure_ascii=False),
-                'javsp'
-            ))
+                (video_id, javdb_code, javdb_url, javdb_title, release_date, duration,
+                 studio, series, rating, score, cover_url, local_cover_path, cover_image_data, magnet_links,
+                 updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+                """,
+                (
+                    video_id,
+                    movie_info.get('video_id', ''),
+                    movie_info.get('detail_url', ''),
+                    movie_info.get('title', ''),
+                    movie_info.get('release_date', ''),
+                    movie_info.get('duration', ''),
+                    movie_info.get('studio', ''),
+                    movie_info.get('series', ''),
+                    movie_info.get('rating', ''),
+                    score,
+                    movie_info.get('cover_image_url', ''),
+                    movie_info.get('local_image_path', ''),
+                    cover_image_data,
+                    json.dumps(movie_info.get('magnet_links', []), ensure_ascii=False),
+                )
+            )
+
+            # 获取当前javdb_info记录ID用于关系写入
+            cursor.execute("SELECT id FROM javdb_info WHERE video_id = ?", (video_id,))
+            row = cursor.fetchone()
+            javdb_info_id = row[0] if row else None
+
+            # 写入JAVDB标签关系
+            try:
+                if javdb_info_id and movie_info.get('tags'):
+                    for t in movie_info.get('tags'):
+                        tag_name = (t or '').strip()
+                        if not tag_name:
+                            continue
+                        cursor.execute(
+                            "INSERT OR IGNORE INTO javdb_tags (tag_name) VALUES (?)",
+                            (tag_name,),
+                        )
+                        cursor.execute("SELECT id FROM javdb_tags WHERE tag_name = ?", (tag_name,))
+                        tag_row = cursor.fetchone()
+                        if tag_row:
+                            tag_id = tag_row[0]
+                            cursor.execute(
+                                "INSERT OR IGNORE INTO javdb_info_tags (javdb_info_id, tag_id) VALUES (?, ?)",
+                                (javdb_info_id, tag_id),
+                            )
+            except Exception as _e:
+                self.logger.warning(f"写入JAVDB标签关联失败: {_e}")
+
+            # 写入演员与视频-演员关系
+            try:
+                actors = movie_info.get('actors') or []
+                for a in actors:
+                    name = None
+                    profile_url = None
+                    if isinstance(a, dict):
+                        name = (a.get('name') or '').strip() if a.get('name') else None
+                        profile_url = (
+                            a.get('profile_url')
+                            or a.get('link')
+                            or a.get('url')
+                        )
+                    elif isinstance(a, str):
+                        name = a.strip()
+                    if not name:
+                        continue
+
+                    # 插入或获取演员ID
+                    cursor.execute("SELECT id, profile_url FROM actors WHERE name = ?", (name,))
+                    ar = cursor.fetchone()
+                    if ar:
+                        actor_id = ar[0]
+                        # 更新缺失的个人链接
+                        if profile_url and not (ar[1] or '').strip():
+                            cursor.execute(
+                                "UPDATE actors SET profile_url = ?, updated_at = datetime('now') WHERE id = ?",
+                                (profile_url, actor_id),
+                            )
+                    else:
+                        cursor.execute(
+                            """
+                            INSERT INTO actors (name, profile_url, created_at, updated_at)
+                            VALUES (?, ?, datetime('now'), datetime('now'))
+                            """,
+                            (name, profile_url),
+                        )
+                        actor_id = cursor.lastrowid
+
+                    # 建立视频-演员关联
+                    if actor_id:
+                        cursor.execute(
+                            """
+                            INSERT OR IGNORE INTO video_actors (video_id, actor_id, created_at)
+                            VALUES (?, ?, datetime('now'))
+                            """,
+                            (video_id, actor_id),
+                        )
+            except Exception as _e:
+                self.logger.warning(f"写入演员关联失败: {_e}")
             
             conn.commit()
             conn.close()
