@@ -1,0 +1,202 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mxfile host="app.diagrams.net" agent="5.0 (Macintosh)" version="22.1.8" type="device">
+  <diagram id="FmWwGkH4sYrK14P33R0v" name="数据库ER图">
+    <mxGraphModel dx="1420" dy="956" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1169" pageHeight="827" math="0" shadow="0">
+      <root>
+        <mxCell id="0"/>
+        <mxCell id="1" parent="0"/>
+        <!-- 数据库ER图 -->
+        <mxCell id="2" value="媒体库管理系统数据库ER图" style="text;html=1;strokeColor=none;fillColor=none;align=center;fontSize=24;fontFamily=Arial;" parent="1">
+          <mxGeometry x="500" y="30" width="420" height="40" as="geometry"/>
+        </mxCell>
+        
+        <!-- videos表 -->
+        <mxCell id="3" value="videos\n视频文件基本信息" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;" parent="1">
+          <mxGeometry x="100" y="100" width="180" height="140" as="geometry"/>
+        </mxCell>
+        <mxCell id="4" value="id (PK)\nfile_path (UK)\nfile_name\nfile_size\nmd5_hash\nduration\ndate_added\nlast_modified\nfolder_id (FK)" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=top;spacingLeft=4;spacingRight=4;spacingTop=4;spacingBottom=4;" parent="3">
+          <mxGeometry width="100%" height="100%" as="geometry"/>
+        </mxCell>
+        
+        <!-- actors表 -->
+        <mxCell id="5" value="actors\n演员信息" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;" parent="1">
+          <mxGeometry x="320" y="100" width="180" height="180" as="geometry"/>
+        </mxCell>
+        <mxCell id="6" value="id (PK)\nname (UK)\njapanese_name\navatar_url\navatar_path\nbirth_date\nheight\nbust\nwaist\nhips\ndebut_date\ndescription\ngender" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=top;spacingLeft=4;spacingRight=4;spacingTop=4;spacingBottom=4;" parent="5">
+          <mxGeometry width="100%" height="100%" as="geometry"/>
+        </mxCell>
+        
+        <!-- video_actors表 -->
+        <mxCell id="7" value="video_actors\n视频和演员关联" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;" parent="1">
+          <mxGeometry x="210" y="320" width="180" height="80" as="geometry"/>
+        </mxCell>
+        <mxCell id="8" value="video_id (PK, FK)\nactor_id (PK, FK)" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=top;spacingLeft=4;spacingRight=4;spacingTop=4;spacingBottom=4;" parent="7">
+          <mxGeometry width="100%" height="100%" as="geometry"/>
+        </mxCell>
+        
+        <!-- javdb_info表 -->
+        <mxCell id="9" value="javdb_info\nJAVDB视频元数据" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;" parent="1">
+          <mxGeometry x="540" y="100" width="180" height="220" as="geometry"/>
+        </mxCell>
+        <mxCell id="10" value="id (PK)\nvideo_id (UK, FK)\ntitle\noriginal_title\nrelease_date\nduration\ndirector\nstudio\nlabel\nseries\nscore\ncover_url\ncover_path\ndescription\nmagnet_link" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=top;spacingLeft=4;spacingRight=4;spacingTop=4;spacingBottom=4;" parent="9">
+          <mxGeometry width="100%" height="100%" as="geometry"/>
+        </mxCell>
+        
+        <!-- tags表 -->
+        <mxCell id="11" value="tags\n系统标签信息" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;" parent="1">
+          <mxGeometry x="760" y="100" width="180" height="100" as="geometry"/>
+        </mxCell>
+        <mxCell id="12" value="id (PK)\nname (UK)\ncategory\ndescription" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=top;spacingLeft=4;spacingRight=4;spacingTop=4;spacingBottom=4;" parent="11">
+          <mxGeometry width="100%" height="100%" as="geometry"/>
+        </mxCell>
+        
+        <!-- javdb_tags表 -->
+        <mxCell id="13" value="javdb_tags\nJAVDB特定标签" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;" parent="1">
+          <mxGeometry x="760" y="240" width="180" height="80" as="geometry"/>
+        </mxCell>
+        <mxCell id="14" value="id (PK)\nname (UK)\nurl" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=top;spacingLeft=4;spacingRight=4;spacingTop=4;spacingBottom=4;" parent="13">
+          <mxGeometry width="100%" height="100%" as="geometry"/>
+        </mxCell>
+        
+        <!-- javdb_info_tags表 -->
+        <mxCell id="15" value="javdb_info_tags\nJAVDB信息和标签关联" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;" parent="1">
+          <mxGeometry x="650" y="360" width="180" height="80" as="geometry"/>
+        </mxCell>
+        <mxCell id="16" value="javdb_info_id (PK, FK)\njavdb_tag_id (PK, FK)" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=top;spacingLeft=4;spacingRight=4;spacingTop=4;spacingBottom=4;" parent="15">
+          <mxGeometry width="100%" height="100%" as="geometry"/>
+        </mxCell>
+        
+        <!-- folders表 -->
+        <mxCell id="17" value="folders\n文件夹信息" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e6e6fa;strokeColor=#9370db;" parent="1">
+          <mxGeometry x="100" y="320" width="100" height="80" as="geometry"/>
+        </mxCell>
+        <mxCell id="18" value="id (PK)\nfolder_path (UK)\nname\ndate_added" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=top;spacingLeft=4;spacingRight=4;spacingTop=4;spacingBottom=4;" parent="17">
+          <mxGeometry width="100%" height="100%" as="geometry"/>
+        </mxCell>
+        
+        <!-- 关系连接线 -->
+        <!-- videos -> video_actors -->
+        <mxCell id="19" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;" edge="1" parent="1" source="3" target="7">
+          <mxGeometry width="50" height="50" relative="1" as="geometry">
+            <mxPoint x="280" y="170" as="sourcePoint"/>
+            <mxPoint x="210" y="360" as="targetPoint"/>
+          </mxGeometry>
+        </mxCell>
+        
+        <!-- actors -> video_actors -->
+        <mxCell id="20" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;" edge="1" parent="1" source="5" target="7">
+          <mxGeometry width="50" height="50" relative="1" as="geometry">
+            <mxPoint x="320" y="280" as="sourcePoint"/>
+            <mxPoint x="390" y="360" as="targetPoint"/>
+          </mxGeometry>
+        </mxCell>
+        
+        <!-- videos -> javdb_info -->
+        <mxCell id="21" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;" edge="1" parent="1" source="3" target="9">
+          <mxGeometry width="50" height="50" relative="1" as="geometry">
+            <mxPoint x="280" y="140" as="sourcePoint"/>
+            <mxPoint x="540" y="140" as="targetPoint"/>
+          </mxGeometry>
+        </mxCell>
+        
+        <!-- javdb_info -> javdb_info_tags -->
+        <mxCell id="22" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;" edge="1" parent="1" source="9" target="15">
+          <mxGeometry width="50" height="50" relative="1" as="geometry">
+            <mxPoint x="720" y="210" as="sourcePoint"/>
+            <mxPoint x="650" y="400" as="targetPoint"/>
+          </mxGeometry>
+        </mxCell>
+        
+        <!-- javdb_tags -> javdb_info_tags -->
+        <mxCell id="23" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;" edge="1" parent="1" source="13" target="15">
+          <mxGeometry width="50" height="50" relative="1" as="geometry">
+            <mxPoint x="760" y="320" as="sourcePoint"/>
+            <mxPoint x="830" y="400" as="targetPoint"/>
+          </mxGeometry>
+        </mxCell>
+        
+        <!-- folders -> videos -->
+        <mxCell id="24" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;" edge="1" parent="1" source="17" target="3">
+          <mxGeometry width="50" height="50" relative="1" as="geometry">
+            <mxPoint x="150" y="320" as="sourcePoint"/>
+            <mxPoint x="150" y="240" as="targetPoint"/>
+          </mxGeometry>
+        </mxCell>
+        
+        <!-- 关系基数标签 -->
+        <mxCell id="25" value="1" style="text;html=1;align=center;verticalAlign=middle;fillColor=none;strokeColor=none;" parent="1">
+          <mxGeometry x="280" y="160" width="20" height="20" as="geometry"/>
+        </mxCell>
+        
+        <mxCell id="26" value="N" style="text;html=1;align=center;verticalAlign=middle;fillColor=none;strokeColor=none;" parent="1">
+          <mxGeometry x="210" y="380" width="20" height="20" as="geometry"/>
+        </mxCell>
+        
+        <mxCell id="27" value="1" style="text;html=1;align=center;verticalAlign=middle;fillColor=none;strokeColor=none;" parent="1">
+          <mxGeometry x="320" y="280" width="20" height="20" as="geometry"/>
+        </mxCell>
+        
+        <mxCell id="28" value="N" style="text;html=1;align=center;verticalAlign=middle;fillColor=none;strokeColor=none;" parent="1">
+          <mxGeometry x="390" y="380" width="20" height="20" as="geometry"/>
+        </mxCell>
+        
+        <mxCell id="29" value="1" style="text;html=1;align=center;verticalAlign=middle;fillColor=none;strokeColor=none;" parent="1">
+          <mxGeometry x="280" y="160" width="20" height="20" as="geometry"/>
+        </mxCell>
+        
+        <mxCell id="30" value="1" style="text;html=1;align=center;verticalAlign=middle;fillColor=none;strokeColor=none;" parent="1">
+          <mxGeometry x="540" y="160" width="20" height="20" as="geometry"/>
+        </mxCell>
+        
+        <mxCell id="31" value="1" style="text;html=1;align=center;verticalAlign=middle;fillColor=none;strokeColor=none;" parent="1">
+          <mxGeometry x="720" y="210" width="20" height="20" as="geometry"/>
+        </mxCell>
+        
+        <mxCell id="32" value="N" style="text;html=1;align=center;verticalAlign=middle;fillColor=none;strokeColor=none;" parent="1">
+          <mxGeometry x="650" y="420" width="20" height="20" as="geometry"/>
+        </mxCell>
+        
+        <mxCell id="33" value="1" style="text;html=1;align=center;verticalAlign=middle;fillColor=none;strokeColor=none;" parent="1">
+          <mxGeometry x="760" y="320" width="20" height="20" as="geometry"/>
+        </mxCell>
+        
+        <mxCell id="34" value="N" style="text;html=1;align=center;verticalAlign=middle;fillColor=none;strokeColor=none;" parent="1">
+          <mxGeometry x="830" y="420" width="20" height="20" as="geometry"/>
+        </mxCell>
+        
+        <mxCell id="35" value="1" style="text;html=1;align=center;verticalAlign=middle;fillColor=none;strokeColor=none;" parent="1">
+          <mxGeometry x="150" y="340" width="20" height="20" as="geometry"/>
+        </mxCell>
+        
+        <mxCell id="36" value="N" style="text;html=1;align=center;verticalAlign=middle;fillColor=none;strokeColor=none;" parent="1">
+          <mxGeometry x="150" y="260" width="20" height="20" as="geometry"/>
+        </mxCell>
+        
+        <!-- 图例 -->
+        <mxCell id="37" value="图例" style="text;html=1;strokeColor=none;fillColor=none;align=center;fontSize=16;fontFamily=Arial;" parent="1">
+          <mxGeometry x="980" y="100" width="100" height="30" as="geometry"/>
+        </mxCell>
+        
+        <mxCell id="38" value="实体表" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;" parent="1">
+          <mxGeometry x="980" y="140" width="100" height="30" as="geometry"/>
+        </mxCell>
+        
+        <mxCell id="39" value="关联表" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;" parent="1">
+          <mxGeometry x="980" y="190" width="100" height="30" as="geometry"/>
+        </mxCell>
+        
+        <mxCell id="40" value="PK: 主键\nUK: 唯一键\nFK: 外键" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=top;spacingLeft=4;spacingRight=4;spacingTop=4;spacingBottom=4;" parent="1">
+          <mxGeometry x="980" y="240" width="100" height="60" as="geometry"/>
+        </mxCell>
+        
+        <mxCell id="41" value="1:N 关系" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=top;spacingLeft=4;spacingRight=4;spacingTop=4;spacingBottom=4;" parent="1">
+          <mxGeometry x="980" y="310" width="100" height="20" as="geometry"/>
+        </mxCell>
+        
+        <mxCell id="42" value="N:M 关系" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=top;spacingLeft=4;spacingRight=4;spacingTop=4;spacingBottom=4;" parent="1">
+          <mxGeometry x="980" y="340" width="100" height="20" as="geometry"/>
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

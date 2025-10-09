@@ -30,6 +30,7 @@ from send2trash import send2trash
 # from concurrent.futures import ThreadPoolExecutor, as_completed
 # import multiprocessing
 import logging
+from fast_smart_media_updater import run_fast_update, load_active_folders
 
 # 日志级别配置
 class LogLevel:
@@ -820,6 +821,7 @@ class MediaLibrary:
         tools_menu.add_command(label="修正JAVDB错误信息", command=self.fix_javdb_error_titles)
         tools_menu.add_separator()
         tools_menu.add_command(label="智能媒体库更新", command=self.comprehensive_media_update)
+        tools_menu.add_command(label="快速智能媒体库更新", command=self.quick_smart_media_update)
         
         # 界面菜单
         view_menu = tk.Menu(menubar, tearoff=0)
@@ -1521,7 +1523,129 @@ class MediaLibrary:
         except Exception as e:
             print(f"添加视频失败 {file_path}: {str(e)}")
             return 'error'
-    
+
+    def quick_smart_media_update(self):
+        """快速智能媒体库更新：按选中文件夹逐个处理，迁移检测仅限单个文件夹。"""
+        # 查询活跃文件夹
+        self.cursor.execute("SELECT folder_path FROM folders WHERE is_active = 1")
+        active_rows = self.cursor.fetchall()
+        active_folders = [r[0] for r in active_rows if r and r[0] and os.path.exists(r[0])]
+
+        if not active_folders:
+            messagebox.showinfo("信息", "没有找到在线的活跃文件夹，请先添加文件夹")
+            return
+
+        # 选择文件夹对话框（多选）
+        select_win = tk.Toplevel(self.root)
+        select_win.title("快速智能媒体库更新 - 选择文件夹")
+        select_win.geometry("560x420")
+        select_win.transient(self.root)
+        select_win.grab_set()
+
+        ttk.Label(select_win, text="请选择要更新的文件夹（可多选）").pack(pady=8)
+
+        list_frame = ttk.Frame(select_win)
+        list_frame.pack(fill=tk.BOTH, expand=True, padx=12, pady=8)
+
+        folder_listbox = tk.Listbox(list_frame, selectmode=tk.MULTIPLE)
+        folder_listbox.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        scroll = ttk.Scrollbar(list_frame, orient=tk.VERTICAL, command=folder_listbox.yview)
+        folder_listbox.configure(yscrollcommand=scroll.set)
+        scroll.pack(side=tk.RIGHT, fill=tk.Y)
+
+        for f in active_folders:
+            folder_listbox.insert(tk.END, f)
+
+        # 选项
+        options_frame = ttk.LabelFrame(select_win, text="选项")
+        options_frame.pack(fill=tk.X, padx=12, pady=8)
+        enable_md5_var = tk.BooleanVar(value=True)
+        delete_missing_var = tk.BooleanVar(value=True)
+        ttk.Checkbutton(options_frame, text="启用MD5匹配（更准确，但较慢）", variable=enable_md5_var).pack(anchor=tk.W, padx=8, pady=4)
+        ttk.Checkbutton(options_frame, text="删除数据库中缺失的记录", variable=delete_missing_var).pack(anchor=tk.W, padx=8, pady=4)
+
+        # 操作按钮
+        btn_frame = ttk.Frame(select_win)
+        btn_frame.pack(fill=tk.X, padx=12, pady=8)
+        selected_folders = []
+
+        def on_confirm():
+            nonlocal selected_folders
+            indices = folder_listbox.curselection()
+            selected_folders = [active_folders[i] for i in indices]
+            if not selected_folders:
+                messagebox.showwarning("提示", "请至少选择一个文件夹")
+                return
+            select_win.destroy()
+
+            # 进度窗口
+            progress_window = tk.Toplevel(self.root)
+            progress_window.title("快速智能媒体库更新")
+            progress_window.geometry("640x420")
+            progress_window.transient(self.root)
+            progress_window.grab_set()
+
+            progress_var = tk.DoubleVar(value=0)
+            progress_bar = ttk.Progressbar(progress_window, variable=progress_var, maximum=100)
+            progress_bar.pack(fill=tk.X, padx=12, pady=8)
+
+            status_var = tk.StringVar(value="准备开始...")
+            ttk.Label(progress_window, textvariable=status_var).pack(pady=4)
+
+            log_frame = ttk.LabelFrame(progress_window, text="日志")
+            log_frame.pack(fill=tk.BOTH, expand=True, padx=12, pady=8)
+            log_text = tk.Text(log_frame)
+            log_scroll = ttk.Scrollbar(log_frame, orient=tk.VERTICAL, command=log_text.yview)
+            log_text.configure(yscrollcommand=log_scroll.set)
+            log_text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+            log_scroll.pack(side=tk.RIGHT, fill=tk.Y)
+
+            cancel_var = tk.BooleanVar(value=False)
+            ttk.Button(progress_window, text="取消", command=lambda: cancel_var.set(True)).pack(pady=8)
+
+            def log_message(msg: str):
+                ts = datetime.now().strftime('%H:%M:%S')
+                log_text.insert(tk.END, f"{ts} - {msg}\n")
+                log_text.see(tk.END)
+                progress_window.update()
+
+            def worker():
+                try:
+                    total = len(selected_folders)
+                    for idx, folder in enumerate(selected_folders, start=1):
+                        if cancel_var.get():
+                            log_message("用户取消，任务结束。")
+                            break
+                        status_var.set(f"处理中 ({idx}/{total}): {folder}")
+                        progress = (idx - 1) / total * 100
+                        progress_var.set(progress)
+                        # 串行处理当前文件夹
+                        run_fast_update(
+                            folders=[folder],
+                            enable_md5=enable_md5_var.get(),
+                            dry_run=False,
+                            delete_missing=delete_missing_var.get(),
+                            quiet=False,
+                            progress=log_message,
+                        )
+                        progress_var.set(idx / total * 100)
+                    status_var.set("完成")
+                    self.conn.commit()
+                    # 刷新列表
+                    self.root.after(100, self.load_videos)
+                    self.root.after(0, lambda: messagebox.showinfo("完成", "快速智能媒体库更新完成"))
+                except Exception as e:
+                    log_message(f"发生错误: {e}")
+                    err_text = str(e)
+                    self.root.after(0, lambda msg=err_text: messagebox.showerror("错误", msg))
+                finally:
+                    self.root.after(0, progress_window.destroy)
+
+            threading.Thread(target=worker, daemon=True).start()
+
+        ttk.Button(btn_frame, text="确定", command=on_confirm).pack(side=tk.LEFT, padx=8)
+        ttk.Button(btn_frame, text="取消", command=select_win.destroy).pack(side=tk.LEFT, padx=8)
+
     def add_video_to_db(self, file_path, folder_type):
         """添加视频到数据库"""
         try:
