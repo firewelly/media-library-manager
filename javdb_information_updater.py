@@ -17,6 +17,18 @@ import sqlite3
 import argparse
 from urllib.parse import urlparse, urljoin
 
+# 从配置文件加载代理与域名设置
+from config import (
+    SOCKS5_PROXY_HOST,
+    SOCKS5_PROXY_PORT,
+    MIN_DELAY,
+    MAX_DELAY,
+    LOGIN_EMAIL,
+    LOGIN_PASSWORD,
+    get_javdb_base_url,
+    normalize_javdb_url,
+)
+
 from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
@@ -25,13 +37,10 @@ from selenium.webdriver.edge.options import Options
 from selenium.common.exceptions import TimeoutException
 from selenium.webdriver.common.action_chains import ActionChains
 
-# 配置信息
-SOCKS5_PROXY_HOST = '127.0.0.1'
-SOCKS5_PROXY_PORT = '1080'
-BASE_URL = 'https://javdb.com'
+# 配置信息（BASE_URL/LOGIN_URL 根据是否使用代理动态设置；默认使用代理）
+USE_PROXY = True
+BASE_URL = get_javdb_base_url(USE_PROXY)
 LOGIN_URL = f'{BASE_URL}/login'
-MIN_DELAY = 3
-MAX_DELAY = 7
 DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'media_library.db')
 # 统一封面缓存目录到 results/images（与其它脚本保持一致）
 COVERS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'results', 'images')
@@ -132,8 +141,11 @@ def is_edge_running():
     return False
 
 
-def setup_driver(user_data_dir=None, profile_directory=None, headless=False):
-    """设置MS Edge浏览器驱动，支持附加到现有Edge用户配置文件以帮助通过安全检查"""
+def setup_driver(user_data_dir=None, profile_directory=None, headless=False, use_proxy: bool = None):
+    """设置MS Edge浏览器驱动，支持附加到现有Edge用户配置文件以帮助通过安全检查。
+
+    :param use_proxy: 显式指定是否使用代理；为 None 时按既定尝试顺序（先代理后直连）。
+    """
     def build_options(use_proxy=True):
         opts = Options()
         opts.page_load_strategy = 'eager'
@@ -180,11 +192,22 @@ def setup_driver(user_data_dir=None, profile_directory=None, headless=False):
     driver_path = user_driver_path if os.path.exists(user_driver_path) else default_driver_path
 
     last_error = None
-    attempts = [
-        {"proxy": True,  "use_service": True,  "label": "ui+proxy+service"},
-        {"proxy": False, "use_service": True,  "label": "ui+no-proxy+service"},
-        {"proxy": False, "use_service": False, "label": "ui+no-proxy+PATH"},
-    ]
+    if use_proxy is None:
+        attempts = [
+            {"proxy": True,  "use_service": True,  "label": "ui+proxy+service"},
+            {"proxy": False, "use_service": True,  "label": "ui+no-proxy+service"},
+            {"proxy": False, "use_service": False, "label": "ui+no-proxy+PATH"},
+        ]
+    elif use_proxy:
+        attempts = [
+            {"proxy": True,  "use_service": True,  "label": "ui+proxy+service"},
+            {"proxy": True,  "use_service": False, "label": "ui+proxy+PATH"},
+        ]
+    else:
+        attempts = [
+            {"proxy": False, "use_service": True,  "label": "ui+no-proxy+service"},
+            {"proxy": False, "use_service": False, "label": "ui+no-proxy+PATH"},
+        ]
     
     for att in attempts:
         try:
@@ -499,7 +522,9 @@ def get_videos_to_update(folder_path=None, refresh_all=False, filter_by_code=Non
             update_conditions += "    SELECT 1 FROM video_actors va \n"
             update_conditions += "    JOIN actors a ON va.actor_id = a.id \n"
             update_conditions += "    WHERE va.video_id = v.id \n"
-            update_conditions += "    AND a.profile_url LIKE '%javdb.com%'\n"
+            # 根据当前 BASE_URL 的域名进行匹配（支持代理/直连两种主域名）
+            domain = urlparse(BASE_URL).netloc
+            update_conditions += f"    AND a.profile_url LIKE '%{domain}%'\n"
             update_conditions += ") -- 没有JAVDB女演员链接\n"
             
             query = base_query + where_clause + update_conditions + ")"
@@ -524,7 +549,22 @@ def get_videos_without_actors(folder_path=None):
     return get_videos_to_update(folder_path)
 
 
-def update_video_info(video_id, title=None, actors=None, tags=None, studio=None, release_date=None, duration=None, rating=None, cover_image_path=None):
+def update_video_info(
+    video_id,
+    title=None,
+    actors=None,
+    tags=None,
+    studio=None,
+    series=None,
+    release_date=None,
+    duration=None,
+    rating=None,
+    cover_image_path=None,
+    javdb_code=None,
+    javdb_url=None,
+    cover_image_url=None,
+    magnet_links=None,
+):
     """更新视频信息到数据库，并将封面以BLOB写入数据库。
 
     - 更新 `videos` 表：标题、标签、时长、评分、`thumbnail_path`，如存在则同时更新 `thumbnail_data`。
@@ -596,7 +636,7 @@ def update_video_info(video_id, title=None, actors=None, tags=None, studio=None,
         cursor.execute(query, params)
         conn.commit()
 
-        # 将封面以BLOB写入/更新到 javdb_info 表
+        # 将封面以BLOB写入/更新到 javdb_info 表，并补充其它JAVDB字段
         try:
             if cover_image_path and cover_image_data is None:
                 # 若上面未能读取，重试一次读取
@@ -607,29 +647,238 @@ def update_video_info(video_id, title=None, actors=None, tags=None, studio=None,
                     with open(p, 'rb') as f:
                         cover_image_data = f.read()
 
+            # 确保 javdb_info / javdb_tags / javdb_info_tags 表存在
+            cursor.execute(
+                """
+                CREATE TABLE IF NOT EXISTS javdb_info (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    video_id INTEGER NOT NULL,
+                    javdb_code TEXT NOT NULL,
+                    javdb_url TEXT,
+                    javdb_title TEXT,
+                    release_date TEXT,
+                    duration TEXT,
+                    studio TEXT,
+                    series TEXT,
+                    rating TEXT,
+                    score TEXT,
+                    cover_url TEXT,
+                    local_cover_path TEXT,
+                    cover_image_data BLOB,
+                    magnet_links TEXT,
+                    preview_images TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (video_id) REFERENCES videos (id) ON DELETE CASCADE
+                )
+                """
+            )
+            cursor.execute(
+                """
+                CREATE TABLE IF NOT EXISTS javdb_tags (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    tag_name TEXT UNIQUE NOT NULL,
+                    tag_type TEXT DEFAULT 'general',
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+                """
+            )
+            cursor.execute(
+                """
+                CREATE TABLE IF NOT EXISTS javdb_info_tags (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    javdb_info_id INTEGER NOT NULL,
+                    tag_id INTEGER NOT NULL,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (javdb_info_id) REFERENCES javdb_info (id) ON DELETE CASCADE,
+                    FOREIGN KEY (tag_id) REFERENCES javdb_tags (id) ON DELETE CASCADE,
+                    UNIQUE(javdb_info_id, tag_id)
+                )
+                """
+            )
+
+            # 解析评分为数值分值（score）
+            score_val = None
+            try:
+                if isinstance(rating, (int, float)):
+                    score_val = float(rating)
+                elif isinstance(rating, str):
+                    cleaned = rating.strip()
+                    if cleaned:
+                        score_val = float(cleaned)
+            except Exception:
+                score_val = None
+
+            # 统一序列化列表字段（仅磁力链接保留JSON；标签与演员使用关系表写入）
+            magnet_json = None
+            try:
+                import json as _json
+                if magnet_links:
+                    magnet_json = _json.dumps(magnet_links, ensure_ascii=False)
+            except Exception:
+                pass
+
             cursor.execute("SELECT id FROM javdb_info WHERE video_id = ?", (video_id,))
             row = cursor.fetchone()
             if row is None:
                 cursor.execute(
                     """
-                    INSERT INTO javdb_info (video_id, local_cover_path, cover_image_data, created_at, updated_at)
-                    VALUES (?, ?, ?, datetime('now'), datetime('now'))
+                    INSERT INTO javdb_info (
+                        video_id, javdb_code, javdb_url, javdb_title, release_date, duration, studio, series,
+                        rating, score, cover_url, local_cover_path, cover_image_data, magnet_links,
+                        created_at, updated_at
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))
                     """,
-                    (video_id, cover_image_path or '', cover_image_data)
+                    (
+                        video_id,
+                        javdb_code or '',
+                        javdb_url or '',
+                        title or None,
+                        release_date or None,
+                        duration if (duration is not None) else None,
+                        studio or None,
+                        series or None,
+                        None,
+                        score_val,
+                        cover_image_url or None,
+                        cover_image_path or '',
+                        cover_image_data,
+                        magnet_json,
+                    )
                 )
+                javdb_info_id = cursor.lastrowid
             else:
                 cursor.execute(
                     """
                     UPDATE javdb_info
-                    SET local_cover_path = ?, cover_image_data = ?, updated_at = datetime('now')
+                    SET javdb_code = COALESCE(?, javdb_code),
+                        javdb_url = COALESCE(?, javdb_url),
+                        javdb_title = COALESCE(?, javdb_title),
+                        release_date = COALESCE(?, release_date),
+                        duration = COALESCE(?, duration),
+                        studio = COALESCE(?, studio),
+                        series = COALESCE(?, series),
+                        rating = COALESCE(?, rating),
+                        score = COALESCE(?, score),
+                        cover_url = COALESCE(?, cover_url),
+                        local_cover_path = COALESCE(?, local_cover_path),
+                        cover_image_data = COALESCE(?, cover_image_data),
+                        magnet_links = COALESCE(?, magnet_links),
+                        updated_at = datetime('now')
                     WHERE video_id = ?
                     """,
-                    (cover_image_path or '', cover_image_data, video_id)
+                    (
+                        javdb_code or None,
+                        javdb_url or None,
+                        title or None,
+                        release_date or None,
+                        duration if (duration is not None) else None,
+                        studio or None,
+                        series or None,
+                        None,
+                        score_val,
+                        cover_image_url or None,
+                        cover_image_path or '',
+                        cover_image_data,
+                        magnet_json,
+                        video_id,
+                    )
                 )
+                javdb_info_id = row[0]
             conn.commit()
+
+            # 同步写入标签关联（javdb_tags / javdb_info_tags）
+            try:
+                if tags and javdb_info_id:
+                    for t in tags:
+                        tag_name = (t or '').strip()
+                        if not tag_name:
+                            continue
+                        cursor.execute(
+                            "INSERT OR IGNORE INTO javdb_tags (tag_name) VALUES (?)",
+                            (tag_name,)
+                        )
+                        cursor.execute("SELECT id FROM javdb_tags WHERE tag_name = ?", (tag_name,))
+                        tag_row = cursor.fetchone()
+                        if tag_row:
+                            tag_id = tag_row[0]
+                            cursor.execute(
+                                "INSERT OR IGNORE INTO javdb_info_tags (javdb_info_id, tag_id) VALUES (?, ?)",
+                                (javdb_info_id, tag_id)
+                            )
+                    conn.commit()
+            except Exception as _e:
+                # 标签关联失败不阻断主流程
+                print(f"写入JAVDB标签关联失败: {_e}")
         except Exception as e:
             # 不影响主更新流程，打印日志即可
             print(f"更新javdb_info封面BLOB失败: {e}")
+
+        # 若提供了演员信息，则写入 actors 与 video_actors 关联
+        try:
+            if actors and isinstance(actors, (list, tuple)):
+                for actor in actors:
+                    try:
+                        actor_name = (actor.get('name') or '').strip()
+                        actor_link = (actor.get('link') or '').strip()
+
+                        if not actor_name:
+                            continue
+
+                        # 规范化链接为绝对URL（可能为/actors/xxx形式）
+                        if actor_link and actor_link.startswith('/'):
+                            actor_link = urljoin(BASE_URL, actor_link)
+
+                        # 查找现有演员（优先按profile_url匹配，其次按name匹配）
+                        cursor.execute("SELECT id, profile_url FROM actors WHERE profile_url = ?", (actor_link,))
+                        row = cursor.fetchone()
+                        actor_id = None
+
+                        if row:
+                            actor_id = row[0]
+                            # 如名称为空或不同，可适度更新名称（不强制覆盖已有非空）
+                            cursor.execute("UPDATE actors SET updated_at = datetime('now') WHERE id = ?", (actor_id,))
+                        else:
+                            # 尝试按名称匹配已存在记录
+                            cursor.execute("SELECT id, profile_url FROM actors WHERE name = ?", (actor_name,))
+                            row = cursor.fetchone()
+                            if row:
+                                actor_id = row[0]
+                                # 若该记录没有profile_url，则补充
+                                existing_profile = row[1] or ''
+                                if actor_link and (not existing_profile.strip()):
+                                    cursor.execute(
+                                        "UPDATE actors SET profile_url = ?, updated_at = datetime('now') WHERE id = ?",
+                                        (actor_link, actor_id)
+                                    )
+                            else:
+                                # 插入新演员
+                                cursor.execute(
+                                    """
+                                    INSERT INTO actors (name, profile_url, created_at, updated_at)
+                                    VALUES (?, ?, datetime('now'), datetime('now'))
+                                    """,
+                                    (actor_name, actor_link)
+                                )
+                                actor_id = cursor.lastrowid
+
+                        # 建立视频-演员关联（唯一约束防重复）
+                        if actor_id:
+                            cursor.execute(
+                                """
+                                INSERT OR IGNORE INTO video_actors (video_id, actor_id, created_at)
+                                VALUES (?, ?, datetime('now'))
+                                """,
+                                (video_id, actor_id)
+                            )
+                    except Exception as _e:
+                        # 单个演员写入失败不影响整体，打印日志继续
+                        print(f"写入演员信息失败: {_e}")
+
+                conn.commit()
+        except Exception as e:
+            print(f"批量写入演员信息时出错: {e}")
 
         conn.close()
         return True
@@ -922,6 +1171,18 @@ def parse_detail(driver, detail_url, max_retries=3):
                     except:
                         pass
 
+            # Get series (系列)
+            series = 'N/A'
+            try:
+                series_element = driver.find_element(By.XPATH, "//strong[text()='系列:']/following-sibling::span[1]")
+                series = series_element.text.strip()
+            except:
+                try:
+                    series_element = driver.find_element(By.XPATH, "//strong[text()='Series:']/following-sibling::span[1]")
+                    series = series_element.text.strip()
+                except:
+                    pass
+
             # Get cover image
             img_url = ''
             img_selectors = [
@@ -976,6 +1237,37 @@ def parse_detail(driver, detail_url, max_retries=3):
                                 print("封面回退截图成功")
                 except Exception as e:
                     print(f"封面截图回退失败: {e}")
+
+            # Get magnet links (下载链接)
+            magnet_links = []
+            try:
+                # 首选：页面内包含 data-clipboard-text 的磁力链接复制按钮
+                elements = driver.find_elements(By.CSS_SELECTOR, '.magnet-links [data-clipboard-text^="magnet:?xt"]')
+                for el in elements:
+                    data = el.get_attribute('data-clipboard-text')
+                    if data and data.startswith('magnet:?'):
+                        magnet_links.append(data)
+
+                # 兜底：常见复制按钮选择器
+                if not magnet_links:
+                    copy_buttons = driver.find_elements(By.CSS_SELECTOR, 'button[data-clipboard-text^="magnet:?xt"], .copy-to-clipboard')
+                    for b in copy_buttons:
+                        data = b.get_attribute('data-clipboard-text')
+                        if data and data.startswith('magnet:?'):
+                            magnet_links.append(data)
+
+                # 最后兜底：直接抓取 a[href^="magnet:"]
+                if not magnet_links:
+                    anchors = driver.find_elements(By.CSS_SELECTOR, 'a[href^="magnet:?xt"]')
+                    for a in anchors:
+                        href = a.get_attribute('href')
+                        if href and href.startswith('magnet:?'):
+                            magnet_links.append(href)
+
+                # 去重
+                magnet_links = list(dict.fromkeys(magnet_links))
+            except Exception:
+                pass
             
             print(f"解析成功 - 标题: {title[:50]}..., ID: {video_id}")
             return {
@@ -988,8 +1280,10 @@ def parse_detail(driver, detail_url, max_retries=3):
                 'tags': tags,
                 'actors': actors,
                 'studio': studio,
+                'series': series,
                 'cover_image_url': img_url,
-                'local_image_path': local_img_path
+                'local_image_path': local_img_path,
+                'magnet_links': magnet_links
             }
 
         except Exception as e:
@@ -1011,8 +1305,10 @@ def parse_detail(driver, detail_url, max_retries=3):
                     'tags': [],
                     'actors': [],
                     'studio': 'N/A',
+                    'series': 'N/A',
                     'cover_image_url': '',
-                    'local_image_path': None
+                    'local_image_path': None,
+                    'magnet_links': []
                 }
 
 
@@ -1079,6 +1375,12 @@ def update_videos_without_actors(driver, folder_path=None):
     success_count = 0
     failed_count = 0
     failed_videos = []
+    # 批量摘要累计
+    total_tags = 0
+    total_actors = 0
+    total_magnet_links = 0
+    unique_studios = set()
+    unique_series = set()
 
     # 先记录无法提取番号的失败项
     for v in invalid_group:
@@ -1101,6 +1403,23 @@ def update_videos_without_actors(driver, folder_path=None):
             random_delay(MIN_DELAY, MAX_DELAY)
             continue
 
+        # 打印该番号的摘要
+        tags_cnt = len(result.get('tags') or [])
+        actors_cnt = len(result.get('actors') or [])
+        magnets_cnt = len(result.get('magnet_links') or [])
+        studio_str = result.get('studio') or 'N/A'
+        series_str = result.get('series') or 'N/A'
+        print(f"摘要：标签 {tags_cnt} 个，演员 {actors_cnt} 名，片商 {studio_str}，下载链接 {magnets_cnt} 条" + (f"，系列 {series_str}" if series_str and series_str != 'N/A' else ""))
+
+        # 累计批量摘要
+        total_tags += tags_cnt
+        total_actors += actors_cnt
+        total_magnet_links += magnets_cnt
+        if studio_str and studio_str != 'N/A':
+            unique_studios.add(studio_str)
+        if series_str and series_str != 'N/A':
+            unique_series.add(series_str)
+
         # 将结果应用到所有关联视频
         for v in group:
             # 优先使用网络下载的封面；如无则回退到同目录poster.jpg
@@ -1113,10 +1432,15 @@ def update_videos_without_actors(driver, folder_path=None):
                 actors=result['actors'],
                 tags=result['tags'],
                 studio=result['studio'],
+                series=result.get('series'),
                 release_date=result['release_date'],
                 duration=result['duration'],
                 rating=result['rating'],
-                cover_image_path=cover_path
+                cover_image_path=cover_path,
+                javdb_code=result.get('video_id'),
+                javdb_url=result.get('detail_url'),
+                cover_image_url=result.get('cover_image_url'),
+                magnet_links=result.get('magnet_links')
             )
             if update_result:
                 success_count += 1
@@ -1133,6 +1457,11 @@ def update_videos_without_actors(driver, folder_path=None):
     print(f"去重后番号数: {len(unique_codes)}")
     print(f"成功更新: {success_count}")
     print(f"更新失败: {failed_count}")
+    print(f"汇总：标签 {total_tags} 个，演员 {total_actors} 名，下载链接 {total_magnet_links} 条")
+    if unique_studios:
+        print(f"片商数: {len(unique_studios)}（例如：{list(unique_studios)[:3]}）")
+    if unique_series:
+        print(f"系列数: {len(unique_series)}（例如：{list(unique_series)[:3]}）")
 
     if failed_videos:
         print("\n失败的视频列表:")
@@ -1185,8 +1514,8 @@ def login_and_update(test_mode=False, test_folder_path=None, refresh_all=False, 
     user_data_dir = os.path.join(os.path.expanduser('~'), '.javdb_scraper', 'user_data')
     os.makedirs(user_data_dir, exist_ok=True)
     
-    # 启动浏览器
-    driver = setup_driver(user_data_dir=user_data_dir, headless=False)  # 使用有头模式
+    # 启动浏览器（根据是否使用代理决定网络模式）
+    driver = setup_driver(user_data_dir=user_data_dir, headless=False, use_proxy=USE_PROXY)  # 使用有头模式
     
     if not driver:
         print("无法启动浏览器，程序退出")
@@ -1255,10 +1584,15 @@ def login_and_update(test_mode=False, test_folder_path=None, refresh_all=False, 
                             actors=result['actors'],
                             tags=result['tags'],
                             studio=result['studio'],
+                            series=result.get('series'),
                             release_date=result['release_date'],
                             duration=result['duration'],
                             rating=result['rating'],
-                            cover_image_path=cover_path
+                            cover_image_path=cover_path,
+                            javdb_code=result.get('video_id'),
+                            javdb_url=result.get('detail_url'),
+                            cover_image_url=result.get('cover_image_url'),
+                            magnet_links=result.get('magnet_links')
                         )
                         if update_result:
                             print(f"成功更新番号为 {filter_by_code} 的视频信息")
@@ -1333,10 +1667,15 @@ def login_and_update(test_mode=False, test_folder_path=None, refresh_all=False, 
                                         actors=result['actors'],
                                         tags=result['tags'],
                                         studio=result['studio'],
+                                        series=result.get('series'),
                                         release_date=result['release_date'],
                                         duration=result['duration'],
                                         rating=result['rating'],
-                                        cover_image_path=cover_path
+                                        cover_image_path=cover_path,
+                                        javdb_code=result.get('video_id'),
+                                        javdb_url=result.get('detail_url'),
+                                        cover_image_url=result.get('cover_image_url'),
+                                        magnet_links=result.get('magnet_links')
                                     )
                                     if update_result:
                                         success_count += 1
@@ -1395,6 +1734,7 @@ if __name__ == "__main__":
     parser.add_argument('--db-path', type=str, help='指定数据库文件路径或目录（目录将自动追加media_library.db）')
     parser.add_argument('--min-delay', type=float, help='最小操作间隔秒，默认3')
     parser.add_argument('--max-delay', type=float, help='最大操作间隔秒，默认7')
+    parser.add_argument('--no-proxy', dest='no_proxy', action='store_true', help='不使用代理（使用直连域名）')
     
     # 解析命令行参数
     args = parser.parse_args()
@@ -1424,6 +1764,16 @@ if __name__ == "__main__":
         print(f"操作间隔：最小 {MIN_DELAY:.1f}s，最大 {MAX_DELAY:.1f}s")
     except Exception:
         pass
+
+    # 设置是否使用代理，并根据模式更新 BASE_URL / LOGIN_URL
+    try:
+        USE_PROXY = not getattr(args, 'no_proxy', False)
+        BASE_URL = get_javdb_base_url(USE_PROXY)
+        LOGIN_URL = f"{BASE_URL}/login"
+        mode_str = '代理模式' if USE_PROXY else '直连模式'
+        print(f"访问域名切换为：{BASE_URL}（{mode_str}）")
+    except Exception as e:
+        print(f"设置访问域名失败，仍使用默认：{BASE_URL}。错误：{e}")
 
     # 执行登录和更新
     login_and_update(
