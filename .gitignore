@@ -59,6 +59,9 @@ Thumbs.db
 # 配置文件（如果包含敏感信息）
 config.ini
 settings.json
+config.py
+config.local.py
+.env
 
 # Cookie文件（包含敏感信息）
 cookie_javdb.json
