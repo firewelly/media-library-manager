@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-演员详细信息爬虫 - 无头模式版本
+演员详细信息爬虫 - UI模式（非无头）
 使用Selenium + SOCKS5代理爬取JAVDB演员页面的详细信息并保存到数据库
 """
 
@@ -20,6 +20,31 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.common.exceptions import TimeoutException, WebDriverException, NoSuchElementException
+
+def get_dedicated_edge_user_data_dir():
+    """返回并创建一个专用于 EdgeDriver 的用户数据目录，以持久化登录态。"""
+    try:
+        base = os.path.dirname(os.path.abspath(__file__))
+        d = os.path.join(base, '.edge_driver_user_data')
+        os.makedirs(d, exist_ok=True)
+        return d
+    except Exception:
+        try:
+            d = os.path.join(os.getcwd(), '.edge_driver_user_data')
+            os.makedirs(d, exist_ok=True)
+            return d
+        except Exception:
+            return None
+
+def detect_default_edge_profile_directory(user_data_dir):
+    """优先返回 'Default' 配置目录，若不存在则返回 None"""
+    try:
+        if not user_data_dir:
+            return None
+        d = os.path.join(user_data_dir, 'Default')
+        return 'Default' if os.path.isdir(d) else None
+    except Exception:
+        return None
 
 class ActorCrawlerHeadlessDB:
     def __init__(self, proxy_host="127.0.0.1", proxy_port="1080"):
@@ -52,9 +77,8 @@ class ActorCrawlerHeadlessDB:
             return "/usr/local/bin/edgedriver_mac64/msedgedriver"
     
     def setup_driver(self):
-        """设置Edge浏览器驱动，配置SOCKS5代理和无头模式"""
+        """设置Edge浏览器驱动，配置SOCKS5代理（非无头），复用登录态"""
         edge_options = Options()
-        edge_options.add_argument('--headless')  # 启用无头模式
         edge_options.add_argument('--no-sandbox')
         edge_options.add_argument('--disable-dev-shm-usage')
         edge_options.add_argument('--disable-gpu')
@@ -62,10 +86,19 @@ class ActorCrawlerHeadlessDB:
         edge_options.add_argument('--disable-blink-features=AutomationControlled')
         edge_options.add_experimental_option("excludeSwitches", ["enable-automation"])
         edge_options.add_experimental_option('useAutomationExtension', False)
-        
+        edge_options.add_argument('--start-maximized')
+
+        # 附加用户数据目录与默认配置档，复用登录态
+        user_data_dir = get_dedicated_edge_user_data_dir()
+        profile_directory = detect_default_edge_profile_directory(user_data_dir)
+        if user_data_dir:
+            edge_options.add_argument(f"--user-data-dir={user_data_dir}")
+        if profile_directory:
+            edge_options.add_argument(f"--profile-directory={profile_directory}")
+
         # 配置SOCKS5代理
         edge_options.add_argument(f'--proxy-server=socks5://{self.proxy_host}:{self.proxy_port}')
-        
+
         # 设置更真实的用户代理
         edge_options.add_argument('--user-agent=Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36')
         
@@ -96,7 +129,7 @@ class ActorCrawlerHeadlessDB:
             self.driver.execute_script("Object.defineProperty(navigator, 'plugins', {get: () => [1, 2, 3, 4, 5]})")
             self.driver.execute_script("Object.defineProperty(navigator, 'languages', {get: () => ['zh-CN', 'zh', 'en']})")
             
-            print("Edge驱动初始化成功，已配置SOCKS5代理和无头模式")
+            print("Edge驱动初始化成功，已配置SOCKS5代理（UI模式，复用登录态）")
             return True
         except Exception as e:
             print(f"Edge驱动初始化失败: {e}")
@@ -489,7 +522,7 @@ class ActorCrawlerHeadlessDB:
 def test_crawler():
     """测试爬虫功能"""
     print("\n" + "="*50)
-    print("开始测试演员爬虫功能（无头模式）")
+    print("开始测试演员爬虫功能（UI模式）")
     print("="*50)
     
     crawler = ActorCrawlerHeadlessDB()

@@ -122,10 +122,17 @@ class AvatarFixer:
         success_count = 0
         failed_count = 0
         
-        for actor_id, name, avatar_url in actors:
+        for actor_id, name, avatar_url, profile_url in actors:
             print(f"\n处理演员: {name} (ID: {actor_id})")
             print(f"头像URL: {avatar_url}")
             
+            # 跳过无效的头像URL
+            if not avatar_url:
+                print("✗ 无有效头像URL，跳过")
+                failed_count += 1
+                time.sleep(0.5)
+                continue
+
             # 下载头像
             avatar_data = self.download_avatar(avatar_url)
             

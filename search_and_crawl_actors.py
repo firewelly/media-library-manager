@@ -23,7 +23,45 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.common.exceptions import TimeoutException, WebDriverException, NoSuchElementException
-from config import BASE_URL, FALLBACK_URL, SOCKS5_PROXY_HOST, SOCKS5_PROXY_PORT
+# 兼容性导入配置：在缺少某些字段（如 FALLBACK_URL）时自动回退
+import config as _cfg
+
+# 基础配置（提供合理默认值）
+BASE_URL = getattr(_cfg, 'BASE_URL', 'https://javdb.com')
+SOCKS5_PROXY_HOST = getattr(_cfg, 'SOCKS5_PROXY_HOST', '127.0.0.1')
+SOCKS5_PROXY_PORT = getattr(_cfg, 'SOCKS5_PROXY_PORT', 1080)
+
+# 推导直连使用的备选域名（无代理时）
+if hasattr(_cfg, 'get_javdb_base_url'):
+    FALLBACK_URL = _cfg.get_javdb_base_url(False)
+else:
+    _direct_domain = getattr(_cfg, 'JAVDB_DIRECT_DOMAIN', None)
+    FALLBACK_URL = f"https://{_direct_domain}" if _direct_domain else BASE_URL
+
+def get_dedicated_edge_user_data_dir():
+    """返回并创建一个专用于 EdgeDriver 的用户数据目录，以持久化登录态。"""
+    try:
+        base = os.path.dirname(os.path.abspath(__file__))
+        d = os.path.join(base, '.edge_driver_user_data')
+        os.makedirs(d, exist_ok=True)
+        return d
+    except Exception:
+        try:
+            d = os.path.join(os.getcwd(), '.edge_driver_user_data')
+            os.makedirs(d, exist_ok=True)
+            return d
+        except Exception:
+            return None
+
+def detect_default_edge_profile_directory(user_data_dir):
+    """优先返回 'Default' 配置目录，若不存在则返回 None"""
+    try:
+        if not user_data_dir:
+            return None
+        d = os.path.join(user_data_dir, 'Default')
+        return 'Default' if os.path.isdir(d) else None
+    except Exception:
+        return None
 
 class ActorCrawlerNoProxy:
     """不使用代理的演员爬虫类"""
@@ -58,7 +96,6 @@ class ActorCrawlerNoProxy:
     def setup_driver(self):
         """设置Edge浏览器驱动，不使用代理"""
         edge_options = Options()
-        edge_options.add_argument('--headless')
         edge_options.add_argument('--no-sandbox')
         edge_options.add_argument('--disable-dev-shm-usage')
         edge_options.add_argument('--disable-gpu')
@@ -66,6 +103,15 @@ class ActorCrawlerNoProxy:
         edge_options.add_argument('--disable-blink-features=AutomationControlled')
         edge_options.add_experimental_option("excludeSwitches", ["enable-automation"])
         edge_options.add_experimental_option('useAutomationExtension', False)
+        edge_options.add_argument('--start-maximized')
+
+        # 附加用户数据目录与默认配置档，复用登录态
+        user_data_dir = get_dedicated_edge_user_data_dir()
+        profile_directory = detect_default_edge_profile_directory(user_data_dir)
+        if user_data_dir:
+            edge_options.add_argument(f"--user-data-dir={user_data_dir}")
+        if profile_directory:
+            edge_options.add_argument(f"--profile-directory={profile_directory}")
         
         # 设置用户代理
         edge_options.add_argument('--user-agent=Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36')

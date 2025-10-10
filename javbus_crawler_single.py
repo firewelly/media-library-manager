@@ -25,7 +25,12 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-def save_cover_image_from_selenium(driver, img_element, av_code, download_dir="covers"):
+# 统一封面保存目录到 results/images（与其它脚本保持一致）
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+COVERS_DIR = os.path.join(BASE_DIR, 'results', 'images')
+os.makedirs(COVERS_DIR, exist_ok=True)
+
+def save_cover_image_from_selenium(driver, img_element, av_code, download_dir=COVERS_DIR):
     """
     使用Selenium直接保存已加载的封面图片
     """
