@@ -2769,25 +2769,26 @@ class MediaLibrary:
             for folder_path, folder_type, device_name in folders:
                 folder_name = os.path.basename(folder_path)
                 
-                # 根据文件夹类型生成显示名称
+                # 根据文件夹类型生成显示名称（统一为 设备@文件夹）
                 if folder_type == "nas":
-                    # NAS文件夹：提取IP地址
+                    # 优先解析设备标识（IP/主机名/卷名）
+                    device_display = None
                     if folder_path.startswith("smb://"):
-                        # 从smb://username@192.168.1.100/folder格式中提取IP
                         import re
-                        ip_match = re.search(r'@([0-9.]+)/', folder_path)
-                        if ip_match:
-                            nas_ip = ip_match.group(1)
-                            display_name = f"{nas_ip}@{folder_name}"
-                        else:
-                            display_name = f"NAS@{folder_name}"
+                        # 支持 smb://host/... 或 smb://user@host/...
+                        domain_match = re.search(r'smb://(?:[^@]+@)?([^/]+)/', folder_path)
+                        if domain_match:
+                            device_display = domain_match.group(1)
                     elif folder_path.startswith("/Volumes/"):
-                        # macOS挂载的网络驱动器
-                        display_name = f"NAS@{folder_name}"
-                    else:
-                        display_name = f"NAS@{folder_name}"
+                        # macOS 挂载的网络驱动器：取卷名作为设备名
+                        parts = folder_path.split('/')
+                        device_display = parts[2] if len(parts) > 2 and parts[2] else "NAS"
+                    # 回退到数据库中的设备名称或通用 NAS
+                    if not device_display or not str(device_display).strip():
+                        device_display = device_name if device_name and device_name.strip() else "NAS"
+                    display_name = f"{device_display}@{folder_name}"
                 else:
-                    # 本地文件夹：显示设备名称
+                    # 本地文件夹：显示设备名称或“本地”
                     device_display = device_name if device_name and device_name.strip() else "本地"
                     display_name = f"{device_display}@{folder_name}"
                 
@@ -9956,6 +9957,11 @@ class MediaLibrary:
         try:
             ActorDetailWindow(self.root, actor_name, self)
         except Exception as e:
+            import traceback
+            # 将错误输出到命令行便于调试
+            print(f"无法打开演员详情页面: {e}")
+            traceback.print_exc()
+            # 同时弹窗提示用户
             messagebox.showerror("错误", f"无法打开演员详情页面: {str(e)}")
 
     def select_video_by_id(self, video_id):
@@ -10325,6 +10331,9 @@ class ActorDetailWindow:
         self.parent = parent
         self.actor_name = actor_name
         self.media_library = media_library
+        # 默认头像图片路径（用于无头像时显示）
+        self.default_avatar_path = \
+            '/Users/firewell/Library/CloudStorage/OneDrive-个人/bioinfo/media/covers/default.JPEG'
         
         # 获取演员信息
         self.actor_info = media_library.get_actor_info_by_name(actor_name)
@@ -10442,38 +10451,51 @@ class ActorDetailWindow:
     def load_avatar(self):
         """加载演员头像"""
         try:
-            if self.actor_info and self.actor_info[6] is not None:  # avatar_data
-                # 从数据库加载头像
-                import io
-                from PIL import Image, ImageTk
-                
+            import os
+            import io
+            from PIL import Image, ImageTk
+
+            # 1) 数据库头像优先
+            if self.actor_info and self.actor_info[6] is not None:
                 avatar_data = self.actor_info[6]
-                if len(avatar_data) > 0:  # 确保头像数据不为空
+                if len(avatar_data) > 0:
                     image = Image.open(io.BytesIO(avatar_data))
-                    # 兼容不同版本的PIL
                     try:
-                        # 新版本PIL
                         image = image.resize((150, 200), Image.Resampling.LANCZOS)
                     except AttributeError:
-                        # 旧版本PIL
                         image = image.resize((150, 200), Image.LANCZOS)
                     photo = ImageTk.PhotoImage(image)
-                    
                     self.avatar_label.config(image=photo, text="")
-                    self.avatar_label.image = photo  # 保持引用
+                    self.avatar_label.image = photo
                     return
-            
-            # 显示默认头像（没有头像数据或数据为空）
-            self.avatar_label.config(text="暂无头像\n(150x200)", 
-                                    width=20, height=10, 
-                                    relief="solid", borderwidth=1,
-                                    background="#f0f0f0")
+
+            # 2) 无数据库头像则尝试默认图片
+            default_path = getattr(self, 'default_avatar_path', None)
+            if default_path and os.path.exists(default_path):
+                try:
+                    image = Image.open(default_path)
+                    try:
+                        image = image.resize((150, 200), Image.Resampling.LANCZOS)
+                    except AttributeError:
+                        image = image.resize((150, 200), Image.LANCZOS)
+                    photo = ImageTk.PhotoImage(image)
+                    self.avatar_label.config(image=photo, text="")
+                    self.avatar_label.image = photo
+                    return
+                except Exception as img_err:
+                    print(f"默认头像加载失败: {img_err}")
+
+            # 3) 仍失败则显示简易文本（避免ttk不支持的配置项）
+            self.avatar_label.config(text="暂无头像")
         except Exception as e:
+            import traceback
             print(f"加载头像失败: {e}")
-            self.avatar_label.config(text="头像加载失败\n(150x200)", 
-                                   width=20, height=10, 
-                                   relief="solid", borderwidth=1,
-                                   background="#ffeeee")
+            traceback.print_exc()
+            # 回退为简易文本，避免使用ttk不支持的参数
+            try:
+                self.avatar_label.config(text="头像加载失败")
+            except Exception:
+                pass
     
     def create_movies_section(self, parent):
         """创建影片列表区域"""
