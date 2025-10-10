@@ -85,3 +85,6 @@ javdb_selenium_results_*.json
 
 # 第三方库目录
 JavSP/
+
+# 数据库备份目录
+db_backups/
