@@ -21,6 +21,28 @@ from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.common.exceptions import TimeoutException, WebDriverException, NoSuchElementException
 
+def get_dedicated_edge_user_data_dir():
+    try:
+        base = os.path.dirname(os.path.abspath(__file__))
+        d = os.path.join(base, '.edge_driver_user_data')
+        os.makedirs(d, exist_ok=True)
+        return d
+    except Exception:
+        try:
+            d = os.path.join(os.getcwd(), '.edge_driver_user_data')
+            os.makedirs(d, exist_ok=True)
+            return d
+        except Exception:
+            return None
+
+def detect_default_edge_profile_directory(user_data_dir):
+    try:
+        if not user_data_dir:
+            return None
+        d = os.path.join(user_data_dir, 'Default')
+        return 'Default' if os.path.isdir(d) else None
+    except Exception:
+        return None
 class ActorCrawlerWithDB:
     def __init__(self, proxy_host="127.0.0.1", proxy_port="1080"):
         self.proxy_host = proxy_host
@@ -52,7 +74,7 @@ class ActorCrawlerWithDB:
             return "/usr/local/bin/edgedriver_mac64/msedgedriver"
     
     def setup_driver(self):
-        """设置Edge浏览器驱动，配置SOCKS5代理"""
+        """设置Edge浏览器驱动，配置SOCKS5代理（复用登录态）"""
         edge_options = Options()
         # edge_options.add_argument('--headless')  # 关闭无头模式以便调试
         edge_options.add_argument('--no-sandbox')
@@ -62,6 +84,15 @@ class ActorCrawlerWithDB:
         edge_options.add_argument('--disable-blink-features=AutomationControlled')
         edge_options.add_experimental_option("excludeSwitches", ["enable-automation"])
         edge_options.add_experimental_option('useAutomationExtension', False)
+        edge_options.add_argument('--start-maximized')
+
+        # 附加用户数据目录与默认配置档
+        user_data_dir = get_dedicated_edge_user_data_dir()
+        profile_directory = detect_default_edge_profile_directory(user_data_dir)
+        if user_data_dir:
+            edge_options.add_argument(f"--user-data-dir={user_data_dir}")
+        if profile_directory:
+            edge_options.add_argument(f"--profile-directory={profile_directory}")
         
         # 配置SOCKS5代理
         edge_options.add_argument(f'--proxy-server=socks5://{self.proxy_host}:{self.proxy_port}')
