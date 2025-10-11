@@ -78,6 +78,38 @@ python3 test_refresh_by_code.py [番号]
 3. 使用专用的浏览器用户数据目录保存登录状态，路径为：`~/.javdb_scraper/user_data`
 4. 刷新操作可能需要一些时间，具体取决于需要更新的视频数量
 
+## 🧩 按番号复制与填充工具
+
+`copy_javdb_info_by_code.py` 用于在同番号存在更完整信息的来源视频时，批量为目标视频填充缺失的 `javdb_info` 字段与标签；当目标当前无任何演员关联时，会复制来源的演员关系。
+
+### 主要功能
+- 来源选择排序：按“信息完整度优先、更新时间次之”确定最佳来源
+- 字段填充：默认仅填充目标为空的字段；可选 `--overwrite` 覆盖已有值
+- 标签复制：在目标无标签时复制来源的 `javdb_info_tags`
+- 演员复制：当目标视频无任何演员关联时，复制来源视频的 `video_actors`（INSERT OR IGNORE）
+
+### 使用示例
+```bash
+# 干跑预览（不写入数据库）
+python3 copy_javdb_info_by_code.py --folder-index 11 --dry-run --limit 5
+
+# 小批量正式入库
+python3 copy_javdb_info_by_code.py --folder-index 11 --limit 10
+
+# 覆盖已有字段（谨慎使用）
+python3 copy_javdb_info_by_code.py --folder-index 11 --overwrite
+```
+
+### 日志输出示例
+```
+优先来源: /Volumes/Video/usr/... (ID=33594) | 完整度=12, 更新时间=2025-10-07 22:54:41
+来源: /Volumes/Video/usr/... (ID=33594)
+[DRY-RUN] 填充javdb_info空字段到: /Volumes/app/usr/... | fields=<...>
+[DRY-RUN] 复制JAVDB标签到目标，共 4 个
+[DRY-RUN] 关联演员 726 -> /Volumes/app/usr/...
+完成：填充/更新javdb_info及标签关联，并复制演员 1 条
+```
+
 ## 🌟 项目特色
 
 - 🧠 **智能化管理** - 自动检测文件移动、智能去重、批量MD5计算
