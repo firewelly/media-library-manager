@@ -9939,7 +9939,7 @@ class MediaLibrary:
         try:
             self.cursor.execute("""
                 SELECT DISTINCT v.id, v.file_name, v.file_path, j.javdb_title, 
-                       j.javdb_code, j.release_date, j.cover_url
+                       j.javdb_code, j.release_date, j.cover_url, v.source_folder, v.is_nas_online
                 FROM videos v
                 JOIN video_actors va ON v.id = va.video_id
                 JOIN actors a ON va.actor_id = a.id
@@ -10503,7 +10503,7 @@ class ActorDetailWindow:
         movies_frame.pack(fill=tk.BOTH, expand=True, pady=(0, 10))
         
         # 创建Treeview
-        columns = ('title', 'code', 'release_date', 'file_name', 'online_status')
+        columns = ('title', 'code', 'release_date', 'file_name', 'file_source', 'online_status')
         self.movies_tree = ttk.Treeview(movies_frame, columns=columns, show='headings')
         
         # 设置列标题
@@ -10511,13 +10511,15 @@ class ActorDetailWindow:
         self.movies_tree.heading('code', text='番号')
         self.movies_tree.heading('release_date', text='发行日期')
         self.movies_tree.heading('file_name', text='文件名')
+        self.movies_tree.heading('file_source', text='文件来源')
         self.movies_tree.heading('online_status', text='是否在线')
         
         # 设置列宽
         self.movies_tree.column('title', width=220)
         self.movies_tree.column('code', width=100)
         self.movies_tree.column('release_date', width=80)
-        self.movies_tree.column('file_name', width=250)
+        self.movies_tree.column('file_name', width=220)
+        self.movies_tree.column('file_source', width=120)
         self.movies_tree.column('online_status', width=30)
         
         # 添加滚动条
@@ -10528,24 +10530,179 @@ class ActorDetailWindow:
         self.movies_tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
         
-        # 填充数据
+        # 预处理数据集用于排序与展示
+        self.movies_data = []
         for movie in self.actor_movies:
-            video_id, file_name, file_path, javdb_title, javdb_code, release_date, cover_url = movie
-            
-            # 检查视频是否在线
-            is_online = self.media_library.is_video_online(int(video_id))
+            # 兼容新增字段：source_folder、is_nas_online
+            try:
+                video_id, file_name, file_path, javdb_title, javdb_code, release_date, cover_url, source_folder, is_nas_online = movie
+            except ValueError:
+                # 老数据集不含新增字段，优雅回退
+                try:
+                    video_id, file_name, file_path, javdb_title, javdb_code, release_date, cover_url, source_folder = movie
+                    is_nas_online = None
+                except ValueError:
+                    video_id, file_name, file_path, javdb_title, javdb_code, release_date, cover_url = movie
+                    source_folder = None
+                    is_nas_online = None
+
+            # 在线状态：优先依据管理文件夹的激活与路径存在性，其次回退到数据库或实时文件路径
+            is_online = False
+            managed_folder_info = self._resolve_managed_folder_info(source_folder)
+            if managed_folder_info:
+                managed_folder_path, is_active = managed_folder_info
+                try:
+                    is_online = bool(is_active) and os.path.exists(managed_folder_path)
+                except Exception:
+                    is_online = False
+            elif is_nas_online is not None:
+                is_online = bool(is_nas_online)
+            else:
+                # 回退：直接检查文件路径存在性
+                is_online = self.media_library.is_video_online(int(video_id))
             online_status = "在线" if is_online else "离线"
-            
-            self.movies_tree.insert('', 'end', values=(
-                javdb_title or file_name,
-                javdb_code or "未知",
-                release_date or "未知",
-                file_name,
-                online_status
-            ), tags=(video_id,))
+
+            # 文件来源优先显示“设备@管理文件夹”，否则显示完整路径
+            file_source = self._get_managed_source_display(source_folder, file_path)
+
+            self.movies_data.append({
+                'video_id': int(video_id),
+                'title': javdb_title or file_name or '',
+                'code': javdb_code or '',
+                'release_date': release_date or '',
+                'file_name': file_name or '',
+                'file_source': file_source or '',
+                'online_status': online_status
+            })
+
+        # 排序状态管理
+        self.sort_reverse_map = {c: False for c in columns}
+        self.current_sort_col = None
+
+        # 绑定表头点击事件实现排序
+        for col in columns:
+            self.movies_tree.heading(col, text=self._get_heading_text(col), command=lambda c=col: self.on_heading_click(c))
+
+        # 初始填充
+        self._populate_movies_tree()
         
         # 绑定双击事件
         self.movies_tree.bind('<Double-1>', self.on_movie_double_click)
+
+    def _get_heading_text(self, col):
+        mapping = {
+            'title': '标题',
+            'code': '番号',
+            'release_date': '发行日期',
+            'file_name': '文件名',
+            'file_source': '文件来源',
+            'online_status': '是否在线'
+        }
+        return mapping.get(col, col)
+
+    def _populate_movies_tree(self):
+        # 清空现有行
+        for item in self.movies_tree.get_children():
+            self.movies_tree.delete(item)
+
+        # 插入当前数据
+        for row in self.movies_data:
+            self.movies_tree.insert('', 'end', values=(
+                row['title'],
+                row['code'],
+                row['release_date'],
+                row['file_name'],
+                row['file_source'],
+                row['online_status']
+            ), tags=(row['video_id'],))
+
+    def on_heading_click(self, column):
+        # 切换升降序
+        reverse = self.sort_reverse_map.get(column, False)
+        self.sort_reverse_map[column] = not reverse
+        self.current_sort_col = column
+
+        def sort_key(row):
+            val = row.get(column, '') or ''
+            if column == 'release_date':
+                # 日期按字符串YYYY-MM-DD排序即可；若为空置于末尾
+                return (val == '', val)
+            if column == 'online_status':
+                # 在线优先
+                priority = 0 if val == '在线' else 1
+                return (priority, val)
+            # 其他列按不区分大小写字符串排序
+            return (val == '', str(val).lower())
+
+        self.movies_data.sort(key=sort_key, reverse=self.sort_reverse_map[column])
+        self._populate_movies_tree()
+
+    def _get_managed_source_display(self, source_folder, file_path):
+        """返回管理文件夹显示：设备@顶层文件夹；若不可解析则返回完整路径。"""
+        try:
+            import os
+            import re
+            # 优先使用source_folder进行管理文件夹解析
+            sf = source_folder or ''
+            if sf:
+                # 查找匹配的管理文件夹记录（最长前缀匹配）
+                self.media_library.cursor.execute(
+                    """
+                    SELECT folder_path, folder_type, device_name
+                    FROM folders
+                    WHERE ? LIKE folder_path || '%'
+                    ORDER BY LENGTH(folder_path) DESC
+                    LIMIT 1
+                    """,
+                    (sf,)
+                )
+                row = self.media_library.cursor.fetchone()
+                if row:
+                    folder_path, folder_type, device_name = row
+                    folder_name = os.path.basename(folder_path)
+                    # 设备显示
+                    if folder_type == 'nas':
+                        device_display = None
+                        if folder_path.startswith('smb://'):
+                            domain_match = re.search(r'smb://(?:[^@]+@)?([^/]+)/', folder_path)
+                            if domain_match:
+                                device_display = domain_match.group(1)
+                        elif folder_path.startswith('/Volumes/'):
+                            parts = folder_path.split('/')
+                            device_display = parts[2] if len(parts) > 2 else 'NAS'
+                        if not device_display or not str(device_display).strip():
+                            device_display = device_name if device_name and device_name.strip() else 'NAS'
+                    else:
+                        device_display = device_name if device_name and device_name.strip() else '本地'
+                    return f"{device_display}@{folder_name}"
+            # 回退：显示完整路径（优先使用file_path，否则source_folder）
+            fp = file_path or sf
+            return fp or '未知'
+        except Exception:
+            # 最终回退：尽量返回可用路径
+            return (file_path or source_folder or '未知')
+
+    def _resolve_managed_folder_info(self, source_folder):
+        """解析并返回管理文件夹信息 (folder_path, is_active)，若无法解析返回None。"""
+        try:
+            if not source_folder:
+                return None
+            self.media_library.cursor.execute(
+                """
+                SELECT folder_path, is_active
+                FROM folders
+                WHERE ? LIKE folder_path || '%'
+                ORDER BY LENGTH(folder_path) DESC
+                LIMIT 1
+                """,
+                (source_folder,)
+            )
+            row = self.media_library.cursor.fetchone()
+            if row:
+                return row[0], row[1]
+            return None
+        except Exception:
+            return None
     
     def on_movie_double_click(self, event):
         """影片双击事件 - 直接播放视频"""
