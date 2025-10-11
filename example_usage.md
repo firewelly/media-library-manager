@@ -218,3 +218,39 @@ chmod +x start_media_library.sh
 ---
 
 **提示**: 如果遇到其他问题，可以查看程序运行时的控制台输出获取更多调试信息。
+
+## 按番号复制JAVDB信息与演员关联
+
+用于在同番号存在更完整信息的来源视频时，批量为目标视频填充缺失的 `javdb_info` 字段与标签；当目标当前无任何演员关联时，会复制来源的演员关系。
+
+### 适用场景
+- 目标视频 `javdb_info` 记录缺失或部分字段为空
+- 需要在不覆盖既有值的前提下补齐信息（默认仅填充空值）
+- 目标视频尚未建立任何演员关联，需沿用同番号来源的演员关系
+
+### 使用示例
+```bash
+# 干跑预览（不写入数据库）：
+python3 copy_javdb_info_by_code.py --folder-index 11 --dry-run --limit 5
+
+# 正式入库（小批量）：
+python3 copy_javdb_info_by_code.py --folder-index 11 --limit 10
+
+# 覆盖已有字段（谨慎使用）：
+python3 copy_javdb_info_by_code.py --folder-index 11 --overwrite
+```
+
+### 行为说明
+- 来源选择：按“信息完整度优先、更新时间次之”排序，优先使用最完整且最近更新的来源视频
+- 字段填充：默认仅填充目标为空的字段，支持 `--overwrite` 强制覆盖
+- 标签复制：目标无任何标签时，复制来源的 `javdb_info_tags`
+- 演员复制：目标无演员关联时，复制来源的 `video_actors`（INSERT OR IGNORE）
+
+### 日志示例
+```
+优先来源: /Volumes/Video/usr/... (ID=33594) | 完整度=12, 更新时间=2025-10-07 22:54:41
+[DRY-RUN] 填充javdb_info空字段到: /Volumes/app/usr/... | fields=<...>
+[DRY-RUN] 复制JAVDB标签到目标，共 4 个
+[DRY-RUN] 关联演员 726 -> /Volumes/app/usr/...
+完成：填充/更新javdb_info及标签关联，并复制演员 1 条
+```
