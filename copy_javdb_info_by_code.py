@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-按番号复制并填充完整JAVDB字段（仅填充空值，支持可选覆盖）。
+按番号复制并填充完整JAVDB字段（仅填充空值，支持可选覆盖），并在目标无演员关联时复制演员关系。
 
 用法示例：
 - 干跑预览：
@@ -14,7 +14,7 @@
 说明：
 - 根据选中文件夹中的视频，若其 `javdb_info` 缺失或存在空字段，则尝试按番号在数据库中查找有完整 `javdb_info` 的来源视频，
   将缺失的字段填充到目标（默认仅填充空字段）。
-- 同步的字段范围：javdb_info 表的常见字段，以及 javdb_info_tags 标签关联；不处理演员关联。
+- 同步的字段范围：`javdb_info` 表的常见字段、`javdb_info_tags` 标签关联；此外，当目标视频当前没有任何演员关联时，会复制来源视频的 `video_actors` 关系（INSERT OR IGNORE）。
 """
 
 import os
@@ -191,8 +191,50 @@ def get_tags_for_javdb_info(cursor, javdb_info_id: int) -> list[str]:
     return [row[0] for row in cursor.fetchall()]
 
 
+def has_any_actors(cursor: sqlite3.Cursor, video_id: int) -> bool:
+    """判断目标视频是否已有任何演员关联。"""
+    try:
+        cursor.execute("SELECT COUNT(1) FROM video_actors WHERE video_id = ?", (video_id,))
+        return ((cursor.fetchone() or [0])[0] > 0)
+    except Exception:
+        return False
+
+
+def copy_actor_links(conn: sqlite3.Connection, source_video_id: int, target_video_id: int, dry_run: bool = False) -> int:
+    """将来源视频的演员关联复制到目标视频（INSERT OR IGNORE）。返回新增尝试的数量。"""
+    cursor = conn.cursor()
+    try:
+        cursor.execute("SELECT DISTINCT actor_id FROM video_actors WHERE video_id = ?", (source_video_id,))
+        actor_ids = [row[0] for row in cursor.fetchall()]
+    except Exception:
+        actor_ids = []
+    added = 0
+    for aid in actor_ids:
+        if dry_run:
+            try:
+                cursor.execute("SELECT file_path FROM videos WHERE id = ?", (target_video_id,))
+                tpath = (cursor.fetchone() or [""])[0] or ""
+            except Exception:
+                tpath = ""
+            print(f"  [DRY-RUN] 关联演员 {aid} -> {tpath or ('视频ID=' + str(target_video_id))}")
+            added += 1
+            continue
+        cursor.execute(
+            """
+            INSERT OR IGNORE INTO video_actors (video_id, actor_id, created_at)
+            VALUES (?, ?, datetime('now'))
+            """,
+            (target_video_id, aid)
+        )
+        added += 1
+    return added
+
+
 def fill_empty_javdb_info(conn, source_video_id: int, target_video_id: int, dry_run: bool = False, overwrite: bool = False) -> bool:
-    """将来源视频的javdb_info字段复制到目标：默认仅填充空值；支持覆盖。并复制标签关联（目标无标签时）。"""
+    """将来源视频的javdb_info字段复制到目标：默认仅填充空值；支持覆盖。并复制标签关联（目标无标签时）。
+
+    返回值仅在发生实际变更时为 True：插入新记录、更新了至少一个字段，或复制了至少一个标签。
+    """
     cursor = conn.cursor()
     cols = get_available_javdb_cols(conn)
     s = get_javdb_info_row(cursor, source_video_id, cols)
@@ -241,6 +283,7 @@ def fill_empty_javdb_info(conn, source_video_id: int, target_video_id: int, dry_
             if is_empty and sv not in (None, ''):
                 updates[c] = sv
 
+    did_update = False
     if not updates:
         # 标签填充仍可进行
         pass
@@ -248,19 +291,22 @@ def fill_empty_javdb_info(conn, source_video_id: int, target_video_id: int, dry_
         if dry_run:
             filled = ", ".join(sorted(updates.keys()))
             print(f"  [DRY-RUN] 填充javdb_info空字段到: {tpath or ('视频ID=' + str(target_video_id))} | fields=<{filled}>")
+            did_update = True
         else:
             set_clause = ", ".join([f"{k} = ?" for k in updates.keys()]) + ", updated_at = datetime('now')"
             params = list(updates.values()) + [target_video_id]
             cursor.execute(f"UPDATE javdb_info SET {set_clause} WHERE video_id = ?", params)
+            did_update = True
 
     # 复制标签：仅当目标无任何标签关联时复制来源标签集合（标签表可能缺失，需容错）
+    did_copy_tags = False
     try:
         cursor.execute("SELECT id FROM javdb_info WHERE video_id = ?", (target_video_id,))
         tinfo_row = cursor.fetchone()
         cursor.execute("SELECT id FROM javdb_info WHERE video_id = ?", (source_video_id,))
         sinfo_row = cursor.fetchone()
         if not (tinfo_row and sinfo_row):
-            return True
+            return did_update
         tinfo_id = tinfo_row[0]
         sinfo_id = sinfo_row[0]
 
@@ -271,6 +317,7 @@ def fill_empty_javdb_info(conn, source_video_id: int, target_video_id: int, dry_
             if src_tag_names:
                 if dry_run:
                     print(f"  [DRY-RUN] 复制JAVDB标签到目标，共 {len(src_tag_names)} 个")
+                    did_copy_tags = True
                 else:
                     # 写入标签并建立关联
                     for tag_name in src_tag_names:
@@ -287,48 +334,55 @@ def fill_empty_javdb_info(conn, source_video_id: int, target_video_id: int, dry_
                             "INSERT OR IGNORE INTO javdb_info_tags (javdb_info_id, tag_id) VALUES (?, ?)",
                             (tinfo_id, tag_id)
                         )
+                    did_copy_tags = True
     except Exception:
         pass
 
-    return True
+    return did_update or did_copy_tags
+
+def score_javdb_info(cursor: sqlite3.Cursor, video_id: int, cols: list[str]) -> tuple[int, str]:
+    """计算来源视频的javdb_info完整度与更新时间，用于来源优先级排序。
+    - 完整度：非空字段数量（None或空字符串视为空）；
+    - 更新时间：`updated_at`文本，作为同分时的降序次序。
+    """
+    try:
+        cursor.execute(
+            f"SELECT {', '.join(cols)}, updated_at FROM javdb_info WHERE video_id = ?",
+            (video_id,)
+        )
+        row = cursor.fetchone()
+        if not row:
+            return (0, '')
+        values = row[:-1]
+        updated_at = row[-1] or ''
+        score = 0
+        for v in values:
+            if v is None:
+                continue
+            if isinstance(v, str) and v.strip() == '':
+                continue
+            score += 1
+        return (score, updated_at)
+    except Exception:
+        return (0, '')
 
 
 def build_targets_query(conn: sqlite3.Connection, selected_folder: str):
-    """选中文件夹中的目标视频：无javdb_info或存在空字段。"""
+    """选中文件夹中的目标视频：无javdb_info，或核心字段缺失（javdb_title为空且无演员关联）。"""
     where_folder = "(v.source_folder = ? OR v.source_folder = ? OR v.source_folder LIKE ? OR v.file_path LIKE ?)"
-    # 检测空字段：NULL或空字符串
-    available = set(get_available_javdb_cols(conn))
-    checks = []
-    def add_text_empty(col):
-        if col in available:
-            checks.append(f"j.{col} IS NULL OR j.{col} = ''")
-    def add_blob_empty(col):
-        if col in available:
-            checks.append(f"j.{col} IS NULL")
-
-    add_text_empty('javdb_url')
-    add_text_empty('javdb_title')
-    add_text_empty('release_date')
-    add_text_empty('duration')
-    add_text_empty('studio')
-    add_text_empty('series')
-    add_text_empty('rating')
-    if 'score' in available:
-        checks.append("j.score IS NULL")
-    add_text_empty('cover_url')
-    add_text_empty('local_cover_path')
-    add_blob_empty('cover_image_data')
-    add_text_empty('magnet_links')
-    add_text_empty('preview_images')
-    empty_checks = " OR ".join(checks) if checks else "1=0"
     sql = f"""
         SELECT v.id, v.file_path, v.title, j.javdb_code
         FROM videos v
         LEFT JOIN javdb_info j ON v.id = j.video_id
         WHERE {where_folder}
           AND (
-              j.video_id IS NULL  -- 无记录
-              OR ({empty_checks}) -- 有记录但存在空字段
+              j.video_id IS NULL
+              OR (
+                  (j.javdb_title IS NULL OR j.javdb_title = '')
+                  AND NOT EXISTS (
+                      SELECT 1 FROM video_actors va WHERE va.video_id = v.id
+                  )
+              )
           )
         ORDER BY v.id
     """
@@ -401,14 +455,35 @@ def main():
                 continue
             print(f"  番号: {av_code}")
 
-            source_ids = source_index.get(av_code, [])
+            source_ids = [sid for sid in source_index.get(av_code, []) if sid != video_id]
             if not source_ids:
-                print("  未找到同番号来源视频（已有javdb_info），跳过。")
+                print("  未找到同番号来源视频（已排除自身），跳过。")
                 failed += 1
                 continue
 
-            updated_any = False
+            # 对来源进行优先级排序：完整度优先，其次更新时间（降序）
+            cols = get_available_javdb_cols(conn)
+            scored_sources = []
             for sid in source_ids:
+                s_score, s_updated = score_javdb_info(cursor, sid, cols)
+                scored_sources.append((sid, s_score, s_updated))
+            scored_sources.sort(key=lambda x: (x[1], x[2]), reverse=True)
+            ordered_source_ids = [sid for sid, _, _ in scored_sources]
+
+            # 提示最高优先来源
+            if scored_sources:
+                top_sid, top_score, top_updated = scored_sources[0]
+                try:
+                    cursor.execute("SELECT file_path FROM videos WHERE id = ?", (top_sid,))
+                    top_fp = (cursor.fetchone() or [""])[0] or ""
+                except Exception:
+                    top_fp = ""
+                print(f"  优先来源: {top_fp or '(无路径记录)'} (ID={top_sid}) | 完整度={top_score}, 更新时间={top_updated}")
+
+            updated_any = False
+            actors_added_total = 0
+            target_has_actors = has_any_actors(cursor, video_id)
+            for sid in ordered_source_ids:
                 try:
                     cursor.execute("SELECT file_path FROM videos WHERE id = ?", (sid,))
                     src_fp = (cursor.fetchone() or [""])[0] or ""
@@ -419,21 +494,40 @@ def main():
                 changed = fill_empty_javdb_info(conn, sid, video_id, dry_run=args.dry_run, overwrite=args.overwrite)
                 if changed:
                     updated_any = True
-                    # 一旦成功填充/更新，通常无需继续其他来源
+                    # 若目标无演员关联，尝试复制来源演员关系
+                    if not target_has_actors:
+                        added = copy_actor_links(conn, sid, video_id, dry_run=args.dry_run)
+                        actors_added_total += added
+                        if added > 0:
+                            target_has_actors = True
+                    # 一旦成功填充/更新（且已尝试演员复制），通常无需继续其他来源
                     break
+
+                # 即使未发生字段更新，若目标无演员关联，也可以尝试仅复制演员关系
+                if not target_has_actors:
+                    added = copy_actor_links(conn, sid, video_id, dry_run=args.dry_run)
+                    actors_added_total += added
+                    if added > 0:
+                        target_has_actors = True
+                        updated_any = True
+                        # 已完成演员复制，无需继续其他来源
+                        break
 
             if not args.dry_run:
                 conn.commit()
 
             if updated_any:
                 success += 1
-                print("  完成：填充/更新javdb_info及标签关联")
+                if actors_added_total > 0:
+                    print(f"  完成：填充/更新javdb_info及标签关联，并复制演员 {actors_added_total} 条")
+                else:
+                    print("  完成：填充/更新javdb_info及标签关联")
                 if args.limit and success >= args.limit:
                     print(f"\n达到处理上限：{args.limit} 条，提前结束。")
                     break
             else:
                 failed += 1
-                print("  未进行任何填充或更新。")
+                print("  跳过：无空字段或已有标签，无实际变更。")
 
         print("\n处理完成：")
         print(f"  成功视频数：{success}")
