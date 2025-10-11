@@ -2480,7 +2480,42 @@ class MediaLibrary:
                 # 格式化星级显示（实心/空心星星组合）
                 star_display = self.format_stars_display(stars)
                 size_display = self.format_file_size(file_size) if file_size else ""
-                status_display = "在线" if is_nas_online else "离线"
+                # 在线状态：与演员详情页一致，优先依据管理文件夹激活与路径存在性
+                is_online = False
+                try:
+                    if source_folder:
+                        self.cursor.execute(
+                            """
+                            SELECT folder_path, is_active
+                            FROM folders
+                            WHERE ? LIKE folder_path || '%'
+                            ORDER BY LENGTH(folder_path) DESC
+                            LIMIT 1
+                            """,
+                            (source_folder,)
+                        )
+                        mf_row = self.cursor.fetchone()
+                        if mf_row:
+                            managed_folder_path, is_active = mf_row
+                            try:
+                                is_online = bool(is_active) and os.path.exists(managed_folder_path)
+                            except Exception:
+                                is_online = False
+                        elif is_nas_online is not None:
+                            is_online = bool(is_nas_online)
+                        else:
+                            is_online = self.is_video_online(int(video_id))
+                    else:
+                        if is_nas_online is not None:
+                            is_online = bool(is_nas_online)
+                        else:
+                            is_online = self.is_video_online(int(video_id))
+                except Exception:
+                    if is_nas_online is not None:
+                        is_online = bool(is_nas_online)
+                    else:
+                        is_online = self.is_video_online(int(video_id))
+                status_display = "在线" if is_online else "离线"
                 # 初始化标签显示，稍后会在获取JAVDB标签后更新
                 tags_display = tags if tags else ""
                 
