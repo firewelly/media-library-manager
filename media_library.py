@@ -287,9 +287,9 @@ class MediaLibrary:
         # 当前选中的视频
         self.current_video = None
         
-        # 排序状态
-        self.sort_column_name = None
-        self.sort_reverse = False
+        # 排序状态 - 默认按创建时间降序排列
+        self.sort_column_name = 'file_created_time'
+        self.sort_reverse = True
         
         # GPU加速状态
         self.gpu_acceleration = None
@@ -495,32 +495,36 @@ class MediaLibrary:
         
         # 重新创建"仅显示在线"复选框
         if not hasattr(self, 'show_online_only'):
-            self.show_online_only = tk.BooleanVar(value=False)
-        online_checkbox = ttk.Checkbutton(control_frame, text="仅显示在线", 
+            self.show_online_only = tk.BooleanVar(value=True)
+        online_checkbox = ttk.Checkbutton(control_frame, text="仅显示在线",
                                          variable=self.show_online_only,
                                          command=self.filter_videos)
         online_checkbox.pack(side=tk.RIGHT)
-        
+
         # 重新创建表格
         sorted_columns = sorted(self.column_config.items(), key=lambda x: x[1]['position'])
         columns = [col[0] for col in sorted_columns]
-        
+
         self.video_tree = ttk.Treeview(list_frame, columns=columns, show='headings', height=15, selectmode='extended')
-        
+
         # 设置列标题和宽度
         for col_name in columns:
             config = self.column_config[col_name]
-            self.video_tree.heading(col_name, text=config['text'], 
+            self.video_tree.heading(col_name, text=config['text'],
                                   command=lambda c=col_name: self.sort_column(c))
             # 确保列宽不会过小，最小宽度为50
             width = max(config['width'], 50)
             self.video_tree.column(col_name, width=width, minwidth=50)
-        
-        # 初始化排序状态
+
+        # 初始化排序状态 - 默认按创建时间降序排列
         if not hasattr(self, 'sort_column_name'):
-            self.sort_column_name = None
+            self.sort_column_name = 'file_created_time'
         if not hasattr(self, 'sort_reverse'):
-            self.sort_reverse = False
+            self.sort_reverse = True
+
+        # 自动执行一次排序以确保数据按创建时间降序显示
+        if hasattr(self, 'load_videos'):
+            self.load_videos()
         
         # 重新设置滚动条
         v_scrollbar = ttk.Scrollbar(list_frame, orient=tk.VERTICAL, command=self.video_tree.yview)
@@ -956,9 +960,9 @@ class MediaLibrary:
         control_frame = ttk.Frame(list_frame)
         control_frame.pack(fill=tk.X, padx=5, pady=5)
         
-        # 仅显示在线内容的checkbox
-        self.show_online_only = tk.BooleanVar(value=False)
-        online_checkbox = ttk.Checkbutton(control_frame, text="仅显示在线", 
+        # 仅显示在线内容的checkbox - 默认勾选
+        self.show_online_only = tk.BooleanVar(value=True)
+        online_checkbox = ttk.Checkbutton(control_frame, text="仅显示在线",
                                          variable=self.show_online_only,
                                          command=self.filter_videos)
         online_checkbox.pack(side=tk.RIGHT)
@@ -1182,6 +1186,8 @@ class MediaLibrary:
         # 加载数据
         self.load_tags()
         self.load_videos()
+        # 确保初始加载后应用在线筛选（因为默认是勾选的）
+        self.root.after(100, self.filter_videos)
         
     def add_folder(self):
         """添加文件夹"""
