@@ -885,14 +885,6 @@ class MediaLibrary:
             ttk.Radiobutton(stars_frame, text=star_text, variable=self.star_filter, 
                            value=i, command=self.filter_videos).pack(anchor=tk.W, padx=5)
         
-        # 标签筛选
-        tags_frame = ttk.LabelFrame(left_frame, text="标签筛选")
-        tags_frame.pack(fill=tk.X, pady=(0, 10))
-        
-        self.tags_listbox = tk.Listbox(tags_frame, height=6, selectmode=tk.MULTIPLE)
-        self.tags_listbox.pack(fill=tk.BOTH, padx=5, pady=5)
-        self.tags_listbox.bind('<<ListboxSelect>>', self.filter_videos)
-        
         # NAS状态筛选
         nas_frame = ttk.LabelFrame(left_frame, text="NAS状态")
         nas_frame.pack(fill=tk.X, pady=(0, 10))
@@ -1184,7 +1176,6 @@ class MediaLibrary:
         status_bar.pack(side=tk.BOTTOM, fill=tk.X)
         
         # 加载数据
-        self.load_tags()
         self.load_videos()
         # 确保初始加载后应用在线筛选（因为默认是勾选的）
         self.root.after(100, self.filter_videos)
@@ -2289,11 +2280,11 @@ class MediaLibrary:
                     conditions.append("(v.title LIKE ? OR v.file_name LIKE ? OR j.javdb_title LIKE ?)")
                     title_search_param = f"%{title_search_text}%"
                     params.extend([title_search_param, title_search_param, title_search_param])
-                    
-                # 标签搜索条件 - 同时搜索videos表的tags和javdb_info表的标签关联
+                
+                # 标签搜索条件 - 同时搜索videos表的tags和javdb_tags表的tags
                 tag_search_text = self.tag_search_var.get().strip()
                 if tag_search_text:
-                    conditions.append("(v.tags LIKE ? OR EXISTS (SELECT 1 FROM javdb_tags jt JOIN tags t ON jt.tag_id = t.id WHERE jt.javdb_info_id = j.id AND t.name LIKE ?))")
+                    conditions.append("(v.tags LIKE ? OR EXISTS (SELECT 1 FROM javdb_info_tags jit JOIN javdb_tags jt ON jit.tag_id = jt.id JOIN javdb_info ji2 ON jit.javdb_info_id = ji2.id WHERE ji2.video_id = v.id AND jt.tag_name LIKE ?))")
                     tag_search_param = f"%{tag_search_text}%"
                     params.extend([tag_search_param, tag_search_param])
                     
@@ -2309,16 +2300,6 @@ class MediaLibrary:
                 if star_filter > 0:
                     conditions.append("stars = ?")
                     params.append(star_filter)
-                    
-                # 标签筛选 - 同时支持videos表的tags和javdb_info表的标签关联
-                selected_tags = [self.tags_listbox.get(i) for i in self.tags_listbox.curselection()]
-                if selected_tags:
-                    tag_conditions = []
-                    for tag in selected_tags:
-                        tag_conditions.append("(v.tags LIKE ? OR EXISTS (SELECT 1 FROM javdb_tags jt JOIN tags t ON jt.tag_id = t.id WHERE jt.javdb_info_id = j.id AND t.name LIKE ?))")
-                        params.extend([f"%{tag}%", f"%{tag}%"])
-                    if tag_conditions:
-                        conditions.append(f"({' OR '.join(tag_conditions)})")
                         
                 # NAS状态筛选 - 基于路径存在性判断
                 nas_filter = self.nas_filter.get()
@@ -2778,17 +2759,6 @@ class MediaLibrary:
         except (ValueError, TypeError, OverflowError):
             return ""
         
-    def load_tags(self):
-        """加载标签列表"""
-        self.tags_listbox.delete(0, tk.END)
-        try:
-            self.cursor.execute("SELECT tag_name FROM tags ORDER BY tag_name")
-            tags = self.cursor.fetchall()
-            for tag in tags:
-                self.tags_listbox.insert(tk.END, tag[0])
-        except Exception as e:
-            print(f"加载标签失败: {str(e)}")
-            
     def load_folder_sources(self):
         """加载文件夹来源列表"""
         try:
@@ -3416,7 +3386,6 @@ class MediaLibrary:
                     
                 self.tags_var.set(new_tags)
                 self.save_video_info()
-                self.load_tags()
                 
             except Exception as e:
                 messagebox.showerror("错误", f"添加标签失败: {str(e)}")
@@ -4747,7 +4716,6 @@ class MediaLibrary:
                         # 刷新界面
                         self.load_videos()
                         self.load_folder_sources()
-                        self.load_tags()
                         
                         cancel_button.config(text="完成", command=progress_window.destroy)
                         self.root.after(0, lambda: messagebox.showinfo("完成", f"数据库重置完成！\n\n恢复文件: {restored_files}\n新增文件: {new_files}\n总计: {total_files}"))
@@ -4917,11 +4885,11 @@ class MediaLibrary:
                                 conditions.append("(v.title LIKE ? OR v.file_name LIKE ? OR j.javdb_title LIKE ?)")
                                 title_search_param = f"%{title_search_text}%"
                                 query_params.extend([title_search_param, title_search_param, title_search_param])
-                                
-                            # 标签搜索条件
+                            
+                            # 标签搜索条件 - 同时搜索videos表的tags和javdb_tags表的tags
                             tag_search_text = self.tag_search_var.get().strip()
                             if tag_search_text:
-                                conditions.append("(v.tags LIKE ? OR EXISTS (SELECT 1 FROM javdb_tags jt JOIN tags t ON jt.tag_id = t.id WHERE jt.javdb_info_id = j.id AND t.name LIKE ?))")
+                                conditions.append("(v.tags LIKE ? OR EXISTS (SELECT 1 FROM javdb_tags jt JOIN tags t ON jt.tag_id = t.id WHERE jt.video_id = v.id AND t.name LIKE ?))")
                                 tag_search_param = f"%{tag_search_text}%"
                                 query_params.extend([tag_search_param, tag_search_param])
                                 
@@ -4938,16 +4906,6 @@ class MediaLibrary:
                                 conditions.append("v.stars = ?")
                                 query_params.append(star_filter)
                                 
-                            # 标签筛选
-                            selected_tags = [self.tags_listbox.get(i) for i in self.tags_listbox.curselection()]
-                            if selected_tags:
-                                tag_conditions = []
-                                for tag in selected_tags:
-                                    tag_conditions.append("(v.tags LIKE ? OR EXISTS (SELECT 1 FROM javdb_tags jt JOIN tags t ON jt.tag_id = t.id WHERE jt.javdb_info_id = j.id AND t.name LIKE ?))")
-                                    query_params.extend([f"%{tag}%", f"%{tag}%"])
-                                if tag_conditions:
-                                    conditions.append(f"({' OR '.join(tag_conditions)})")
-                                    
                             # NAS状态筛选
                             nas_filter = self.nas_filter.get()
                             if nas_filter == "online":
@@ -5497,7 +5455,6 @@ class MediaLibrary:
                     self.cursor.execute("INSERT INTO tags (tag_name) VALUES (?)", (tag,))
                     self.conn.commit()
                     load_tags_list()
-                    self.load_tags()
                 except Exception as e:
                     messagebox.showerror("错误", f"添加标签失败: {str(e)}")
                     
@@ -5510,7 +5467,6 @@ class MediaLibrary:
                         self.cursor.execute("DELETE FROM tags WHERE tag_name = ?", (tag_name,))
                         self.conn.commit()
                         load_tags_list()
-                        self.load_tags()
                     except Exception as e:
                         messagebox.showerror("错误", f"删除标签失败: {str(e)}")
                         
@@ -9192,14 +9148,14 @@ class MediaLibrary:
                 # 标题搜索条件
                 title_search_text = self.title_search_var.get().strip()
                 if title_search_text:
-                    conditions.append("(v.title LIKE ? OR v.file_name LIKE ? OR j.javdb_title LIKE ?)")
+                    conditions.append("(v.title LIKE ? OR v.file_name LIKE ? OR ji.javdb_title LIKE ?)")
                     title_search_param = f"%{title_search_text}%"
                     params.extend([title_search_param, title_search_param, title_search_param])
-                    
-                # 标签搜索条件
+                
+                # 标签搜索条件 - 同时搜索videos表的tags和javdb_tags表的tags
                 tag_search_text = self.tag_search_var.get().strip()
                 if tag_search_text:
-                    conditions.append("(v.tags LIKE ? OR EXISTS (SELECT 1 FROM javdb_tags jt JOIN tags t ON jt.tag_id = t.id WHERE jt.javdb_info_id = j.id AND t.name LIKE ?))")
+                    conditions.append("(v.tags LIKE ? OR EXISTS (SELECT 1 FROM javdb_info_tags jit JOIN javdb_tags jt ON jit.tag_id = jt.id WHERE jit.javdb_info_id = ji.id AND jt.tag_name LIKE ?))")
                     tag_search_param = f"%{tag_search_text}%"
                     params.extend([tag_search_param, tag_search_param])
                     
@@ -9216,16 +9172,6 @@ class MediaLibrary:
                     conditions.append("stars = ?")
                     params.append(star_filter)
                     
-                # 标签筛选
-                selected_tags = [self.tags_listbox.get(i) for i in self.tags_listbox.curselection()]
-                if selected_tags:
-                    tag_conditions = []
-                    for tag in selected_tags:
-                        tag_conditions.append("(v.tags LIKE ? OR EXISTS (SELECT 1 FROM javdb_tags jt JOIN tags t ON jt.tag_id = t.id WHERE jt.javdb_info_id = j.id AND t.name LIKE ?))")
-                        params.extend([f"%{tag}%", f"%{tag}%"])
-                    if tag_conditions:
-                        conditions.append(f"({' OR '.join(tag_conditions)})")
-                        
                 # NAS状态筛选 - 只获取在线的
                 nas_filter = self.nas_filter.get()
                 if nas_filter == "online":
@@ -9300,7 +9246,7 @@ class MediaLibrary:
             else:
                 where_clause = "WHERE v.file_path IS NOT NULL"
                 
-            query = f"SELECT v.id FROM videos v LEFT JOIN javdb_info j ON v.id = j.video_id {where_clause}"
+            query = f"SELECT v.id FROM videos v LEFT JOIN javdb_info ji ON v.id = ji.video_id {where_clause}"
             self.cursor.execute(query, params)
             
             # 返回视频ID列表
