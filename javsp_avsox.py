@@ -5,6 +5,7 @@ from typing import Optional
 from urllib.parse import urljoin
 
 from javsp_base import get_html, CrawlerError, MovieNotFoundError, sleep_after_request, is_url_accessible
+from javsp_config import get_proxy_settings
 from javsp_datatype import MovieInfo
 from javsp_config import config
 
@@ -17,31 +18,30 @@ class AvsoxCrawler:
         self.name = 'avsox'
         self.permanent_url = 'https://avsox.click'
         self.base_url = ''
-        self._init_network_config()
-        
-        logger.info(f"Avsox crawler initialized with base_url: {self.base_url}")
+        logger.info("Avsox crawler initialized (lazy network config)")
     
     def _init_network_config(self):
-        """初始化网络配置，选择最佳的访问URL"""
-        # 候选URL列表
-        urls = [
-            config.network.proxy_free.get('avsox', self.permanent_url),
-            self.permanent_url,
-            'https://avsox.com',
-            'https://avsox.website',
-            'https://avsox.host'
-        ]
-        
-        # 测试URL可用性
-        for url in urls:
-            if url and self._test_url_accessibility(url):
-                self.base_url = url
-                logger.info(f"Using Avsox URL: {url}")
-                return
-        
-        # 如果都不可用，使用永久URL
-        self.base_url = self.permanent_url
-        logger.warning(f"All URLs failed, using permanent URL: {self.permanent_url}")
+        if getattr(config.crawler, 'probe_on_first_use', False):
+            urls = [
+                config.network.proxy_free.get('avsox', self.permanent_url),
+                self.permanent_url,
+                'https://avsox.com',
+                'https://avsox.website',
+                'https://avsox.host'
+            ]
+            for url in urls:
+                try:
+                    if is_url_accessible(url, timeout=5):
+                        self.base_url = url
+                        logger.info(f"Using Avsox URL: {url}")
+                        return
+                except Exception as e:
+                    logger.debug(f"Failed to access {url}: {e}")
+            self.base_url = self.permanent_url
+            logger.warning(f"All URLs failed, using permanent URL: {self.permanent_url}")
+        else:
+            self.base_url = self.permanent_url
+            logger.info(f"Using Avsox URL with proxy: {self.base_url}")
     
     def _test_url_accessibility(self, url: str) -> bool:
         """测试URL可访问性"""
@@ -258,11 +258,10 @@ class AvsoxCrawler:
             return None
     
     def is_available(self) -> bool:
-        """检查爬虫是否可用"""
+        """检查爬虫是否可用（不触发网络访问，要求已配置代理）"""
         try:
-            return self._test_url_accessibility(self.base_url)
-        except Exception as e:
-            logger.error(f"Avsox crawler is not available: {e}")
+            return bool(get_proxy_settings())
+        except Exception:
             return False
 
 # 创建全局实例

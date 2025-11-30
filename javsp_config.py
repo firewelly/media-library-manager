@@ -61,6 +61,8 @@ class CrawlerConfig:
     selection: Dict[str, List[str]] = None
     # FC2爬虫选择（兼容JavSP原始接口）
     fc2_selection: List[str] = None
+    # 是否在首次调用时做可用性探测（启动阶段不探测）
+    probe_on_first_use: bool = True
     
     def __post_init__(self):
         if self.normal_crawlers is None:
