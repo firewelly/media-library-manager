@@ -17,7 +17,7 @@ NC='\033[0m' # No Color
 
 # BigModel API配置
 BIGMODEL_TOKEN="47c72eb3ea3845d0b47b0a7afab098c3.ZAA85YV1VxUqhTvK"
-BIGMODEL_BASE_URL="https://open.bigmodel.cn/api/paas/v4/"
+BIGMODEL_BASE_URL="https://open.bigmodel.cn/api/anthropic"
 MODEL_NAME="glm-4.6"
 
 # 错误处理函数
@@ -110,7 +110,7 @@ if [ -f "$CONFIG_FILE" ]; then
 fi
 
 # 步骤5: 创建新的配置文件
-info_msg "创建新的配置文件，使用BigModel GLM-4.6模型..."
+info_msg "创建新的配置文件，使用BigModel GLM Coding Plan套餐..."
 
 # 检查是否需要使用代理
 PROXY_CONFIG=""
@@ -125,8 +125,11 @@ cat > "$CONFIG_FILE" << EOF
 {
   "env": {
     "ANTHROPIC_AUTH_TOKEN": "$BIGMODEL_TOKEN",
-    "ANTHROPIC_BASE_URL": "$BIGMODEL_BASE_URL",
-    "ANTHROPIC_MODEL": "$MODEL_NAME"$PROXY_CONFIG
+    "ANTHROPIC_BASE_URL": "https://open.bigmodel.cn/api/anthropic",
+    "API_TIMEOUT_MS": "3000000",
+    "ANTHROPIC_DEFAULT_HAIKU_MODEL": "glm-4.5-air",
+    "ANTHROPIC_DEFAULT_SONNET_MODEL": "glm-4.6",
+    "ANTHROPIC_DEFAULT_OPUS_MODEL": "glm-4.6"$PROXY_CONFIG
   },
   "model": {
     "name": "$MODEL_NAME",
@@ -175,10 +178,13 @@ if [ -n "$SHELL_RC" ] && [ -f "$SHELL_RC" ]; then
     # 检查是否已经设置了环境变量
     if ! grep -q "ANTHROPIC_AUTH_TOKEN" "$SHELL_RC"; then
         echo "" >> "$SHELL_RC"
-        echo "# BigModel GLM-4.6 配置" >> "$SHELL_RC"
+        echo "# BigModel GLM Coding Plan 配置" >> "$SHELL_RC"
         echo "export ANTHROPIC_AUTH_TOKEN=\"$BIGMODEL_TOKEN\"" >> "$SHELL_RC"
-        echo "export ANTHROPIC_BASE_URL=\"$BIGMODEL_BASE_URL\"" >> "$SHELL_RC"
-        echo "export ANTHROPIC_MODEL=\"$MODEL_NAME\"" >> "$SHELL_RC"
+        echo "export ANTHROPIC_BASE_URL=\"https://open.bigmodel.cn/api/anthropic\"" >> "$SHELL_RC"
+        echo "export API_TIMEOUT_MS=\"3000000\"" >> "$SHELL_RC"
+        echo "export ANTHROPIC_DEFAULT_HAIKU_MODEL=\"glm-4.5-air\"" >> "$SHELL_RC"
+        echo "export ANTHROPIC_DEFAULT_SONNET_MODEL=\"glm-4.6\"" >> "$SHELL_RC"
+        echo "export ANTHROPIC_DEFAULT_OPUS_MODEL=\"glm-4.6\"" >> "$SHELL_RC"
         success_msg "环境变量已添加到 $SHELL_RC"
         warning_msg "请运行 'source $SHELL_RC' 或重新打开终端以加载环境变量"
     else
@@ -202,7 +208,7 @@ fi
 # 完成提示
 echo "=========================================="
 success_msg "配置完成!"
-success_msg "Claude Code已更新并配置为使用BigModel的GLM-4.6模型"
+success_msg "Claude Code已更新并配置为使用BigModel GLM Coding Plan套餐"
 echo "=========================================="
 echo ""
 echo "📋 使用说明:"
@@ -215,4 +221,4 @@ echo "- 如果遇到网络问题，请确保代理设置正确"
 echo "- 如果API调用失败，请检查Token是否有效"
 echo "- 如果命令不可用，请重新启动终端或运行 'source ~/.zshrc'"
 echo ""
-echo "✨ 现在您可以使用BigModel的GLM-4.6模型了!"
+echo "✨ 现在您可以使用BigModel GLM Coding Plan套餐了!"

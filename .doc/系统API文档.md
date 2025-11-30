@@ -1,8 +1,18 @@
 # 系统API文档
+ - 版本: 开发版
+ - 最后更新: 2025-11-29
+ - 适用系统: Windows/macOS/Linux
 
 ## 1. 简介
 
 本文档详细描述了媒体库管理系统的API接口，包括数据库操作、视频管理、演员管理、标签系统等核心功能的接口定义。这些API主要用于系统内部模块间的通信，也可以用于第三方应用集成。
+
+## 快速代码引用索引
+- 导入器入口：`resumable_smart_importer.py:744`
+- JAVDB详情解析示例：`javdb_information_updater.py:1165`
+- 多源兜底与重试：`improved_javdb_processor.py:228`
+- 同番号信息复制：`copy_javdb_info_by_code.py:1`
+- 去重检查入口：`check_duplicate_file_records.py:81`
 
 ## 2. API设计原则
 

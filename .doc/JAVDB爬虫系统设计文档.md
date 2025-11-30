@@ -1,4 +1,7 @@
 # JAVDB爬虫系统设计文档
+ - 版本: 开发版
+ - 最后更新: 2025-11-29
+ - 适用系统: Windows/macOS/Linux
 
 ## 1. 系统概述
 
@@ -105,7 +108,93 @@ def update_video_info(self, video_id, driver):
     # 下载封面图片
 ```
 
-### 4.2 CodeExtractor 类
+#### `crawl_single_video(code, driver)`
+通过番号爬取单个视频信息
+```python
+def crawl_single_video(self, code, driver):
+    # 构建搜索URL
+    # 执行搜索并获取结果
+    # 解析搜索结果获取详情页URL
+    # 调用parse_detail解析详情页
+    # 返回解析结果
+```
+
+#### `parse_detail(driver, url)`
+解析视频详情页
+```python
+def parse_detail(self, driver, url):
+    # 访问详情页
+    # 模拟人类操作（滚动、鼠标移动）
+    # 等待核心内容加载
+    # 使用多选择器策略提取信息
+    # 返回结构化的视频信息
+```
+
+### 4.2 JavdbActorRepair 类
+
+**主要参数：**
+- `db_path`：数据库文件路径，默认为"media_library.db"
+- `download_avatar`：是否下载头像二进制数据
+- `use_proxy`：是否使用SOCKS5代理
+- `prefer_insert`：是否优先插入新记录而非更新现有记录
+- `use_temp_profile`：是否使用临时浏览器用户数据目录
+- `use_cover_fallback`：是否启用封面头像兜底功能
+
+**关键方法：**
+
+#### `setup_driver()`
+设置Edge浏览器驱动
+```python
+def setup_driver(self):
+    # 配置Edge浏览器选项
+    # 设置用户数据目录和代理
+    # 配置无头模式和页面加载超时
+    # 启动浏览器驱动
+```
+
+#### `fetch_actor_page(url)`
+爬取演员页面信息
+```python
+def fetch_actor_page(self, url):
+    # 规范化URL
+    # 加载页面并模拟人类操作
+    # 验证登录状态
+    # 解析页面内容
+    # 返回演员信息
+```
+
+#### `fetch_actor_page_http(url)`
+使用HTTP请求快速解析演员页面
+```python
+def fetch_actor_page_http(self, url):
+    # 设置请求头
+    # 发送HTTP请求
+    # 使用正则表达式提取头像URL
+    # 返回演员信息
+```
+
+#### `extract_avatar_from_covers_for_actor(actor_id)`
+从视频封面中提取演员头像
+```python
+def extract_avatar_from_covers_for_actor(self, actor_id):
+    # 获取演员的单体作品封面
+    # 检测封面中的人脸
+    # 对人脸进行聚类分析
+    # 选择最佳人脸作为头像
+    # 返回头像二进制数据
+```
+
+#### `merge_duplicates_by_profile_url(cursor, conn, limit, dry_run)`
+按profile_url合并重复演员记录
+```python
+def merge_duplicates_by_profile_url(self, cursor, conn, limit, dry_run):
+    # 查找具有相同profile_url的记录组
+    # 选择last_crawled_at最新的记录作为主记录
+    # 合并名称和别名到主记录
+    # 更新关联关系并删除重复记录
+```
+
+### 4.3 CodeExtractor 类
 
 **主要功能：**
 - 从文件名或标题中提取视频番号
@@ -229,6 +318,24 @@ python javdb_information_updater.py
 #### 刷新所有视频信息
 ```bash
 python javdb_information_updater.py --refresh-all
+```
+
+#### 修复演员档案信息
+```bash
+# 预览模式（不实际修改数据库）
+python javdb_actor_profile_repair.py --dry-run
+
+# 执行模式（实际修改数据库）
+python javdb_actor_profile_repair.py --execute
+
+# 限制处理数量
+python javdb_actor_profile_repair.py --execute --limit 100
+
+# 禁用头像下载（仅更新avatar_url）
+python javdb_actor_profile_repair.py --execute --no-download-avatar
+
+# 测试单个演员页面
+python javdb_actor_profile_repair.py --test-actor-url https://javdb.com/actors/V2z2
 ```
 
 ### 8.3 登录状态管理

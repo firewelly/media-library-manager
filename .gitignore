@@ -49,6 +49,9 @@ venv.bak/
 ehthumbs.db
 Thumbs.db
 
+# 浏览器驱动用户数据
+.edge_driver_user_data/
+
 # 日志文件
 *.log
 
@@ -88,3 +91,6 @@ JavSP/
 
 # 数据库备份目录
 db_backups/
+
+requirements/
+requirement/
