@@ -123,9 +123,9 @@ def setup_driver():
         driver.execute_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
         return driver
     except Exception as e:
-        print(f"MS Edge driver startup failed: {e}")
-        print("Please make sure MS Edge browser and EdgeDriver are installed")
-        print("You can run update_msedge_driver.py to install the driver")
+        print(f"MS Edge driver startup failed: {e}", file=sys.stderr)
+        print("Please make sure MS Edge browser and EdgeDriver are installed", file=sys.stderr)
+        print("You can run update_msedge_driver.py to install the driver", file=sys.stderr)
         return None
 
 def random_delay(min_seconds=MIN_DELAY, max_seconds=MAX_DELAY):
@@ -545,11 +545,11 @@ def handle_login(driver):
         login_button = driver.find_element(By.CSS_SELECTOR, 'button[type="submit"], input[type="submit"], .btn-primary')
         login_button.click()
         
-        print("Login form submitted")
+        print("Login form submitted", file=sys.stderr)
         return True
         
     except Exception as e:
-        print(f"Login error: {e}")
+        print(f"Login error: {e}", file=sys.stderr)
         return False
 
 def crawl_single_video(video_code):
@@ -566,7 +566,7 @@ def crawl_single_video(video_code):
         # If login page detected, invoke login helper to let user login persistently
         try:
             if is_login_page(driver):
-                print("登录状态缺失，调用登录助手以持久化登录态...")
+                print("登录状态缺失，调用登录助手以持久化登录态...", file=sys.stderr)
                 cwd_dir = os.path.dirname(os.path.abspath(__file__))
                 try:
                     subprocess.run(['python3', 'javdb_login_helper.py'], cwd=cwd_dir, check=True)
@@ -589,7 +589,7 @@ def crawl_single_video(video_code):
         driver.get(detail_url)
         random_delay(1, 2)
         if is_login_page(driver):
-            print("访问详情页需要登录，启动登录助手后重试...")
+            print("访问详情页需要登录，启动登录助手后重试...", file=sys.stderr)
             cwd_dir = os.path.dirname(os.path.abspath(__file__))
             try:
                 subprocess.run(['python3', 'javdb_login_helper.py'], cwd=cwd_dir, check=True)

@@ -1,4 +1,7 @@
 # Python脚本功能文档
+ - 版本: 开发版
+ - 最后更新: 2025-11-29
+ - 适用系统: Windows/macOS/Linux
 
 ## 概述
 本文档详细描述了media目录下所有Python脚本的功能、用途和主要特性，帮助用户了解项目结构和各组件的作用。文档按照音序排列所有Python脚本，并提供功能检索表以便快速查找。
@@ -8,7 +11,7 @@
 | 功能分类 | 包含脚本 |
 |---------|---------|
 | 数据库相关 | `init_database.py`, `database_extension.py`, `merge_duplicate_actors.py`, `merge_duplicate_actors_enhance.py`, `extend_actors_table.py` |
-| 爬虫与数据获取 | `javdb_actor_all.py`, `javdb_actor_stream.py`, `javdb_crawler.py`, `javdb_crawler_single.py`, `actor_crawler_headless_db.py`, `actor_crawler_with_db.py`, `actor_detail_crawler.py`, `search_and_crawl_actors.py`, `javbus_crawler_single.py`, `update_msedge_driver.py` |
+| 爬虫与数据获取 | `javdb_actor_all.py`, `javdb_actor_stream.py`, `javdb_crawler.py`, `javdb_crawler_single.py`, `javdb_information_updater.py`, `javdb_actor_profile_repair.py`, `actor_crawler_headless_db.py`, `actor_crawler_with_db.py`, `actor_detail_crawler.py`, `search_and_crawl_actors.py`, `javbus_crawler_single.py`, `update_msedge_driver.py` |
 | 视频处理与分析 | `batch_video_analyzer_enhanced.py`, `video_content_analyzer.py`, `video_multimodal_analyzer.py`, `video_integrity_checker.py`, `batch_video_integrity_checker.py`, `delete_small_videos.py`, `recalculate_md5.py`, `reprocess_failed_videos.py`, `resumable_smart_importer.py`, `fast_import_from_md5.py`, `import_videos_from_md5.py`, `check_invalid_records.py`, `video_subtitle_extractor.py` |
 | 元数据与标签处理 | `title_analysis.py`, `batch_title_cleanup.py`, `update_tags_from_csv.py`, `update_video_descriptions.py`, `clean_duplicate_tags.py`, `auto_clean_tags.py`, `comprehensive_tag_cleaner.py`, `video_tagging.py`, `code_extractor.py`, `enhanced_code_extractor.py` |
 | 配置与管理 | `config.py`, `config.json`, `javsp_config.py`, `javsp_config.yaml`, `javsp_config_manager.py`, `media_library.py`, `gui_config.json` |
@@ -259,6 +262,107 @@ JavDB网站通用爬虫。
 - 专注于单个资源的深度爬取
 - 提取详细的元数据和关联信息
 - 支持处理复杂的页面结构和动态内容
+
+### `javdb_information_updater.py`
+JavDB视频信息更新器，用于从JavDB网站获取视频详细信息并更新到本地数据库。
+
+**主要功能**：
+1. **番号提取与格式化**
+   - 支持多种番号格式（东热n/k系列、纯数字番号等）
+   - 提供文件名清理和番号验证逻辑
+   - 处理特殊字符和格式不规范的情况
+
+2. **数据库操作**
+   - 获取用户定义文件夹列表
+   - 查询需更新视频列表（支持按文件夹/番号过滤）
+   - 实现视频信息的批量更新和刷新策略
+
+3. **视频信息更新**
+   - 处理标题、标签、时长等字段的数据库写入
+   - 支持BLOB格式封面存储
+   - 实现多表关联更新和数据一致性维护
+
+4. **JAVDB信息爬取**
+   - 构建番号搜索URL
+   - 模拟人类操作（滚动、鼠标移动）
+   - 定位搜索结果并提取详情页URL
+   - 解析详情页信息（标题、番号、日期、时长、评分等）
+
+5. **图片处理**
+   - 下载封面图片（支持代理配置）
+   - 检测内容类型并保存到指定路径
+   - 提供本地封面查找功能（同目录poster.jpg检测）
+
+6. **批量处理**
+   - 支持按文件夹批量更新视频信息
+   - 提供统计结果和失败记录
+   - 实现错误处理和重试机制
+
+**使用方法**：
+```
+# 更新所有视频信息
+python javdb_information_updater.py
+
+# 按指定番号更新
+python javdb_information_updater.py --code ABP-123
+
+# 刷新所有视频信息
+python javdb_information_updater.py --refresh-all
+
+# 测试模式（不实际更新数据库）
+python javdb_information_updater.py --test
+```
+
+### `javdb_actor_profile_repair.py`
+JavDB演员档案修复工具，用于规范化演员信息、修复缺失头像和合并重复记录。
+
+**主要功能**：
+1. **域名规范化**
+   - 统一演员profile_url域名为javdb.com
+   - 处理不同镜像域名的URL标准化
+
+2. **演员信息修复**
+   - 搜索并更新非JavDB链接/空链接记录
+   - 重新爬取无头像记录的头像
+   - 解析演员名称和别名信息
+
+3. **头像处理**
+   - 下载演员头像并存储为二进制数据
+   - 提供HTTP快速解析方案（无需浏览器）
+   - 实现头像URL提取和验证
+
+4. **封面头像兜底**
+   - 使用OpenCV人脸检测技术从视频封面中提取演员头像
+   - 实现人脸质量评分系统（基于尺寸/清晰度/正面特征/位置）
+   - 提供人脸聚类和最佳头像选择功能
+
+5. **重复记录合并**
+   - 按profile_url识别重复演员记录
+   - 保留最新记录并合并名称和别名
+   - 更新video_actors关联关系
+
+6. **浏览器自动化**
+   - 支持多平台Edge驱动配置
+   - 实现人类行为模拟（随机延迟、页面滚动）
+   - 提供安全验证页和登录页检测功能
+
+**使用方法**：
+```
+# 预览模式（不实际修改数据库）
+python javdb_actor_profile_repair.py --dry-run
+
+# 执行模式（实际修改数据库）
+python javdb_actor_profile_repair.py --execute
+
+# 限制处理数量
+python javdb_actor_profile_repair.py --execute --limit 100
+
+# 禁用头像下载（仅更新avatar_url）
+python javdb_actor_profile_repair.py --execute --no-download-avatar
+
+# 测试单个演员页面
+python javdb_actor_profile_repair.py --test-actor-url https://javdb.com/actors/V2z2
+```
 
 ### `javsp_avsox.py`
 与AVSOX网站交互的JavaSP模块。
