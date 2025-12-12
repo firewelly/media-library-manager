@@ -1,3 +1,50 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+JAVDB演员作品信息爬虫工具
+============================
+
+功能描述:
+---------
+本工具用于从JAVDB网站抓取指定演员的所有作品信息，包括：
+- 作品标题、番号、发行日期、时长、评分
+- 演员信息、制作商、标签分类
+- 封面图片URL、磁力链接
+- 支持断点续爬、增量更新
+- 自动处理登录验证、反爬虫检测
+- 智能过滤（单体作品+磁力链接）
+
+核心特性:
+---------
+1. **UI模式爬虫**: 使用Selenium Edge驱动，模拟真实用户行为
+2. **智能反检测**: 随机延迟、鼠标移动、页面滚动等人类行为模拟
+3. **登录状态保持**: 支持复用Edge浏览器登录态，自动处理登录页
+4. **断点续爬**: CSV文件存在时自动续爬，避免重复抓取
+5. **灵活过滤**: 默认只抓取单体作品且有磁力链接，支持legacy模式
+6. **并发安全**: 专用用户数据目录，避免与系统Edge冲突
+
+技术架构:
+---------
+- 基于Selenium WebDriver的UI自动化爬虫
+- 支持SOCKS5代理配置
+- 智能页面等待与元素定位
+- 多重异常处理与重试机制
+- CSV数据持久化存储
+
+依赖配置:
+---------
+- Python 3.7+
+- selenium>=4.0.0
+- Edge浏览器与EdgeDriver
+- SOCKS5代理（可选）
+
+作者: AI Assistant
+创建时间: 2024
+更新记录: 持续维护中
+"""
+
+# 从 JAVDB 抓取所有演员信息
+
 import os
 import re
 import sys
@@ -182,6 +229,58 @@ def extract_actor_id_from_url(url: str):
 
 
 def setup_driver(user_data_dir: str = None, profile_directory: str = None):
+    """
+    初始化并返回一个带代理的Edge WebDriver
+    
+    功能说明:
+    ---------
+    1. 配置Edge浏览器选项（代理、用户数据目录、无头模式等）
+    2. 设置SOCKS5代理（从config.py读取）
+    3. 配置反检测参数（禁用自动化标识）
+    4. 初始化Edge WebDriver实例
+    
+    参数说明:
+    ---------
+    user_data_dir : str, 可选
+        Edge用户数据目录路径，None则使用系统默认
+    profile_directory : str, 可选
+        Edge配置目录名，默认"Default"
+    
+    返回:
+    ------
+    selenium.webdriver.Edge
+        已配置的Edge驱动实例
+    
+    配置详情:
+    ---------
+    - 代理设置: 读取config.py中的SOCKS5代理配置
+    - 用户数据: 支持自定义用户数据目录保持登录状态
+    - 反检测: 禁用navigator.webdriver标识，模拟真实浏览器
+    - 窗口大小: 最大化启动，禁用信息栏
+    - 驱动路径: 自动检测系统平台并选择对应EdgeDriver
+    
+    异常处理:
+    ---------
+    - 自动尝试多种启动方式（代理/无代理/服务模式）
+    - 处理驱动初始化失败异常
+    - 提供详细的错误信息
+    
+    使用示例:
+    ---------
+    >>> # 基础用法
+    >>> driver = setup_driver()
+    >>> driver.get("https://javdb.com")
+    >>> 
+    >>> # 使用专用用户数据目录
+    >>> driver = setup_driver(user_data_dir="/path/to/edge/data")
+    
+    注意事项:
+    ---------
+    - 需要安装Edge浏览器和EdgeDriver
+    - SOCKS5代理需要在config.py中配置
+    - 强制UI模式（非无头）以通过反检测
+    - 建议定期清理用户数据目录避免冲突
+    """
     """Setup MS Edge browser driver and FORCE UI mode (non-headless).
     Optionally attach to an existing Edge user profile to help pass security checks.
     """
@@ -565,6 +664,52 @@ def wait_for_manual_login(driver, seconds=300, reopen_url=None):
 
 
 def collect_actor_video_links(driver, actor_url, start_page=1, end_page=None):
+    """
+    流式爬取演员所有视频链接（UI模式）
+    
+    功能说明:
+    ---------
+    1. 访问演员首页，获取演员姓名
+    2. 构建分页URL，支持t=d筛选（单体作品）
+    3. 逐页解析视频列表，提取详情页链接
+    4. 智能过滤：默认只抓取单体作品且有磁力链接
+    5. 支持断点续爬：跳过已处理的URL
+    
+    参数说明:
+    ---------
+    driver : selenium.webdriver.Edge
+        已初始化的Edge驱动实例
+    actor_url : str
+        演员首页URL，格式：https://javdb.com/actors/{actor_id}
+    start_page : int, 可选
+        起始页码，默认1
+    end_page : int, 可选
+        结束页码，None表示自动探测末页
+    
+    返回:
+    ------
+    list
+        视频详情页URL列表
+    
+    异常处理:
+    ---------
+    - 自动检测登录页面，提示用户登录
+    - 处理网络超时，自动重试
+    - 跳过无磁力链接的作品（非legacy模式）
+    - 详细错误日志记录
+    
+    使用示例:
+    ---------
+    >>> driver = setup_driver()
+    >>> links = collect_actor_video_links(driver, "https://javdb.com/actors/abc123")
+    >>> print(f"共抓取到 {len(links)} 个视频链接")
+    
+    注意事项:
+    ---------
+    - 需要保持driver登录状态
+    - 建议设置适当延迟避免被封
+    - 支持断点续爬机制
+    """
     links = []
     page = start_page
     while True:
@@ -738,8 +883,95 @@ def detect_max_pages_from_current(driver):
 
 
 def main():
+    """
+    主函数 - JAVDB演员作品爬虫入口
+    
+    调用方式:
+    --------
+    基础用法:
+        python javdb_actor_all.py <演员URL>
+        
+    完整参数示例:
+        python javdb_actor_all.py "https://javdb.com/actors/abc123" \
+            --from 1 --to 5 \
+            --name "演员姓名" \
+            --csv "output.csv" \
+            --min-delay 2.0 --max-delay 6.0 \
+            --use-dedicated-profile \
+            --legacy-filter \
+            --no-human-actions
+    
+    参数说明:
+    --------
+    位置参数:
+        actor_url          : 演员首页URL (必填)
+                           格式: https://javdb.com/actors/{actor_id}
+                           
+    可选参数:
+        --from           : 起始页码，默认1
+        --to             : 结束页码，默认自动探测末页
+        --name           : 演员姓名（可选），不提供则自动提取
+        --csv            : 输出CSV文件路径（可选），存在则启用断点续爬
+        --user-data-dir  : Edge用户数据目录路径
+        --profile-directory : Edge配置目录名，默认"Default"
+        --use-dedicated-profile : 使用专用EdgeDriver用户数据目录
+        --legacy-filter  : 使用旧版过滤模式（仅t=d，不限定单体）
+        --min-delay      : 最小随机延迟秒数，默认3.0
+        --max-delay      : 最大随机延迟秒数，默认7.0
+        --no-human-actions : 禁用随机滚动与鼠标移动
+    
+    使用场景:
+    --------
+    1. 首次抓取:
+        python javdb_actor_all.py "https://javdb.com/actors/abc123"
+        
+    2. 指定页码范围:
+        python javdb_actor_all.py "https://javdb.com/actors/abc123" --from 1 --to 10
+        
+    3. 断点续爬:
+        python javdb_actor_all.py "https://javdb.com/actors/abc123" --csv "javdb_演员名.csv"
+        
+    4. 快速抓取（减少延迟）:
+        python javdb_actor_all.py "https://javdb.com/actors/abc123" --min-delay 1.0 --max-delay 2.0
+        
+    5. 后台运行（无UI交互）:
+        python javdb_actor_all.py "https://javdb.com/actors/abc123" --no-human-actions
+    
+    输出格式:
+    --------
+    CSV文件包含以下字段:
+    - title: 作品标题
+    - actor: 演员姓名
+    - release_date: 发行日期
+    - video_id: 作品番号
+    - detail_url: 详情页URL
+    - studio: 制作商
+    - rating: 评分
+    - duration: 时长
+    - magnet_link: 最佳磁力链接
+    - all_magnet_links: 所有磁力链接（分号分隔）
+    
+    错误处理:
+    --------
+    - 自动检测并处理登录页面
+    - 安全验证页面人工交互提示
+    - 网络超时重试机制
+    - 详细错误日志输出
+    
+    注意事项:
+    --------
+    - 需要配置SOCKS5代理（config.py）
+    - Edge浏览器和EdgeDriver必须安装
+    - 首次使用可能需要手动登录验证
+    - 建议设置适当延迟避免被封IP
+    - 输出文件默认保存在results/目录
+    """
     import argparse
-    parser = argparse.ArgumentParser(description='JAVDB演员详情流式爬取（UI模式）')
+    parser = argparse.ArgumentParser(
+        description='JAVDB演员作品信息爬虫 - 支持断点续爬、智能过滤、反检测',
+        epilog='示例: python javdb_actor_all.py "https://javdb.com/actors/abc123" --from 1 --to 10 --csv output.csv',
+        formatter_class=argparse.RawDescriptionHelpFormatter
+    )
     parser.add_argument('actor_url', help='演员首页链接，如 https://javdb.com/actors/yAW')
     parser.add_argument('--from', dest='from_page', type=int, default=1, help='起始页，默认 1')
     parser.add_argument('--to', dest='to_page', type=int, default=None, help='结束页，默认自动探测最大页')
@@ -941,5 +1173,54 @@ def main():
             pass
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
+    """
+    脚本入口点
+    
+    快速开始:
+    ----------
+    1. 安装依赖:
+        pip install selenium
+        
+    2. 配置代理 (config.py):
+        # 添加SOCKS5代理配置
+        PROXY_HOST = "127.0.0.1"
+        PROXY_PORT = 1080
+        
+    3. 首次运行:
+        python javdb_actor_all.py "https://javdb.com/actors/abc123"
+        
+    4. 高级用法:
+        # 断点续爬 + 指定页码
+        python javdb_actor_all.py "https://javdb.com/actors/abc123" \
+            --from 1 --to 20 \
+            --csv "results/演员名.csv" \
+            --min-delay 2.0 --max-delay 5.0
+            
+        # 后台运行 + 快速模式
+        python javdb_actor_all.py "https://javdb.com/actors/abc123" \
+            --no-human-actions \
+            --min-delay 1.0 --max-delay 2.0 \
+            --use-dedicated-profile
+    
+    故障排除:
+    ----------
+    - EdgeDriver未找到: 确保Edge浏览器已安装，或手动下载EdgeDriver
+    - 登录失败: 检查代理配置，可能需要手动登录验证
+    - 页面加载超时: 增加延迟时间，检查网络连接
+    - 抓取为空: 确认演员URL正确，检查过滤条件
+    
+    输出文件:
+    ----------
+    - CSV文件: 包含所有抓取的作品信息
+    - 日志输出: 实时显示抓取进度和错误信息
+    - 断点文件: 自动保存已处理URL，支持续爬
+    
+    性能优化:
+    ----------
+    - 调整延迟参数平衡速度与稳定性
+    - 使用专用用户数据目录避免冲突
+    - 合理设置页码范围分批抓取
+    - 定期清理用户数据目录释放空间
+    """
     main()

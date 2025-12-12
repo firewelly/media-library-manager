@@ -1,0 +1,105 @@
+<mxfile host="app.diagrams.net" modified="2024-01-01T00:00:00.000Z" agent="5.0" etag="功能对比图" version="21.0.0" type="device">
+  <diagram name="功能对比" id="功能对比图">
+    <mxGraphModel dx="1434" dy="796" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1169" pageHeight="827" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+        
+        <!-- 标题 -->
+        <mxCell id="title" value="JavSP文件操作功能对比" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=20;fontStyle=1" vertex="1" parent="1">
+          <mxGeometry x="400" y="40" width="400" height="40" as="geometry" />
+        </mxCell>
+        
+        <!-- 迁移功能 -->
+        <mxCell id="migrate_box" value="" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;strokeWidth=2" vertex="1" parent="1">
+          <mxGeometry x="200" y="120" width="300" height="400" as="geometry" />
+        </mxCell>
+        
+        <mxCell id="migrate_title" value="迁移JavSP到" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=16;fontStyle=1" vertex="1" parent="1">
+          <mxGeometry x="250" y="140" width="200" height="30" as="geometry" />
+        </mxCell>
+        
+        <!-- 复制功能 -->
+        <mxCell id="copy_box" value="" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;strokeWidth=2" vertex="1" parent="1">
+          <mxGeometry x="600" y="120" width="300" height="400" as="geometry" />
+        </mxCell>
+        
+        <mxCell id="copy_title" value="复制JavSP到" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=16;fontStyle=1" vertex="1" parent="1">
+          <mxGeometry x="650" y="140" width="200" height="30" as="geometry" />
+        </mxCell>
+        
+        <!-- 迁移功能特点 -->
+        <mxCell id="migrate_feature1" value="✓ 移动文件" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=12" vertex="1" parent="1">
+          <mxGeometry x="220" y="180" width="260" height="20" as="geometry" />
+        </mxCell>
+        
+        <mxCell id="migrate_feature2" value="✓ 删除源文件" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=12" vertex="1" parent="1">
+          <mxGeometry x="220" y="210" width="260" height="20" as="geometry" />
+        </mxCell>
+        
+        <mxCell id="migrate_feature3" value="✓ 释放磁盘空间" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=12" vertex="1" parent="1">
+          <mxGeometry x="220" y="240" width="260" height="20" as="geometry" />
+        </mxCell>
+        
+        <mxCell id="migrate_feature4" value="⚠ 风险较高" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=12" vertex="1" parent="1">
+          <mxGeometry x="220" y="270" width="260" height="20" as="geometry" />
+        </mxCell>
+        
+        <mxCell id="migrate_usecase" value="使用场景：文件整理" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=12;fontStyle=1" vertex="1" parent="1">
+          <mxGeometry x="220" y="320" width="260" height="20" as="geometry" />
+        </mxCell>
+        
+        <!-- 复制功能特点 -->
+        <mxCell id="copy_feature1" value="✓ 复制文件" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=12" vertex="1" parent="1">
+          <mxGeometry x="620" y="180" width="260" height="20" as="geometry" />
+        </mxCell>
+        
+        <mxCell id="copy_feature2" value="✓ 保留源文件" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=12" vertex="1" parent="1">
+          <mxGeometry x="620" y="210" width="260" height="20" as="geometry" />
+        </mxCell>
+        
+        <mxCell id="copy_feature3" value="✓ 数据安全" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=12" vertex="1" parent="1">
+          <mxGeometry x="620" y="240" width="260" height="20" as="geometry" />
+        </mxCell>
+        
+        <mxCell id="copy_feature4" value="⚠ 占用更多空间" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=12" vertex="1" parent="1">
+          <mxGeometry x="620" y="270" width="260" height="20" as="geometry" />
+        </mxCell>
+        
+        <mxCell id="copy_usecase" value="使用场景：文件备份" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=12;fontStyle=1" vertex="1" parent="1">
+          <mxGeometry x="620" y="320" width="260" height="20" as="geometry" />
+        </mxCell>
+        
+        <!-- 共同特性 -->
+        <mxCell id="common_title" value="共同特性" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=14;fontStyle=1" vertex="1" parent="1">
+          <mxGeometry x="400" y="380" width="200" height="30" as="geometry" />
+        </mxCell>
+        
+        <mxCell id="common_feature1" value="✓ 支持附属文件处理" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=11" vertex="1" parent="1">
+          <mxGeometry x="150" y="420" width="200" height="20" as="geometry" />
+        </mxCell>
+        
+        <mxCell id="common_feature2" value="✓ 保持层级结构" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=11" vertex="1" parent="1">
+          <mxGeometry x="400" y="420" width="200" height="20" as="geometry" />
+        </mxCell>
+        
+        <mxCell id="common_feature3" value="✓ 冲突处理机制" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=11" vertex="1" parent="1">
+          <mxGeometry x="650" y="420" width="200" height="20" as="geometry" />
+        </mxCell>
+        
+        <!-- 箭头 -->
+        <mxCell id="arrow1" value="" style="endArrow=classic;html=1;rounded=0;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;strokeWidth=2" edge="1" parent="1" source="migrate_box" target="copy_box">
+          <mxGeometry width="50" height="50" relative="1" as="geometry">
+            <mxPoint x="550" y="320" as="sourcePoint" />
+            <mxPoint x="600" y="320" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        
+        <mxCell id="arrow_label" value="新增" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=14;fontStyle=1" vertex="1" parent="1">
+          <mxGeometry x="480" y="300" width="80" height="30" as="geometry" />
+        </mxCell>
+        
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

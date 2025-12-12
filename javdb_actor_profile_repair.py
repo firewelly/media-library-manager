@@ -333,15 +333,20 @@ class JavdbActorRepair:
             else:
                 self.human_pause(min_seconds=3, max_seconds=5, do_actions=True)
             selectors = [
+                '#actors .actor-box a[href*="/actors/"]',
+                '.actors .box a[href*="/actors/"]',
                 '.grid .item a[href*="/actors/"]',
                 '.actors-grid .item a[href*="/actors/"]',
-                'a[href*="/actors/"]'
+                '.movie-list .item a[href*="/actors/"]'
             ]
             for sel in selectors:
                 results = self.driver.find_elements(By.CSS_SELECTOR, sel)
                 if results:
-                    href = results[0].get_attribute('href')
-                    return self._normalize_url(href)
+                    for r in results:
+                        href = r.get_attribute('href')
+                        # 过滤掉导航栏中的 censored/uncensored 链接
+                        if href and '/actors/censored' not in href and '/actors/uncensored' not in href:
+                            return self._normalize_url(href)
             return None
         except Exception as e:
             print(f"搜索异常: {e}")
@@ -455,84 +460,70 @@ class JavdbActorRepair:
                 main_text = (name_el.text or '').strip()
             except Exception:
                 pass
-            # 使用清洗后的主名称生成候选名列表
-            cleaned_main = self._clean_actor_name(main_text)
-            primary_names = [self._normalize_name_token(x) for x in (cleaned_main.split(',') if cleaned_main else [])]
-            primary_names = [x for x in primary_names if x]
+            # 基于页面两行规则解析（第一行为中文名与common名，第二行全部为别名）
+            lines_raw = [x.strip() for x in re.split(r"[\r\n]+", (main_text or '')) if x.strip()]
+            def _strip_noise_line(x: str) -> str:
+                x = re.sub(r"[\s\u3000]*\d+\s*部(?:影片|作品)\b.*$", "", x)
+                x = re.sub(r"\s*[-|｜].*$", "", x)
+                return x.strip()
+            lines = [_strip_noise_line(l) for l in lines_raw]
+            first_line = (lines[0] if lines else '')
+            second_lines = (lines[1:] if len(lines) > 1 else [])
+            comma_split = r"[,，、]\s*"
+            tokens1 = [self._normalize_name_token(t) for t in (re.split(comma_split, first_line) if first_line else [])]
+            tokens1 = [t for t in tokens1 if t]
+            aliases_from_main = []
+            if len(tokens1) >= 2:
+                info['name_traditional'] = tokens1[0]
+                info['name'] = tokens1[1]
+                info['name_common'] = tokens1[1]
+                for t in tokens1:
+                    if t != info['name_common']:
+                        aliases_from_main.append(t)
+            elif len(tokens1) == 1:
+                info['name'] = tokens1[0]
+                info['name_common'] = tokens1[0]
+                info['name_traditional'] = tokens1[0]
+            for line_i in second_lines:
+                for t in re.split(comma_split, line_i):
+                    norm = self._normalize_name_token(t)
+                    if norm:
+                        aliases_from_main.append(norm)
 
-            # 解析别名（常见于 section-meta 或副标题）
+            # 解析别名（常见于 section-meta 或副标题），与主标题解析的别名合并
             alias_items = []
             try:
-                alias_el = self.driver.find_element(By.CSS_SELECTOR, '.section-meta, .actor-info .sub-title, .actor-box .sub-title')
+                alias_el = self.driver.find_element(By.CSS_SELECTOR, '.section-meta, .actor-info .sub-title, .actor-box .sub-title, .actor-header .sub-title, .actor-section-name + small')
                 alias_text = (alias_el.text or '').strip()
-                raw_aliases = [self._normalize_name_token(a) for a in alias_text.split(',')]
+                split_pattern = r"[,，、]\s*"
+                raw_aliases = [self._normalize_name_token(a) for a in re.split(split_pattern, alias_text)]
                 alias_items = [a for a in raw_aliases if a]
             except Exception:
                 pass
 
-            # 优先规则：若主名称首行包含逗号（显式成对提供），左侧映射为繁体名，右侧映射为常用名
-            explicit_pair_applied = False
-            if len(primary_names) >= 2:
-                left_tok, right_tok = primary_names[0], primary_names[1]
-                if left_tok and right_tok:
-                    info['name_traditional'] = left_tok
-                    info['name'] = right_tok
-                    info['name_common'] = right_tok
-                    explicit_pair_applied = True
-                    # 将成对出现的两个主名从别名中移除，避免重复
-                    alias_items = [a for a in alias_items if a not in {left_tok, right_tok}]
+            try:
+                m_paren = re.findall(r'[\(（]\s*([^\)）]+?)\s*[\)）]', main_text or '')
+                for grp in m_paren:
+                    for tok in re.split(r"[\,\u3001、，/｜\|・\s]+", grp):
+                        t = self._normalize_name_token(tok)
+                        if t:
+                            alias_items.append(t)
+            except Exception:
+                pass
 
-            if not explicit_pair_applied:
-                # 若首行仅一个名称，主名与繁体名均取该名称；第二行作为别名来源
-                if len(primary_names) == 1:
-                    tok = primary_names[0]
-                    info['name'] = tok
-                    info['name_common'] = tok
-                    info['name_traditional'] = tok
-                    # 别名去重并排除与主名重复
-                    dedup_aliases = []
-                    seen = set()
-                    excluded = {tok}
-                    for a in alias_items:
-                        if a and a not in excluded and a not in seen:
-                            dedup_aliases.append(a)
-                            seen.add(a)
-                    if dedup_aliases:
-                        info['aliases'] = ', '.join(dedup_aliases)
-                else:
-                    # 回退规则：按字符类别进行分类（假名优先为常用名，中文为繁体名，其余归为别名）
-                    japanese_name, traditional_name, other_aliases = self._classify_names(primary_names, alias_items)
-                    if japanese_name:
-                        info['name'] = japanese_name
-                        info['name_common'] = japanese_name
-                    elif traditional_name:
-                        info['name'] = traditional_name
-                        info['name_common'] = traditional_name
-                    else:
-                        info['name'] = cleaned_main or ''
-                    if traditional_name:
-                        info['name_traditional'] = traditional_name
-                    # 汇总别名并去重（排除与主名/繁体名重复）
-                    excluded = {japanese_name, traditional_name}
-                    dedup_aliases = []
-                    seen = set()
-                    for a in other_aliases:
-                        if a and a not in excluded and a not in seen:
-                            dedup_aliases.append(a)
-                            seen.add(a)
-                    if dedup_aliases:
-                        info['aliases'] = ', '.join(dedup_aliases)
-            else:
-                # 显式成对映射已生效，处理别名去重后填充
-                dedup_aliases = []
-                seen = set()
-                excluded = {info.get('name'), info.get('name_traditional'), info.get('name_common')}
-                for a in alias_items:
-                    if a and a not in excluded and a not in seen:
-                        dedup_aliases.append(a)
-                        seen.add(a)
-                if dedup_aliases:
-                    info['aliases'] = ', '.join(dedup_aliases)
+            # 合并别名来源并去重；策略：除了 common 名之外的所有名字都作为别名
+            all_alias_candidates = []
+            all_alias_candidates.extend(aliases_from_main)
+            all_alias_candidates.extend(alias_items)
+            excluded = {info.get('name_common')}
+            dedup_aliases = []
+            seen = set()
+            for a in all_alias_candidates:
+                if a and a not in excluded and a not in seen:
+                    dedup_aliases.append(a)
+                    seen.add(a)
+            if dedup_aliases:
+                info['aliases'] = ', '.join(dedup_aliases)
 
             # 头像（增强版选择器与懒加载/srcset/背景图解析）
             try:
@@ -701,24 +692,78 @@ class JavdbActorRepair:
                     info['avatar_url'] = chosen
             except Exception:
                 pass
-            # 名称粗略提取
+            # 名称与别名粗略提取（按两行规则：第一行中文+common，第二行全部别名）
             try:
                 import re as _re
-                m = _re.search(r'<h1[^>]*class=["\']?title["\']?[^>]*>(.*?)</h1>', html, flags=_re.IGNORECASE|_re.DOTALL)
-                if m:
-                    name = _re.sub(r'<[^>]+>', '', m.group(1)).strip()
-                    name = self._clean_actor_name(name)
-                    # 若标题显式包含逗号成对，按左繁体右常用进行映射
-                    tokens = [self._normalize_name_token(x) for x in (name.split(',') if name else [])]
-                    tokens = [x for x in tokens if x]
-                    if len(tokens) >= 2:
-                        info['name_traditional'] = tokens[0]
-                        info['name'] = tokens[1]
-                        info['name_common'] = tokens[1]
-                    else:
-                        info['name'] = name
-                        info['name_common'] = name
-                        info['name_traditional'] = name
+                name_block = ''
+                m0 = _re.search(r'<div[^>]*class=["\']?actor-section-name["\']?[^>]*>(.*?)</div>', html, flags=_re.IGNORECASE|_re.DOTALL)
+                if m0:
+                    name_block = m0.group(1)
+                else:
+                    m1 = _re.search(r'<h1[^>]*class=["\']?title["\']?[^>]*>(.*?)</h1>', html, flags=_re.IGNORECASE|_re.DOTALL)
+                    if m1:
+                        name_block = m1.group(1)
+                if name_block:
+                    # 保留换行用于两行规则
+                    text = _re.sub(r'<br\s*/?>', '\n', name_block, flags=_re.IGNORECASE)
+                    text = _re.sub(r'<[^>]+>', '', text).strip()
+                    lines = [l.strip() for l in re.split(r"[\r\n]+", text) if l.strip()]
+                    def _strip_noise_line(x: str) -> str:
+                        x = re.sub(r"[\s\u3000]*\d+\s*部(?:影片|作品)\b.*$", "", x)
+                        x = re.sub(r"\s*[-|｜].*$", "", x)
+                        return x.strip()
+                    lines = [_strip_noise_line(l) for l in lines]
+                    first = lines[0] if lines else ''
+                    others = lines[1:] if len(lines) > 1 else []
+                    comma_split = r"[,，、]\s*"
+                    tokens1 = [self._normalize_name_token(t) for t in (re.split(comma_split, first) if first else [])]
+                    tokens1 = [t for t in tokens1 if t]
+                    alias_list = []
+                    if len(tokens1) >= 2:
+                        info['name_traditional'] = tokens1[0]
+                        info['name'] = tokens1[1]
+                        info['name_common'] = tokens1[1]
+                        for t in tokens1:
+                            if t != info['name_common']:
+                                alias_list.append(t)
+                    elif len(tokens1) == 1:
+                        info['name'] = tokens1[0]
+                        info['name_common'] = tokens1[0]
+                        info['name_traditional'] = tokens1[0]
+                    for line_i in others:
+                        for t in re.split(comma_split, line_i):
+                            norm = self._normalize_name_token(t)
+                            if norm:
+                                alias_list.append(norm)
+                    if alias_list:
+                        excluded = {info.get('name_common')}
+                        dedup = []
+                        seen = set()
+                        for a in alias_list:
+                            if a and a not in excluded and a not in seen:
+                                dedup.append(a)
+                                seen.add(a)
+                        if dedup:
+                            info['aliases'] = ', '.join(dedup)
+            except Exception:
+                pass
+            try:
+                import re as _re
+                m2 = _re.search(r'<(div|span)[^>]*class=["\']?(section-meta|sub-title)["\']?[^>]*>(.*?)</\1>', html, flags=_re.IGNORECASE|_re.DOTALL)
+                if m2:
+                    txt = _re.sub(r'<[^>]+>', '', m2.group(3)).strip()
+                    raw_aliases = [self._normalize_name_token(a) for a in re.split(r"[,，、]\s*", txt)]
+                    raw_aliases = [a for a in raw_aliases if a]
+                    if raw_aliases:
+                        excluded = {info.get('name_common')}
+                        dedup = []
+                        seen = set()
+                        for a in raw_aliases:
+                            if a and a not in excluded and a not in seen:
+                                dedup.append(a)
+                                seen.add(a)
+                        if dedup:
+                            info['aliases'] = ', '.join(dedup)
             except Exception:
                 pass
             return info
