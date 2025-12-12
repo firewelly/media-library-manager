@@ -26,12 +26,13 @@ import json
 import time
 import cv2
 from send2trash import send2trash
+import sys
 # 移除并行处理相关导入，改为串行处理以适应NAS环境
 # from concurrent.futures import ThreadPoolExecutor, as_completed
 # import multiprocessing
 import logging
 from fast_smart_media_updater import run_fast_update, load_active_folders
-from utils import javsp_migration
+from utils import javsp_migration, javsp_copy
 
 # 日志级别配置
 class LogLevel:
@@ -228,6 +229,10 @@ class ProgressWindow:
             
     def cancel(self):
         """取消操作"""
+        try:
+            self.window.grab_release()
+        except Exception:
+            pass
         if self.completed:
             self.window.destroy()
         else:
@@ -241,9 +246,14 @@ class ProgressWindow:
     def close(self):
         """关闭窗口"""
         try:
-            self.window.destroy()
-        except tk.TclError:
-            pass
+            if hasattr(self, 'window') and self.window.winfo_exists():
+                try:
+                    self.window.grab_release()
+                except Exception:
+                    pass
+                self.window.destroy()
+        except (tk.TclError, AttributeError):
+            pass  # 窗口已销毁或不存在
 
 class MediaLibrary:
     def __init__(self):
@@ -3516,8 +3526,17 @@ class MediaLibrary:
         # 更新 videos
         update_fields = []
         update_values = []
+        
+        # 确保标题包含番号
         title_val = nfo_data.get('title') or nfo_data.get('javdb_title')
         if title_val:
+            # 如果标题中不包含番号，则将番号添加到标题前面
+            code_val = nfo_data.get('code') or nfo_data.get('uniqueid')
+            if code_val and not title_val.startswith(code_val):
+                # 检查标题是否已包含番号（不区分大小写）
+                if code_val.lower() not in title_val.lower():
+                    title_val = f"{code_val} {title_val}"
+            
             update_fields.append("title = COALESCE(NULLIF(?, ''), title)")
             update_values.append(title_val)
         if nfo_data.get('plot'):
@@ -5898,7 +5917,69 @@ class MediaLibrary:
         self.is_filtering = True
         self.load_videos()
 
+    def get_online_folders(self):
+        """获取所有活跃且在线的文件夹路径"""
+        try:
+            self.cursor.execute("SELECT folder_path FROM folders WHERE is_active = 1")
+            all_folders = [row[0] for row in self.cursor.fetchall()]
+            
+            # 只返回在线（可访问）的文件夹
+            online_folders = []
+            for folder in all_folders:
+                if os.path.exists(folder) and os.path.isdir(folder):
+                    online_folders.append(folder)
+                    print(f"✓ 在线文件夹: {folder}")
+                else:
+                    print(f"✗ 离线文件夹: {folder}")
+            
+            return online_folders
+        except Exception as e:
+            print(f"获取活跃文件夹失败: {e}")
+            return []
     
+    def format_folder_display_name(self, folder_path):
+        """格式化文件夹显示名称 - 显示足够信息以区分重名文件夹"""
+        folder_name = os.path.basename(folder_path)
+        parent_dir = os.path.basename(os.path.dirname(folder_path))
+        
+        # 对于根目录或特殊路径，显示更完整的信息
+        if folder_path.startswith('/Volumes/'):
+            # 对于/Volumes/路径，显示卷标名和文件夹名
+            parts = folder_path.split('/')
+            if len(parts) >= 3:
+                volume_name = parts[2]  # /Volumes/卷标名/...
+                if volume_name == folder_name:
+                    # 如果卷标名和文件夹名相同，只显示卷标名
+                    return volume_name
+                elif len(parts) > 3:
+                    # 如果有子目录，显示卷标名+文件夹名
+                    return f"{volume_name}/{folder_name}"
+                else:
+                    return volume_name
+        elif folder_path.startswith('/Users/'):
+            # 对于用户目录，显示用户名和相对路径
+            parts = folder_path.split('/')
+            if len(parts) >= 3:
+                username = parts[2]
+                if len(parts) > 3:
+                    # 构建相对路径（从用户目录开始）
+                    rel_parts = parts[3:]
+                    if rel_parts:
+                        rel_path = '/'.join(rel_parts)
+                        return f"~{username}/{rel_path}"
+                return f"~{username}/{folder_name}"
+        
+        # 对于通用名称，显示父目录/文件夹名
+        generic_names = ['movies', 'videos', 'films', '视频', '电影', 'mv', 'video', 'av', 'jav']
+        if folder_name.lower() in generic_names and parent_dir and parent_dir not in ['', '/', 'Volumes', 'Users']:
+            return f"{parent_dir}/{folder_name}"
+        
+        # 其他情况，如果父目录有意义，也显示
+        if parent_dir and parent_dir not in ['', '/', 'Volumes', 'Users']:
+            return f"{parent_dir}/{folder_name}"
+        
+        return folder_name
+
     def show_context_menu(self, event):
         """显示右键菜单"""
         # 获取点击的项目
@@ -5986,22 +6067,25 @@ class MediaLibrary:
             context_menu.add_cascade(label="移动到", menu=move_menu)
             
             # 获取所有在线文件夹
-            self.cursor.execute("SELECT folder_path FROM folders WHERE is_active = 1")
-            online_folders = self.cursor.fetchall()
+            online_folders = self.get_online_folders()
             
-            for folder in online_folders:
-                folder_path = folder[0]
-                folder_name = os.path.basename(folder_path)
-                move_menu.add_command(label=folder_name, 
+            for folder_path in online_folders:
+                folder_display_name = self.format_folder_display_name(folder_path)
+                move_menu.add_command(label=folder_display_name, 
                                     command=lambda fp=folder_path: self.move_file_to_folder(video_info['id'], video_info['path'], fp))
             migrate_menu = tk.Menu(context_menu, tearoff=0)
             context_menu.add_cascade(label="迁移JavSP到", menu=migrate_menu)
-            self.cursor.execute("SELECT DISTINCT folder_path FROM folders WHERE is_active = 1 ORDER BY folder_path")
-            for row in self.cursor.fetchall():
-                _folder_path = row[0]
-                _folder_name = os.path.basename(_folder_path)
-                migrate_menu.add_command(label=_folder_name,
-                                         command=lambda fp=_folder_path: self.migrate_javsp_file_to_library(video_info['id'], video_info['path'], fp))
+            for folder_path in online_folders:
+                folder_display_name = self.format_folder_display_name(folder_path)
+                migrate_menu.add_command(label=folder_display_name,
+                                         command=lambda fp=folder_path: self.migrate_javsp_file_to_library(video_info['id'], video_info['path'], fp))
+            
+            copy_menu = tk.Menu(context_menu, tearoff=0)
+            context_menu.add_cascade(label="复制JavSP到", menu=copy_menu)
+            for folder_path in online_folders:
+                folder_display_name = self.format_folder_display_name(folder_path)
+                copy_menu.add_command(label=folder_display_name,
+                                      command=lambda fp=folder_path: self.copy_javsp_file_to_library(video_info['id'], video_info['path'], fp))
         else:
             # 多文件菜单
             context_menu.add_command(label=f"批量自动标签 ({len(selected_videos)}个文件)", 
@@ -6031,22 +6115,25 @@ class MediaLibrary:
             context_menu.add_cascade(label=f"批量移动到 ({len(selected_videos)}个文件)", menu=move_menu)
             
             # 获取所有在线文件夹
-            self.cursor.execute("SELECT folder_path FROM folders WHERE is_active = 1")
-            online_folders = self.cursor.fetchall()
+            online_folders = self.get_online_folders()
             
-            for folder in online_folders:
-                folder_path = folder[0]
-                folder_name = os.path.basename(folder_path)
-                move_menu.add_command(label=folder_name, 
+            for folder_path in online_folders:
+                folder_display_name = self.format_folder_display_name(folder_path)
+                move_menu.add_command(label=folder_display_name, 
                                     command=lambda fp=folder_path: self.batch_move_files_to_folder(fp))
             migrate_menu = tk.Menu(context_menu, tearoff=0)
             context_menu.add_cascade(label=f"批量迁移JavSP到 ({len(selected_videos)}个文件)", menu=migrate_menu)
-            self.cursor.execute("SELECT DISTINCT folder_path FROM folders WHERE is_active = 1 ORDER BY folder_path")
-            for row in self.cursor.fetchall():
-                _folder_path = row[0]
-                _folder_name = os.path.basename(_folder_path)
-                migrate_menu.add_command(label=_folder_name,
-                                         command=lambda fp=_folder_path: self.batch_migrate_javsp_files_to_library(fp))
+            for folder_path in online_folders:
+                folder_display_name = self.format_folder_display_name(folder_path)
+                migrate_menu.add_command(label=folder_display_name,
+                                         command=lambda fp=folder_path: self.batch_migrate_javsp_files_to_library(fp))
+            
+            copy_menu = tk.Menu(context_menu, tearoff=0)
+            context_menu.add_cascade(label=f"批量复制JavSP到 ({len(selected_videos)}个文件)", menu=copy_menu)
+            for folder_path in online_folders:
+                folder_display_name = self.format_folder_display_name(folder_path)
+                copy_menu.add_command(label=folder_display_name,
+                                      command=lambda fp=folder_path: self.batch_copy_javsp_files_to_library(fp))
         
         # 显示菜单
         try:
@@ -6604,28 +6691,36 @@ class MediaLibrary:
                         # 刷新视频列表
                         self.root.after(100, self.load_videos)
                         
-                        # 显示结果
-                        success_count = progress_window.success_count
-                        failed_count = progress_window.failed_count
-                        
-                        result_msg = f"批量JAVDB信息获取完成！\n成功获取: {success_count} 个文件\n失败: {failed_count} 个文件"
-                        if failed_files:
-                            result_msg += "\n\n失败详情:\n" + "\n".join(failed_files[:10])
-                            if len(failed_files) > 10:
-                                result_msg += f"\n... 还有 {len(failed_files) - 10} 个失败文件"
-                        
-                        # 延迟显示结果对话框，让用户看到最终状态
-                        self.root.after(2000, lambda: messagebox.showinfo("完成", result_msg))
-                        self.root.after(2000, lambda: progress_window.close())
+                        # 关闭进度窗口（不再弹出完成统计对话框）
+                        def safe_complete_close():
+                            try:
+                                if progress_window and hasattr(progress_window, 'cancelled') and not progress_window.cancelled:
+                                    progress_window.close()
+                                
+                            except (tk.TclError, AttributeError):
+                                pass
+                        self.root.after(2000, safe_complete_close)
                     else:
                         # 用户取消了操作
                         progress_window.update_status("操作已取消", "orange")
                         success_count = progress_window.success_count
-                        self.root.after(1000, lambda: messagebox.showinfo("取消", f"操作已取消\n已成功处理: {success_count} 个文件"))
-                        self.root.after(1000, lambda: progress_window.close())
+                        
+                        # 线程安全地关闭进度窗口（不弹出取消提示）
+                        def safe_cancel_close():
+                            try:
+                                if progress_window and hasattr(progress_window, 'cancelled') and not progress_window.cancelled:
+                                    progress_window.close()
+                            except (tk.TclError, AttributeError):
+                                pass
+                        self.root.after(1000, safe_cancel_close)
                     
                 except Exception as e:
-                    progress_window.close()
+                    # 异常时安全关闭进度窗口
+                    try:
+                        if progress_window and hasattr(progress_window, 'cancelled'):
+                            progress_window.close()
+                    except (tk.TclError, AttributeError):
+                        pass  # 窗口已关闭或不存在
                     messagebox.showerror("错误", f"批量JAVDB信息获取失败: {str(e)}")
             
             # 在新线程中执行
@@ -6637,7 +6732,12 @@ class MediaLibrary:
             print("处理线程已启动")
             
         except Exception as e:
-            messagebox.showerror("错误", f"批量JAVDB信息获取失败: {str(e)}")
+            # 外层异常处理也增加安全保护
+            try:
+                messagebox.showerror("错误", f"批量JAVDB信息获取失败: {str(e)}")
+            except tk.TclError:
+                # 如果主窗口已关闭，使用print输出错误
+                print(f"批量JAVDB信息获取失败: {str(e)}", file=sys.stderr)
      
     def play_video_from_context(self, video_id):
         """从右键菜单播放视频"""
@@ -6785,6 +6885,17 @@ class MediaLibrary:
         else:
             messagebox.showerror("错误", f"迁移JavSP文件失败: {result.get('error')}")
 
+    def copy_javsp_file_to_library(self, video_id, old_file_path, target_library_path):
+        result = javsp_copy.copy_single(self.cursor, self.conn, old_file_path, video_id, target_library_path)
+        if result.get("ok"):
+            self.filter_videos()
+            if result.get("merged"):
+                messagebox.showinfo("成功", "已合并到目标媒体库并复制元数据")
+            else:
+                messagebox.showinfo("成功", f"文件已复制到: {result.get('final_path')}")
+        else:
+            messagebox.showerror("错误", f"复制JavSP文件失败: {result.get('error')}")
+
     def batch_migrate_javsp_files_to_library(self, target_library_path):
         try:
             selected_items = self.video_tree.selection()
@@ -6840,6 +6951,62 @@ class MediaLibrary:
             t.start()
         except Exception as e:
             messagebox.showerror("错误", f"批量迁移失败: {str(e)}")
+
+    def batch_copy_javsp_files_to_library(self, target_library_path):
+        try:
+            selected_items = self.video_tree.selection()
+            if not selected_items:
+                messagebox.showwarning("警告", "请先选择要复制的视频文件")
+                return
+            videos = []
+            for item in selected_items:
+                try:
+                    vid = self.video_tree.item(item)['tags'][0]
+                    self.cursor.execute("SELECT file_path, file_name FROM videos WHERE id = ?", (vid,))
+                    r = self.cursor.fetchone()
+                    if r and self.is_video_online(vid):
+                        videos.append({'id': vid, 'path': r[0], 'name': r[1]})
+                except (IndexError, TypeError):
+                    continue
+            if not videos:
+                messagebox.showwarning("警告", "没有找到可复制的在线视频文件")
+                return
+            target_name = os.path.basename(target_library_path)
+            if not messagebox.askyesno("确认复制", f"确定要将 {len(videos)} 个视频复制到 '{target_name}' 吗？"):
+                return
+            progress_window = ProgressWindow(self.root, "批量复制JavSP文件", len(videos))
+            def worker():
+                success_count = 0
+                failed = []
+                try:
+                    for i, info in enumerate(videos):
+                        if progress_window.cancelled:
+                            break
+                        result = javsp_copy.copy_single(self.cursor, self.conn, info['path'], info['id'], target_library_path)
+                        if result.get("ok"):
+                            success_count += 1
+                            progress_window.update_progress(i + 1, info['name'], success=True)
+                        else:
+                            failed.append(f"{info['name']}: {result.get('error')}")
+                            progress_window.update_progress(i + 1, info['name'], success=False)
+                    if not progress_window.cancelled:
+                        self.filter_videos()
+                    progress_window.close()
+                    if not progress_window.cancelled:
+                        msg = f"批量复制完成！\n成功: {success_count}"
+                        if failed:
+                            msg += f"\n失败: {len(failed)}\n" + "\n".join(failed[:5])
+                            if len(failed) > 5:
+                                msg += f"\n... 还有 {len(failed) - 5} 个失败项目"
+                        messagebox.showinfo("完成", msg)
+                except Exception as ex:
+                    progress_window.close()
+                    messagebox.showerror("错误", f"批量复制失败: {str(ex)}")
+            import threading
+            t = threading.Thread(target=worker, daemon=True)
+            t.start()
+        except Exception as e:
+            messagebox.showerror("错误", f"批量复制失败: {str(e)}")
 
     def clean_actor_data(self):
         """清理演员信息 - 执行merge_duplicate_actors.py脚本"""
@@ -7634,8 +7801,7 @@ class MediaLibrary:
                     
                     # 刷新界面
                     self.root.after(0, self.load_videos)
-                    result_msg = f"视频标签分析完成！\n\n成功处理: {processed} 个\n失败: {failed} 个"
-                    self.root.after(0, lambda: messagebox.showinfo("完成", result_msg))
+                    # 不弹出完成统计对话框，改为仅刷新界面
                     
                 except Exception as e:
                     error_msg = str(e)
@@ -7739,8 +7905,7 @@ class MediaLibrary:
                     # 刷新界面和显示结果（在GUI线程中安全执行）
                     if not progress_window.cancelled:
                         self.root.after(0, self.load_videos)
-                        result_msg = f"视频标签分析完成！\n\n成功处理: {processed} 个\n失败: {failed} 个"
-                        self.root.after(0, lambda: messagebox.showinfo("完成", result_msg))
+                        # 不弹出完成统计对话框
                     
                 except Exception as e:
                     # 关闭进度窗口并显示错误（在GUI线程中安全执行）
@@ -7800,8 +7965,14 @@ class MediaLibrary:
                         videos = []
                     
                     if not videos:
-                        self.root.after(0, lambda: messagebox.showinfo("信息", "没有找到需要处理的视频"))
-                        self.root.after(0, progress_window.close)
+                        # 先关闭进度窗口，再提示信息，避免模态冲突
+                        def close_then_info():
+                            try:
+                                progress_window.close()
+                                messagebox.showinfo("信息", "没有找到需要处理的视频")
+                            except Exception:
+                                pass
+                        self.root.after(0, close_then_info)
                         return
                     
                     # 更新进度窗口的总数
@@ -7867,8 +8038,7 @@ class MediaLibrary:
                     # 刷新界面
                     if not progress_window.is_cancelled():
                         self.root.after(0, self.load_videos)
-                        result_msg = f"批量视频标签分析完成！\n\n总数: {len(videos)}\n成功分析: {processed}\n更新标签: {updated}\n失败: {failed}"
-                        self.root.after(0, lambda: messagebox.showinfo("完成", result_msg))
+                        # 不弹出完成统计对话框
                     
                     # 关闭进度窗口
                     self.root.after(0, progress_window.close)
@@ -8182,28 +8352,28 @@ class MediaLibrary:
                             self.save_javdb_info_to_db(video_id, result_data)
                             self.root.after(0, lambda: status_label.config(text="获取完成"))
                             time.sleep(0.6)
-                            # 关闭进度窗口并显示结果
-                            self.root.after(0, progress_window.destroy)
-                            self.root.after(100, lambda: messagebox.showinfo(
-                                "完成",
-                                f"已成功获取并保存 {av_code} 的JAVDB信息\n\n标题: {result_data.get('title', 'N/A')}\n发行日期: {result_data.get('release_date', 'N/A')}\n评分: {result_data.get('rating', 'N/A')}"
-                            ))
+                            # 关闭进度窗口并刷新界面（不再弹出完成对话框）
+                            self.root.after(0, lambda: progress_window.grab_release())
+                            self.root.after(10, progress_window.destroy)
                             # 刷新
                             self.root.after(200, self.load_videos)
                             self.root.after(300, lambda: self.load_javdb_details(video_id))
                         except Exception as e:
                             err_msg = f"保存到数据库失败: {e}"
-                            self.root.after(0, progress_window.destroy)
+                            self.root.after(0, lambda: progress_window.grab_release())
+                            self.root.after(10, progress_window.destroy)
                             self.root.after(100, lambda msg=err_msg: messagebox.showerror("错误", msg))
                     else:
-                        self.root.after(0, progress_window.destroy)
+                        self.root.after(0, lambda: progress_window.grab_release())
+                        self.root.after(10, progress_window.destroy)
                         self.root.after(100, lambda: messagebox.showwarning(
                             "警告",
                             f"未能获取到番号 {av_code} 的信息\n\n可能原因：\n1. 网络连接问题\n2. 站点没有该番号\n3. 需要登录验证或被屏蔽"
                         ))
                 except Exception as e:
                     err_msg = f"获取JAVDB信息失败: {e}"
-                    self.root.after(0, progress_window.destroy)
+                    self.root.after(0, lambda: progress_window.grab_release())
+                    self.root.after(10, progress_window.destroy)
                     self.root.after(100, lambda msg=err_msg: messagebox.showerror("错误", msg))
 
             # 后台线程执行
@@ -9627,12 +9797,18 @@ class MediaLibrary:
             video_update_fields = []
             video_update_values = []
             
-            if nfo_data.get('title'):
+            # 确保标题包含番号
+            title_val = nfo_data.get('title') or nfo_data.get('javdb_title')
+            if title_val:
+                # 如果标题中不包含番号，则将番号添加到标题前面
+                code_val = nfo_data.get('code') or nfo_data.get('uniqueid')
+                if code_val and not title_val.startswith(code_val):
+                    # 检查标题是否已包含番号（不区分大小写）
+                    if code_val.lower() not in title_val.lower():
+                        title_val = f"{code_val} {title_val}"
+                
                 video_update_fields.append("title = COALESCE(NULLIF(?, ''), title)")
-                video_update_values.append(nfo_data['title'])
-            elif nfo_data.get('javdb_title'):
-                video_update_fields.append("title = COALESCE(NULLIF(?, ''), title)")
-                video_update_values.append(nfo_data['javdb_title'])
+                video_update_values.append(title_val)
             
             if nfo_data.get('plot'):
                 video_update_fields.append("description = COALESCE(NULLIF(?, ''), description)")
@@ -9803,15 +9979,30 @@ class MediaLibrary:
                 full_title = title_elem.text.strip()
                 nfo_data['title'] = full_title
                 
-                # 从标题中提取番号和JAVDB标题
-                # 第一个空格前面作为番号，后面作为javdb标题
+                # javdb_title直接映射到title标签内容
+                nfo_data['javdb_title'] = full_title
+                
+                # 从标题中提取番号
+                # 第一个空格前面作为番号
                 if ' ' in full_title:
                     parts = full_title.split(' ', 1)
                     nfo_data['code'] = parts[0]  # 番号
-                    nfo_data['javdb_title'] = parts[1]  # JAVDB标题
                 else:
                     nfo_data['code'] = full_title
-                    nfo_data['javdb_title'] = full_title
+                
+                # 增强番号提取：检查番号格式是否符合常见模式
+                code_val = nfo_data['code']
+                # 如果番号不包含连字符或不符合常见格式，尝试从标题的其他位置提取
+                if '-' not in code_val and not any(prefix in code_val.upper() for prefix in ['FC2', '1PONDO', 'CARIB', '10MUSUME']):
+                    # 使用正则表达式在标题中查找可能的番号
+                    import re
+                    # 匹配常见番号格式：字母-数字，如ABC-123
+                    pattern = r'\b([A-Za-z]{2,})-?(\d{3,})\b'
+                    matches = re.findall(pattern, full_title)
+                    if matches:
+                        # 使用第一个匹配作为番号
+                        letters, numbers = matches[0]
+                        nfo_data['code'] = f"{letters}-{numbers}"
             
             # 提取剧情描述
             plot_elem = root.find('plot')
