@@ -7733,10 +7733,10 @@ class MediaLibrary:
         """运行视频内容分析器处理指定文件"""
         try:
             # 导入视频内容分析器
-            import video_content_analyzer
+            from video_analyzer import VideoContentAnalyzer
             
             # 创建分析器实例，使用相同的数据库路径
-            analyzer = video_content_analyzer.VideoContentAnalyzer(db_path="media_library.db")
+            analyzer = VideoContentAnalyzer(db_path="media_library.db")
             
             def analyze_videos():
                 try:
@@ -7819,13 +7819,13 @@ class MediaLibrary:
         """运行视频内容分析器处理指定文件（带进度条）"""
         try:
             # 导入视频内容分析器
-            import video_content_analyzer
+            from video_analyzer import VideoContentAnalyzer
             
             # 创建进度窗口
             progress_window = ProgressWindow(self.root, "批量自动标签", len(video_paths))
             
             # 创建分析器实例，使用相同的数据库路径
-            analyzer = video_content_analyzer.VideoContentAnalyzer(db_path="media_library.db")
+            analyzer = VideoContentAnalyzer(db_path="media_library.db")
             
             def analyze_videos():
                 try:
@@ -7925,14 +7925,74 @@ class MediaLibrary:
         """运行视频内容分析器的指定模式"""
         try:
             # 导入视频内容分析器
-            import video_content_analyzer
+            from video_analyzer import VideoContentAnalyzer
             
             # 创建分析器实例，使用相同的数据库路径
-            analyzer = video_content_analyzer.VideoContentAnalyzer(db_path="media_library.db")
+            analyzer = VideoContentAnalyzer(db_path="media_library.db")
+            
+            # 文件夹筛选条件
+            selected_folder = None
+            
+            # 如果是全量更新，允许选择文件夹
+            if mode == "full_update":
+                try:
+                    # 查询所有在线文件夹
+                    self.cursor.execute("SELECT DISTINCT folder_path FROM folders WHERE is_active = 1")
+                    folders = [r[0] for r in self.cursor.fetchall() if os.path.exists(r[0])]
+                    
+                    if folders:
+                        # 创建选择对话框
+                        dialog = tk.Toplevel(self.root)
+                        dialog.title("选择更新范围")
+                        dialog.geometry("500x400")
+                        dialog.transient(self.root)
+                        dialog.grab_set()
+                        
+                        tk.Label(dialog, text="请选择要更新标签的媒体库：\n(基于GLM模型分析，耗时较长)", font=("Arial", 12)).pack(pady=10)
+                        
+                        # 变量存储选择结果
+                        selection = {"folder": None, "cancelled": True}
+                        
+                        listbox = tk.Listbox(dialog, selectmode=tk.SINGLE, font=("Arial", 11))
+                        listbox.pack(fill=tk.BOTH, expand=True, padx=20, pady=5)
+                        
+                        listbox.insert(tk.END, "🔄 所有媒体库 (全部更新)")
+                        for f in folders:
+                            listbox.insert(tk.END, f"📁 {f}")
+                            
+                        listbox.select_set(0)
+                        
+                        def on_confirm():
+                            idx = listbox.curselection()
+                            if idx:
+                                index = idx[0]
+                                if index > 0: # 0 is "All"
+                                    selection["folder"] = folders[index-1]
+                                selection["cancelled"] = False
+                            dialog.destroy()
+                            
+                        def on_cancel():
+                            dialog.destroy()
+                            
+                        btn_frame = tk.Frame(dialog)
+                        btn_frame.pack(pady=15)
+                        tk.Button(btn_frame, text="开始分析", command=on_confirm, width=10, default=tk.ACTIVE).pack(side=tk.LEFT, padx=10)
+                        tk.Button(btn_frame, text="取消", command=on_cancel, width=10).pack(side=tk.LEFT, padx=10)
+                        
+                        self.root.wait_window(dialog)
+                        
+                        if selection["cancelled"]:
+                            return
+                            
+                        selected_folder = selection["folder"]
+                except Exception as e:
+                    print(f"选择文件夹时出错: {e}")
             
             # 创建进度窗口
             if mode == "full_update":
                 title = "批量更新所有标签"
+                if selected_folder:
+                    title += f" ({os.path.basename(selected_folder)})"
             elif mode == "no_tags_update":
                 title = "批量更新无标签文件"
             else:
@@ -7948,8 +8008,14 @@ class MediaLibrary:
             def analyze_videos():
                 try:
                     if mode == "full_update":
-                        # 获取所有视频
-                        self.cursor.execute("SELECT id, file_path, title, tags FROM videos")
+                        # 构建查询
+                        query = "SELECT id, file_path, title, tags FROM videos"
+                        params = []
+                        if selected_folder:
+                            query += " WHERE file_path LIKE ? || '%'"
+                            params.append(selected_folder)
+                            
+                        self.cursor.execute(query, params)
                         all_videos = self.cursor.fetchall()
                         # 过滤出文件存在的视频
                         videos = [(vid, path, title, tags) for vid, path, title, tags in all_videos 
