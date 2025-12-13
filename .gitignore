@@ -98,3 +98,7 @@ db_backups/
 
 requirements/
 requirement/
+.obs/
+**/.*
+!/.gitignore
+!/.gitattributes
