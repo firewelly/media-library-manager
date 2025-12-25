@@ -11,10 +11,23 @@ import sqlite3
 import os
 import shutil
 from datetime import datetime
+import time
+import sys
 
 def init_empty_database():
     """初始化空的媒体库数据库"""
     db_path = os.path.join(os.path.dirname(__file__), 'media_library.db')
+    print("警告：此操作将初始化数据库并创建一个全新的空库")
+    print(f"目标路径：{db_path}")
+    if os.path.exists(db_path):
+        st = os.stat(db_path)
+        print(f"当前数据库大小：{st.st_size} 字节，最近修改时间：{time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(st.st_mtime))}")
+    print("系统将自动备份旧数据库，然后重建空数据库")
+    for i in range(1, 4):
+        ans = input(f"请进行第{i}次确认（输入大写 YES 继续，其他任意内容取消）：").strip()
+        if ans != "YES":
+            print("已取消初始化操作")
+            return
     
     # 如果数据库已存在，先备份
     if os.path.exists(db_path):
@@ -92,4 +105,11 @@ def init_empty_database():
     print("\n现在可以运行 media_library.py 开始使用媒体库！")
 
 if __name__ == "__main__":
+    print("媒体库数据库初始化向导")
+    print("请仔细阅读：此操作将重建空数据库，并自动备份旧数据库")
+    for i in range(1, 4):
+        ans = input(f"第{i}次最终确认（输入大写 YES 继续，其他内容取消）：").strip()
+        if ans != "YES":
+            print("已取消初始化操作")
+            sys.exit(0)
     init_empty_database()

@@ -7,7 +7,7 @@ SOCKS5_PROXY_PORT = 1080
 
 # JavDB 域名设置（按是否使用代理选择不同域名）
 JAVDB_PROXY_DOMAIN = "javdb.com"           # 使用代理时的主域名
-JAVDB_DIRECT_DOMAIN = "javdb562.com"       # 不使用代理时的镜像域名（可按需修改）
+JAVDB_DIRECT_DOMAIN = "javdb564.com"       # 不使用代理时的镜像域名（可按需修改）
 
 # 历史或备用镜像域名（不使用代理时常变化，统一在此维护）
 JAVDB_ALTERNATE_DIRECT_DOMAINS = [
@@ -15,6 +15,7 @@ JAVDB_ALTERNATE_DIRECT_DOMAINS = [
     "javdb562.com",
     "www.javdb561.com",
     "www.javdb562.com",
+    "www.javdb564.com",
 ]
 
 def get_javdb_base_url(use_proxy: bool) -> str:
