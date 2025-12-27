@@ -1882,6 +1882,7 @@ class SearchWidget(QWidget):
         online_layout = QVBoxLayout()
 
         self.online_only_check = QCheckBox("仅显示在线")
+        self.online_only_check.setChecked(True)  # 默认勾选
         self.online_only_check.stateChanged.connect(self.trigger_online_only_changed)
         online_layout.addWidget(self.online_only_check)
 
@@ -4684,6 +4685,7 @@ class ActorDetailWindow(QDialog):
         # 基本信息字段
         fields = [
             ("name", "姓名"),
+            ("name_en", "英文名"),
             ("name_traditional", "繁体名"),
             ("name_common", "常用名"),
             ("aliases", "别名"),
@@ -4789,17 +4791,23 @@ class ActorDetailWindow(QDialog):
         # 加载演员信息
         if self.actor_info:
             # 映射字段到显示值
+            # 0: id, 1: name, 2: name_en, 3: profile_url, 4: avatar_url, 5: local_avatar_path
+            # 6: birth_date, 7: debut_date, 8: height, 9: measurements, 10: description
+            # 11: created_at, 12: updated_at, 13: name_traditional, 14: name_common, 15: aliases
+            # 16: avatar_data, 17: movie_count, 18: last_crawled_at
+            
             field_mapping = {
                 'name': self.actor_info[1] or "未知",
-                'name_traditional': self.actor_info[13] or "",
-                'name_common': self.actor_info[14] or "",
-                'aliases': self.actor_info[15] or "",
+                'name_en': self.actor_info[2] or "",
+                'name_traditional': self.actor_info[13] if len(self.actor_info) > 13 else "",
+                'name_common': self.actor_info[14] if len(self.actor_info) > 14 else "",
+                'aliases': self.actor_info[15] if len(self.actor_info) > 15 else "",
                 'movie_count': f"{len(self.actor_movies)} 部",
-                'birth_date': self.actor_info[10] or "",
-                'debut_date': self.actor_info[11] or "",
-                'height': self.actor_info[12] or "",
-                'measurements': self.actor_info[13] or "",
-                'description': self.actor_info[9] or ""
+                'birth_date': self.actor_info[6] or "",
+                'debut_date': self.actor_info[7] or "",
+                'height': self.actor_info[8] or "",
+                'measurements': self.actor_info[9] or "",
+                'description': self.actor_info[10] or ""
             }
 
             for field_key, value in field_mapping.items():
@@ -4936,6 +4944,8 @@ class ActorDetailWindow(QDialog):
             self.accept()
             # 在主窗口中选择并显示该视频
             self.parent_window.select_video_by_id(video_id)
+            # 自动播放
+            self.parent_window.play_video()
 
     def refresh_actor_info(self):
         """刷新演员信息"""
