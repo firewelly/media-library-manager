@@ -825,6 +825,12 @@ class JavdbActorRepair:
             return None
 
     def process(self, limit: int = None, dry_run: bool = True, select_not_crawled: bool = False, min_actor_id: int = None):
+        """
+        核心修复流程
+        【区别】分阶段处理：
+        1. 规范化替代域名 (javdbNNN -> javdb.com)
+        2. 搜索并修复无效/缺失的 profile_url (repair_all 脚本跳过此步骤)
+        """
         # 记录干跑模式，用于缩短等待与跳过动作
         self.dry_run_mode = bool(dry_run)
         conn = sqlite3.connect(self.db_path)

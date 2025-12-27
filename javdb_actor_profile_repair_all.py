@@ -3,6 +3,19 @@
 """
 JavDB演员档案全量重新爬取脚本
 
+【与 javdb_actor_profile_repair.py 的区别】
+1. 目标不同：
+   - 本脚本 (repair_all) 针对 **已有 JavDB 链接** 的演员进行全量信息刷新（更新头像、生日、身高、作品数等）。
+   - 原脚本 (repair) 针对 **无链接/非 JavDB 链接/空头像** 的演员进行修复和补全，以及合并重复记录。
+
+2. 选人逻辑不同：
+   - 本脚本：SELECT ... WHERE profile_url LIKE '%javdb%' (选取已链接的演员)
+   - 原脚本：SELECT ... WHERE profile_url IS NULL OR NOT LIKE '%javdb%' (选取未链接的演员)
+
+3. 功能侧重：
+   - 本脚本：侧重于字段的详细解析（如生日、身高、罩杯、作品数）和数据的强制更新。
+   - 原脚本：侧重于链接的发现（搜索）、域名的规范化、头像的补全以及重复数据的合并。
+
 功能：
 - 重新爬取所有已有JavDB链接的演员信息
 - 清理之前爬取错误或者有更新的信息
@@ -397,6 +410,7 @@ class JavdbActorRepair:
             info = {'profile_url': self._normalize_url(actor_url)}
 
             # 解析主名称（常见于 actor-section-name 或 title）
+            # 【区别】本脚本包含更详细的字段解析逻辑 (生日、身高、罩杯、作品数)
             main_text = ''
             try:
                 name_el = self.driver.find_element(By.CSS_SELECTOR, '.actor-section-name, .actor-info .title, .actor-box .title, h1.title, h2.title')
@@ -595,7 +609,10 @@ class JavdbActorRepair:
         return None
 
     def get_actors_with_javdb_links(self, limit: int = None, min_actor_id: int = None):
-        """获取所有有JavDB链接的演员 - 这是本脚本的核心修改"""
+        """
+        获取所有有JavDB链接的演员 - 这是本脚本的核心修改
+        【区别】这里选取的是 LIKE '%javdb%' (已有链接)，而 repair 脚本选取的是 NOT LIKE (无链接)
+        """
         conn = sqlite3.connect(self.db_path)
         conn.row_factory = sqlite3.Row
         cur = conn.cursor()

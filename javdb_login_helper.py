@@ -20,9 +20,13 @@ from selenium.webdriver.edge.options import Options
 from selenium.common.exceptions import TimeoutException
 
 # 配置信息
-SOCKS5_PROXY_HOST = '127.0.0.1'
-SOCKS5_PROXY_PORT = '1080'
-BASE_URL = 'https://javdb.com'
+try:
+    from config import SOCKS5_PROXY_HOST, SOCKS5_PROXY_PORT, BASE_URL
+except ImportError:
+    SOCKS5_PROXY_HOST = '127.0.0.1'
+    SOCKS5_PROXY_PORT = 1080
+    BASE_URL = 'https://javdb.com'
+
 LOGIN_URL = f'{BASE_URL}/login'
 MIN_DELAY = 1
 MAX_DELAY = 3

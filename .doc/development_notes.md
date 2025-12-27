@@ -2,6 +2,39 @@
 
 ## 📝 开发历程
 
+### 2025年12月 - PySide6 版本功能补全与重构 (v2.0)
+
+#### 背景
+`media_library_pyside.py` 是基于 PySide6 的现代化重写版本，但长期以来缺失了 Tkinter 版本中的许多高级功能（批量操作、维护工具等），且核心逻辑与 GUI 耦合严重，导致代码膨胀和维护困难。
+
+#### 目标
+1.  **功能对齐**: 补全 PySide6 版本缺失的所有核心功能。
+2.  **架构解耦**: 将业务逻辑抽离到独立的 `utils` 模块。
+3.  **体验优化**: 使用后台线程处理耗时任务，避免 UI 卡顿。
+
+#### 实施步骤
+
+1.  **Utils 模块设计**:
+    *   `batch_ops.py`: 封装批量 MD5、NFO/JavDB 导入、文件移动等逻辑。
+    *   `maintenance.py`: 封装去重、星级同步、数据清理等维护逻辑。
+    *   `thumbnails.py`: 独立的缩略图生成器。
+    *   **Wrapper 模式**: 为解决 `media_library.py` 与新模块间的循环引用，创建了 `code_extractor.py` 和 `javsp_integration.py` 的 wrapper。
+
+2.  **GUI 集成**:
+    *   重写 `show_context_menu`，支持多选和动态菜单。
+    *   使用 `GenericWorker` 模式统一处理异步任务。
+    *   实现 `FileMoveDialog`，移植了旧版的文件移动管理器 UI。
+
+3.  **遇到的挑战**:
+    *   **循环导入**: `media_library.py` 依赖根目录的许多脚本，而这些脚本又可能依赖 `media_library.py` 的某些常量。解决方案是尽量减少在 `utils` 中直接引用主程序，而是传入 `DatabaseManager` 或 `cursor`。
+    *   **线程安全**: SQLite 在多线程环境下需要小心处理连接。我们在 `BatchOperationManager` 中使用了传入的 `db_manager`，确保在 worker 线程中正确使用数据库连接（或者在主线程提交，视具体实现而定，v2.0 中采用了 worker 内部处理逻辑）。
+    *   **代码复用**: 旧版 Tkinter 代码大量使用了 `self` 引用，移植时需要仔细剥离 UI 依赖。
+
+#### 成果
+*   PySide6 版本现在是一个功能完备的替代品。
+*   代码结构更加清晰，`utils` 模块可被其他脚本复用。
+*   新增了详细的单元测试 `tests/test_pyside_utils.py`。
+
 ### 2024年 - JAVDB标题映射问题
 
 #### 问题发现

@@ -32,7 +32,25 @@
 - `get_video_media_info(path) -> (duration, resolution)` 媒体信息占位实现。
 
 ## thumbnails
-- `generate_thumbnail(path, timepoint=None)` 缩略图占位实现。
+- `ThumbnailGenerator.get_ffmpeg_command() -> Optional[str]` 获取 FFmpeg 路径。
+- `ThumbnailGenerator.detect_gpu_acceleration() -> Optional[str]` 检测 GPU 加速 (videotoolbox/d3d11va)。
+- `ThumbnailGenerator.generate_thumbnail(video_path, output_path, seek_time="00:00:10") -> bool` 生成缩略图。
+
+## batch_ops (New in v2.0)
+`BatchOperationManager` 类提供批量操作接口：
+- `batch_calculate_md5(video_ids, progress_callback, cancel_check) -> Dict` 批量计算 MD5。
+- `batch_import_nfo(video_ids, filter_no_actors, ...) -> Dict` 批量导入 NFO。
+- `batch_import_javdb(video_ids, filter_no_title, ...) -> Dict` 批量获取 JavDB 信息。
+- `batch_clean_filenames(video_ids, ...) -> Dict` 批量清理文件名。
+- `batch_move_files(video_ids, target_dir, ...) -> Dict` 批量移动文件。
+- `batch_generate_thumbnails(video_ids, force, ...) -> Dict` 批量生成缩略图。
+
+## maintenance (New in v2.0)
+`MaintenanceManager` 类提供系统维护功能：
+- `find_duplicates(criteria='md5') -> List[Dict]` 查找重复文件。
+- `clean_actor_data() -> Dict` 清理无效演员数据。
+- `sync_stars_to_filename(video_ids, ...) -> Dict` 同步星级到文件名 (添加 ! 前缀)。
+- `scan_for_file_move(source_dir, ...) -> List[Dict]` 扫描目录用于文件移动管理器。
 
 ## jav
 - `extract_code(filename) -> Optional[str]` 番号提取（优先 `code_extractor`）。
