@@ -2,6 +2,37 @@
 
 一个功能强大的跨平台视频媒体库管理软件，支持本地和NAS存储的视频文件智能管理。具备MD5去重、智能更新、演员信息管理、批量操作等高级功能。
 
+## 📂 核心组件说明
+
+本系统包含多个专门的工具脚本，分别负责爬虫、维护、更新等不同任务。以下是根目录下主要脚本的功能说明：
+
+### 🖥️ 主程序
+- **`media_library.py`**: **[经典版]** 基于 Tkinter 的媒体库管理主程序。
+- **`media_library_pyside.py`**: **[推荐]** 基于 PySide6 的现代化图形界面版本，功能已完全对齐经典版，并增强了批量操作和视觉体验。
+- **`start_media_library.sh`**: macOS/Linux 系统的快捷启动脚本，会自动检查环境依赖并启动 PySide6 版本。
+
+### 🕷️ 数据爬虫与登录
+- **`javdb_login_helper.py`**: **[基础组件]** JAVDB 登录助手。使用独立的浏览器用户数据目录（`~/.javdb_scraper/user_data` 或本地 `.edge_driver_user_data`）来持久化登录状态，只需登录一次即可供所有爬虫脚本使用。
+- **`javdb_crawler.py`**: 批量爬虫工具，支持自动遍历页面抓取视频信息。
+- **`javdb_crawler_single.py`**: 单视频抓取工具，用于精确获取指定番号的信息。
+- **`javdb_actor_all.py`**: 演员作品全量爬虫，支持抓取指定演员的所有作品、磁力链接，并支持断点续传。
+- **`actor_crawler_with_db.py`**: 演员资料爬虫，抓取演员头像及详细资料并存入数据库。
+- **`javbus_crawler_single.py`**: JavBus 源的抓取工具，作为数据补充。
+
+### 📦 媒体库维护与更新
+- **`smart_video_updater.py`**: **[核心维护]** 智能更新工具。支持 NAS 路径映射，可利用预计算的 MD5 CSV 文件加速大型媒体库的导入和更新。
+- **`fast_smart_media_updater.py`**: 快速扫描工具。针对特定文件夹进行增量更新，高效处理文件的移动和删除。
+- **`unified_video_updater.py`**: 元数据同步工具。根据 MD5 或文件名匹配，批量更新视频的标签、描述等信息。
+- **`import_videos_from_md5.py`**: 批量导入工具。基于 MD5 列表快速导入视频，支持过滤特定文件。
+- **`resumable_smart_importer.py`**: 支持断点续传的智能导入器，适合超大规模文件库。
+
+### 🛠️ 辅助工具
+- **`video_integrity_checker.py`**: 坏档检测工具。批量检查视频文件是否完整、能否正常播放（基于 OpenCV）。
+- **`update_msedge_driver.py`**: 驱动更新工具。自动检测系统 Edge 浏览器版本并下载对应的 WebDriver，解决爬虫驱动不兼容问题。
+- **`init_database.py`**: 数据库初始化脚本，用于首次运行时创建必要的数据库表结构。
+
+---
+
 ## 📺 JAVDB信息更新工具
 
 `javdb_information_updater.py`是一个专门用于从JAVDB网站获取和更新JAV视频信息的工具。这个工具可以帮助您自动获取视频的详细信息，包括演员、标签、发布日期、时长、评分等。
@@ -177,21 +208,22 @@ python init_database.py
 
 4. **启动应用**
 ```bash
-# 方法1: 直接运行
-python media_library.py
+# 方法1: 直接运行 (PySide6 GUI)
+python media_library_pyside.py
 
-# 方法2: 使用启动脚本
+# 方法2: 使用启动脚本 (MacOS/Linux)
 ./start_media_library.sh
 ```
 
 ### 主要依赖
-- `tkinter` - GUI界面（Python内置）
+- `PySide6` - 现代GUI界面
 - `sqlite3` - 数据库（Python内置）
 - `Pillow` - 图像处理
 - `opencv-python` - 视频处理
 - `python-magic` - 文件类型检测
 - `requests` - 网络请求
 - `beautifulsoup4` - HTML解析
+- `selenium` - 网页自动化
 
 ## 📖 使用指南
 
@@ -319,27 +351,19 @@ python media_library.py
 ### 项目结构
 ```
 media-library/
-├── media_library.py      # 主程序文件
-├── init_database.py      # 数据库初始化
-├── gui_config.json       # 界面配置
-├── requirements.txt      # 依赖包列表
-├── start_media_library.sh # 启动脚本
-└── README.md            # 项目说明
+├── media_library.py         # Tkinter 主程序
+├── media_library_pyside.py  # PySide6 主程序
+├── utils/                   # 核心工具库
+│   ├── batch_ops.py         # 批量操作管理器
+│   ├── maintenance.py       # 维护工具管理器
+│   ├── thumbnails.py        # 缩略图生成器
+│   └── ...
+├── init_database.py         # 数据库初始化
+├── gui_config.json          # 界面配置
+├── requirements.txt         # 依赖包列表
+├── start_media_library.sh   # 启动脚本
+└── README.md                # 项目说明
 ```
-
-### 主要类和方法
-- `MediaLibrary` - 主应用类
-- `create_gui()` - 创建用户界面
-- `scan_folder()` - 扫描文件夹
-- `load_videos()` - 加载视频列表
-- `set_stars()` - 设置星级评分
-- `save_video_info()` - 保存视频信息
-- `comprehensive_media_update()` - 智能媒体库更新
-- `smart_remove_duplicates()` - 智能去重
-- `batch_calculate_md5()` - 批量计算MD5
-- `calculate_file_hash()` - 计算文件哈希
-- `clean_actor_data()` - 清理演员信息
-- `_execute_actor_cleaning()` - 执行演员清理脚本
 
 ## 📄 许可证
 
@@ -357,9 +381,9 @@ media-library/
 - 💡 直观显示文件状态
 - ⚡ 优化用户体验
 
-## 🌐 新增功能
+## 🌐 新增功能详解
 
-### JavDB演员视频爬虫
+### JavDB演员视频爬虫 (javdb_actor_all.py)
 
 #### 功能特点
 - 🌟 **优秀架构**：代码结构清晰，错误处理完善
@@ -383,13 +407,7 @@ python javdb_actor_all.py https://javdb.com/actors/yERr 美乃雀 3
 - **JSON格式**：包含完整的爬取信息和统计数据
 - **磁力链接**：按优先级排序（-UC > -C > 其他）
 
-#### 特色功能
-- **自动登录**：检测登录页面，支持手工登录，按回车继续
-- **智能分页**：自动处理分页，最多可设置10页
-- **演员信息提取**：自动从页面提取演员名字
-- **多重检测**：智能检测登录页面，确保爬取成功
-
-### 基于MD5的媒体库批量导入工具
+### 基于MD5的媒体库批量导入工具 (import_videos_from_md5.py)
 
 #### 功能特点
 - ⚡ **简洁高效**：代码结构清晰，性能优秀
@@ -408,74 +426,3 @@ python javdb_actor_all.py https://javdb.com/actors/yERr 美乃雀 3
 # 运行导入脚本
 python import_videos_from_md5.py
 ```
-
-#### 输出示例
-```
-基于MD5的视频导入工具
-将跳过回收站、隐藏文件、小于10MB的文件
-
-确认要执行导入操作吗？(y/N): y
-连接数据库成功: /path/to/media_library.db
-开始导入MD5文件...
-CSV文件: /path/to/video_md5.csv
-目标路径: /Volumes/Video/
---------------------------------------------------
-已处理 1000 个文件，有效 850 个，新增 300 个
-
-============================================================
-导入完成统计
-============================================================
-总扫描: 26,746
-有效文件: 15,234
-新增文件: 8,567
-已存在: 6,667
-跳过文件: 11,512
-错误文件: 0
-
-导入成功完成！
-```
-
-## 📁 文件结构更新
-
-### 新增文件
-- `javdb_actor_all.py` - JavDB演员视频爬虫（优秀版本）
-- `import_videos_from_md5.py` - 基于MD5的批量导入脚本（简洁版本）
-- `video_md5.csv` - 手工计算的MD5文件列表
-
-### 工具文件
-- `update_msedge_driver.py` - Edge驱动更新工具
-- `smart_video_updater.py` - 智能视频更新器
-- `resumable_smart_importer.py` - 可恢复的智能导入器
-
-## 🧹 维护与清理
-
-- 已移除无用测试文件与目录（例如 `test/` 及顶层 `test_*.py`、示例测试脚本），避免影响仓库体积与扫描效率。
-- 已删除无用的工作区配置文件（`media.code-workspace`、`media2.code-workspace`）。
-- 使用与调试建议：请直接运行 `media_library.py` 或使用 `./start_media_library.sh` 启动应用。如需批量或专项处理，使用仓库内对应脚本（例如 `smart_video_updater.py`、`unified_video_updater.py` 等）。
-
-### v3.2.0
-- 🎭 新增演员信息清理功能
-- 🔗 智能合并重复演员记录
-- 📚 完善文档和使用指南
-
-### v3.1.0
-- 🎯 修复双击播放功能
-- 🖱️ 增强右键菜单
-- 🎬 优化播放功能
-
-### v3.0.0
-- ✨ 智能媒体库更新
-- 🔐 MD5哈希计算
-- 🔍 智能去重功能
-- 📊 批量操作进度显示
-
-### v2.0.0
-- ✨ 表头点击排序
-- ⭐ 星级评分优化
-- 📊 视频详情面板增强
-
-### v1.0.0
-- 🎉 初始版本发布
-- 📁 基础文件管理
-- ⭐ 星级评分系统
-- 🖼️ 缩略图生成
