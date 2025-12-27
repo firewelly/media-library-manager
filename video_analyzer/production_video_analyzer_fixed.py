@@ -42,8 +42,8 @@ class ProductionVideoAnalyzer:
         self.error_count = 0
         
         # 设置默认API密钥
-        default_api_key = "REDACTED_API_KEY"
-        self.api_key = api_key or os.environ.get('SILICONFLOW_API_KEY') or default_api_key
+        default_api_key = None
+        self.api_key = api_key or os.environ.get('SILICONFLOW_API_KEY')
         
         # 初始化分析器
         self.analyzer = VideoAnalyzerSiliconFlowGLMWithTags(verbose=verbose, api_key=self.api_key)

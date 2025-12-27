@@ -4,7 +4,7 @@
 JavDB演员档案修复脚本
 
 功能：
-- 规范化 actors.profile_url 的域名为 https://javdb.com（例如 javdb562.com 改写为 javdb.com）
+- 规范化 actors.profile_url 的域名为 https://javdb.com（例如 javdb565.com 改写为 javdb.com）
 - 对非 JavDB 链接或空 profile_url 的记录，按演员名搜索 JavDB 并更新 profile_url 与基础信息
  - 对已是 JavDB 链接但头像二进制为空的记录，基于 profile_url 重新爬取头像（更新 avatar_url 并下载 avatar_data）
 - 合并重复演员记录（按 profile_url）：
@@ -111,7 +111,7 @@ class JavdbActorRepair:
         try:
             self.base_url = _cfg.get_javdb_base_url(use_proxy)
         except Exception:
-            self.base_url = ('https://javdb.com' if use_proxy else 'https://javdb562.com')
+            self.base_url = ('https://javdb.com' if use_proxy else 'https://javdb565.com')
         # URL规范化方法（浏览用）：将任意 javdb 域统一改为当前 base_url 域
         def _norm(url):
             try:
@@ -1359,7 +1359,7 @@ def main():
     parser.add_argument("--select-not-crawled", action="store_true", help="阶段C改为按 last_crawled_at 为空选择需要抓取的演员，而非按缺头像")
     parser.add_argument("--no-proxy", action="store_true", help="禁用SOCKS5代理，直接无代理访问")
     parser.add_argument("--prefer-insert", action="store_true", help="当搜索到新profile且库中不存在时插入新记录（默认更新现有记录）")
-    parser.add_argument("--test-actor-url", dest="test_actor_url", default="", help="测试单演员个人页链接（如 https://javdb562.com/actors/V2z2），解析并打印头像/名称后退出")
+    parser.add_argument("--test-actor-url", dest="test_actor_url", default="", help="测试单演员个人页链接（如 https://javdb565.com/actors/V2z2），解析并打印头像/名称后退出")
     parser.add_argument("--test-isolate-profile", action="store_true", help="单链测试时使用临时独立的Edge用户数据目录（避免并发占用）")
     parser.add_argument("--disable-cover-fallback", action="store_true", help="禁用封面头像兜底逻辑（默认启用）")
     args = parser.parse_args()
