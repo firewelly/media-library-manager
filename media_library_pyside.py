@@ -37,6 +37,12 @@ import importlib
 import media_library as ml_module
 from gui_adapter import setup_full_integration
 from utils import jav as utils_jav
+from utils import javsp_migration, javsp_copy
+from utils.batch_ops import BatchOperationManager
+from utils.maintenance import MaintenanceManager
+from utils.thumbnails import ThumbnailGenerator
+from utils.database import DatabaseManager
+from utils.file_utils import FileUtils
 
 # 导入非GUI类和函数
 class LogLevel:
@@ -230,6 +236,11 @@ class MediaLibraryCore:
         db_exists = os.path.exists(self.db_path)
         self.conn = sqlite3.connect(self.db_path, check_same_thread=False)
         self.cursor = self.conn.cursor()
+        
+        # 初始化新的管理器
+        self.db_manager = DatabaseManager(self.db_path)
+        self.batch_manager = BatchOperationManager(self.db_manager)
+        self.maintenance_manager = MaintenanceManager(self.db_manager)
 
         if db_exists:
             print("已连接到现有数据库（不进行建表或迁移）")
@@ -779,6 +790,198 @@ class MediaLibraryCore:
             print(f"删除视频记录失败: {str(e)}")
             return False
 
+    def move_file(self, video_id, old_file_path, target_folder):
+        """移动文件到指定文件夹"""
+        import shutil
+        
+        # 构建新文件路径
+        file_name = os.path.basename(old_file_path)
+        new_file_path = os.path.join(target_folder, file_name)
+        
+        # 检查目标文件是否已存在
+        if os.path.exists(new_file_path):
+             # 抛出异常，由UI层处理
+             raise FileExistsError(f"目标位置已存在同名文件: {new_file_path}")
+        
+        # 移动文件
+        shutil.move(old_file_path, new_file_path)
+        
+        # 更新数据库记录
+        self.cursor.execute(
+            "UPDATE videos SET file_path = ?, source_folder = ? WHERE id = ?",
+            (new_file_path, target_folder, video_id)
+        )
+        self.conn.commit()
+        return new_file_path
+
+    def get_online_folders(self):
+        """获取在线文件夹列表"""
+        self.cursor.execute("SELECT folder_path FROM folders WHERE is_active = 1")
+        folders = [row[0] for row in self.cursor.fetchall()]
+        
+        online_folders = []
+        for folder in folders:
+            if os.path.exists(folder):
+                online_folders.append(folder)
+                
+        return online_folders
+
+    def process_single_filename(self, filename):
+        """处理单个文件名，基于cfn4.py的逻辑"""
+        import re
+        
+        # 获取文件名和后缀
+        filename_no_ext, ext = os.path.splitext(filename)
+        
+        # 去除开头和结尾的句号
+        filename_no_ext = filename_no_ext.strip('.')
+        
+        # 将文件名转换为大写
+        filename_upper = filename_no_ext.upper()
+        
+        # 将后缀转换为小写
+        ext_lower = ext.lower()
+        
+        # 构建新的文件名
+        new_filename = filename_upper + ext_lower
+        
+        # 去掉空格
+        if " " in new_filename:
+            new_filename = new_filename.replace(" ", "")
+        
+        # 去掉常见垃圾字符
+        garbage_patterns = [
+            "CHINESEHOMEMADEVIDEO", "_CHINESE_HOMEMADE_VIDEO",
+            "HHD800.COM@", "WOXAV.COM@",
+            r"\[.*?\]", r"\(.*?\)", r"\{.*?\}",  # 去掉括号内容
+            r"【.*?】",  # 去掉中文括号内容
+        ]
+        
+        for pattern in garbage_patterns:
+            if pattern.startswith("r"):
+                # 处理正则转义
+                p = pattern[1:] if pattern.startswith("r") else pattern
+                new_filename = re.sub(p, "", new_filename)
+            else:
+                new_filename = new_filename.replace(pattern, "")
+        
+        # 去掉多余的下划线和连字符
+        new_filename = re.sub(r"_+", "_", new_filename)
+        new_filename = re.sub(r"-+", "-", new_filename)
+        
+        return new_filename
+
+    def handle_filename_conflict(self, file_path):
+        """处理文件名冲突"""
+        base, ext = os.path.splitext(file_path)
+        counter = 1
+        new_path = f"{base}_{counter}{ext}"
+        while os.path.exists(new_path):
+            counter += 1
+            new_path = f"{base}_{counter}{ext}"
+        return new_path
+
+    def clean_filename_for_video(self, video_id):
+        """为单个视频清理文件名"""
+        try:
+            # 获取视频信息
+            self.cursor.execute("SELECT file_path, title FROM videos WHERE id = ?", (video_id,))
+            result = self.cursor.fetchone()
+            if not result:
+                return False, "未找到视频记录"
+            
+            old_file_path, old_title = result
+            if not os.path.exists(old_file_path):
+                return False, f"文件不存在: {old_file_path}"
+            
+            # 获取文件目录和原始文件名
+            file_dir = os.path.dirname(old_file_path)
+            old_filename = os.path.basename(old_file_path)
+            
+            # 应用清理逻辑
+            new_filename = self.process_single_filename(old_filename)
+            
+            # 如果文件名没有变化
+            if new_filename == old_filename:
+                return True, "文件名无需清理"
+            
+            # 构建新的完整路径
+            new_file_path = os.path.join(file_dir, new_filename)
+            
+            # 处理文件名冲突
+            if os.path.exists(new_file_path):
+                new_file_path = self.handle_filename_conflict(new_file_path)
+                new_filename = os.path.basename(new_file_path)
+            
+            # 重命名文件
+            os.rename(old_file_path, new_file_path)
+            
+            # 更新标题 (如果标题为空，则不更新)
+            new_title = old_title
+            if old_title:
+                cleaned_title_with_ext = self.process_single_filename(old_title + ".tmp")
+                new_title = os.path.splitext(cleaned_title_with_ext)[0]
+            
+            # 更新数据库
+            self.cursor.execute("UPDATE videos SET file_path = ?, title = ? WHERE id = ?", (new_file_path, new_title, video_id))
+            self.conn.commit()
+            
+            return True, f"重命名成功: {new_filename}"
+            
+        except Exception as e:
+            return False, f"清理失败: {str(e)}"
+
+    def auto_tag_video(self, video_path):
+        """自动为视频生成标签"""
+        try:
+            # 延迟导入
+            from video_analyzer import VideoContentAnalyzer
+            analyzer = VideoContentAnalyzer(db_path=self.db_path)
+            
+            if not os.path.exists(video_path):
+                return False, "文件不存在"
+                
+            result = analyzer.analyze_video_content(video_path, min_frames=100, max_interval=10, max_frames=300)
+            
+            if 'error' in result:
+                return False, result['error']
+                
+            tags = result.get('generated_tags', [])
+            if not tags:
+                return True, "未生成标签"
+            
+            # 获取现有标签
+            self.cursor.execute("SELECT id, tags FROM videos WHERE file_path = ?", (video_path,))
+            res = self.cursor.fetchone()
+            if not res:
+                return False, "数据库记录未找到"
+                
+            video_id, existing_tags = res
+            
+            existing_set = set([t.strip() for t in (existing_tags or "").split(",") if t.strip()])
+            new_set = set(tags)
+            all_tags = existing_set.union(new_set)
+            
+            final_tags = ", ".join(sorted(all_tags))
+            
+            self.cursor.execute("UPDATE videos SET tags = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?", (final_tags, video_id))
+            self.conn.commit()
+            
+            return True, f"已添加标签: {', '.join(tags)}"
+            
+        except ImportError:
+            return False, "未找到 video_analyzer 模块"
+        except Exception as e:
+            return False, str(e)
+
+    def migrate_javsp_file(self, video_id, old_file_path, target_library_path):
+        """迁移JavSP文件到媒体库"""
+        return javsp_migration.migrate_single(self.cursor, self.conn, old_file_path, video_id, target_library_path)
+
+    def copy_javsp_file(self, video_id, old_file_path, target_library_path):
+        """复制JavSP文件到媒体库"""
+        return javsp_copy.copy_single(self.cursor, self.conn, old_file_path, video_id, target_library_path)
+
     def search_videos(self, title="", tags="", actors="", stars=0, folder_path=""):
         """搜索视频的简化接口"""
         conditions = []
@@ -1043,6 +1246,121 @@ class MediaLibraryCore:
 
         except Exception as e:
             return False, f"生成缩略图异常: {str(e)}"
+
+class GenericWorker(QThread):
+    """通用的后台工作线程"""
+    progress_signal = Signal(str, int, dict)  # message, progress, data
+    finished_signal = Signal(dict)  # result
+    error_signal = Signal(str)  # error message
+
+    def __init__(self, task_func, **kwargs):
+        super().__init__()
+        self.task_func = task_func
+        self.kwargs = kwargs
+        self._cancelled = False
+
+    def run(self):
+        try:
+            # 进度回调
+            def progress_callback(message, progress=0, data=None):
+                if self._cancelled:
+                    return
+                self.progress_signal.emit(message, progress, data or {})
+
+            # 取消检查回调
+            def cancel_check():
+                return self._cancelled
+
+            # 执行任务
+            result = self.task_func(progress_callback=progress_callback, cancel_check=cancel_check, **self.kwargs)
+
+            if not self._cancelled:
+                self.finished_signal.emit(result or {})
+
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            self.error_signal.emit(str(e))
+
+    def cancel(self):
+        self._cancelled = True
+
+class TaskProgressDialog(QDialog):
+    """通用任务进度对话框"""
+    cancel_signal = Signal()
+
+    def __init__(self, title, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle(title)
+        self.setFixedSize(600, 450)
+        self.setModal(True)
+        self.setup_ui()
+        self.cancelled = False
+
+    def setup_ui(self):
+        layout = QVBoxLayout()
+
+        # 标题
+        self.title_label = QLabel("正在处理...")
+        self.title_label.setStyleSheet("font-size: 14px; font-weight: bold; margin: 10px;")
+        layout.addWidget(self.title_label)
+
+        # 进度条
+        self.progress_bar = QProgressBar()
+        self.progress_bar.setRange(0, 100)
+        self.progress_bar.setValue(0)
+        layout.addWidget(self.progress_bar)
+
+        # 状态标签
+        self.status_label = QLabel("准备开始...")
+        layout.addWidget(self.status_label)
+
+        # 统计信息区域 (可选)
+        self.stats_label = QLabel("")
+        self.stats_label.setStyleSheet("font-family: monospace; background-color: #f5f5f5; padding: 5px; border: 1px solid #ddd;")
+        self.stats_label.hide() # 默认隐藏
+        layout.addWidget(self.stats_label)
+
+        # 日志区域
+        log_group = QGroupBox("处理日志")
+        log_layout = QVBoxLayout()
+        self.log_text = QTextEdit()
+        self.log_text.setReadOnly(True)
+        log_layout.addWidget(self.log_text)
+        log_group.setLayout(log_layout)
+        layout.addWidget(log_group)
+
+        # 按钮
+        button_layout = QHBoxLayout()
+        self.cancel_button = QPushButton("取消")
+        self.cancel_button.clicked.connect(self.cancel)
+        button_layout.addWidget(self.cancel_button)
+        button_layout.addStretch()
+        layout.addLayout(button_layout)
+
+        self.setLayout(layout)
+
+    def update_progress(self, value, message=""):
+        self.progress_bar.setValue(value)
+        if message:
+            self.status_label.setText(message)
+
+    def set_stats(self, text):
+        self.stats_label.setText(text)
+        self.stats_label.show()
+
+    def append_log(self, message):
+        from datetime import datetime
+        timestamp = datetime.now().strftime('%H:%M:%S')
+        self.log_text.append(f"[{timestamp}] {message}")
+        scrollbar = self.log_text.verticalScrollBar()
+        scrollbar.setValue(scrollbar.maximum())
+
+    def cancel(self):
+        self.cancelled = True
+        self.cancel_button.setText("正在取消...")
+        self.cancel_button.setEnabled(False)
+        self.cancel_signal.emit()
 
 class ScanProgressDialog(QDialog):
     """扫描进度对话框"""
@@ -1933,13 +2251,64 @@ class MainWindow(QMainWindow):
         self.status_bar.showMessage("导入视频文件", 2000)
 
     def on_batch_import_nfo_for_no_actors(self):
-        self.status_bar.showMessage("批量导入NFO信息", 2000)
+        reply = QMessageBox.question(self, "批量导入NFO", "是否为所有缺失演员信息的视频导入NFO？",
+                                   QMessageBox.Yes | QMessageBox.No, QMessageBox.Yes)
+        if reply == QMessageBox.Yes:
+            videos = self.core.db_manager.get_videos()
+            video_ids = [v['id'] for v in videos]
+            self.run_batch_task("批量导入NFO", self.core.batch_manager.batch_import_nfo, 
+                              video_ids=video_ids, filter_no_actors=True)
 
     def on_batch_import_javdb_for_no_title(self):
-        self.status_bar.showMessage("批量导入JAVDB信息", 2000)
+        reply = QMessageBox.question(self, "批量导入JavDB", "是否为标题可能是番号的视频获取JavDB信息？",
+                                   QMessageBox.Yes | QMessageBox.No, QMessageBox.Yes)
+        if reply == QMessageBox.Yes:
+            videos = self.core.db_manager.get_videos()
+            video_ids = [v['id'] for v in videos]
+            self.run_batch_task("批量导入JavDB", self.core.batch_manager.batch_import_javdb,
+                              video_ids=video_ids, filter_no_title=True)
 
     def on_remove_duplicates(self):
-        self.status_bar.showMessage("去重复", 2000)
+        duplicates = self.core.maintenance_manager.find_duplicates()
+        if not duplicates:
+             QMessageBox.information(self, "去重", "未发现重复文件")
+             return
+        msg = f"发现 {len(duplicates)} 组重复文件。\n请使用'工具 -> 智能去重'功能进行自动处理，或手动检查。"
+        QMessageBox.information(self, "去重", msg)
+
+    def run_batch_task(self, title, task_func, **kwargs):
+        """运行批量任务的通用方法"""
+        progress = TaskProgressDialog(title, self)
+        progress.show()
+        
+        worker = GenericWorker(task_func, **kwargs)
+        worker.progress_signal.connect(progress.update_progress)
+        progress.cancel_signal.connect(worker.cancel)
+        
+        def on_finished(result):
+            progress.close()
+            # 尝试获取各种可能的成功计数键
+            success = result.get('success', result.get('renamed', result.get('moved', result.get('generated', 0))))
+            failed = result.get('failed', 0)
+            skipped = result.get('skipped', 0)
+            
+            msg = f"操作完成\n成功: {success}"
+            if failed > 0:
+                msg += f"\n失败: {failed}"
+            if skipped > 0:
+                msg += f"\n跳过: {skipped}"
+                
+            if result.get('error'):
+                msg += f"\n错误: {result.get('error')}"
+                
+            QMessageBox.information(self, "完成", msg)
+            self.refresh_data()
+            
+        worker.finished_signal.connect(on_finished)
+        worker.error_signal.connect(lambda err: (progress.close(), QMessageBox.critical(self, "错误", str(err))))
+        
+        worker.start()
+        self._current_worker = worker
 
     def on_manage_tags(self):
         self.status_bar.showMessage("标签管理", 2000)
@@ -1948,16 +2317,33 @@ class MainWindow(QMainWindow):
         self.status_bar.showMessage("文件夹管理", 2000)
 
     def on_sync_stars_to_filename(self):
-        self.status_bar.showMessage("同步打分到文件", 2000)
+        reply = QMessageBox.question(self, "同步星级", "是否将星级同步到文件名（添加!前缀）？\n这会重命名文件。",
+                                   QMessageBox.Yes | QMessageBox.No, QMessageBox.Yes)
+        if reply == QMessageBox.Yes:
+            self.run_batch_task("同步星级", self.core.maintenance_manager.sync_stars_to_filename)
 
     def on_batch_calculate_md5(self):
-        self.status_bar.showMessage("批量计算MD5", 2000)
+        reply = QMessageBox.question(self, "批量计算MD5", "确定要重新计算所有视频的MD5吗？\n这可能需要很长时间。",
+                                   QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
+        if reply == QMessageBox.Yes:
+            videos = self.core.db_manager.get_videos()
+            video_ids = [v['id'] for v in videos]
+            self.run_batch_task("批量计算MD5", self.core.batch_manager.batch_calculate_md5, video_ids=video_ids)
 
     def on_smart_remove_duplicates(self):
-        self.status_bar.showMessage("智能去重", 2000)
+        reply = QMessageBox.question(self, "智能去重", "是否自动删除重复文件（保留文件较大的版本）？\n删除操作不可恢复！",
+                                   QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
+        if reply == QMessageBox.Yes:
+            # 包装一下以适配 progress_callback 签名
+            def task(progress_callback=None, cancel_check=None):
+                if progress_callback: progress_callback("正在分析重复文件...", 0)
+                return self.core.maintenance_manager.duplicate_manager.remove_duplicates_by_criteria(keep_criteria='largest')
+            
+            self.run_batch_task("智能去重", task)
 
     def on_file_move_manager(self):
-        self.status_bar.showMessage("文件移动管理", 2000)
+        dialog = FileMoveDialog(self)
+        dialog.exec()
 
     def create_menus(self):
         """创建菜单栏"""
@@ -2584,42 +2970,115 @@ class MainWindow(QMainWindow):
 
         # 创建右键菜单
         context_menu = QMenu(self)
+        
+        count = len(selected_items)
+        
+        if count == 1:
+            # 单文件操作
+            video_id = item.data(0, Qt.UserRole)
+            
+            play_action = context_menu.addAction("播放视频")
+            play_action.triggered.connect(self.play_video)
 
-        # 添加菜单项
-        play_action = context_menu.addAction("播放视频")
-        play_action.triggered.connect(self.play_video)
+            context_menu.addSeparator()
 
-        context_menu.addSeparator()
+            show_in_finder_action = context_menu.addAction("在文件管理器中显示")
+            show_in_finder_action.triggered.connect(self.show_in_file_manager)
 
-        show_in_finder_action = context_menu.addAction("在文件管理器中显示")
-        show_in_finder_action.triggered.connect(self.show_in_file_manager)
+            copy_path_action = context_menu.addAction("复制文件路径")
+            copy_path_action.triggered.connect(self.copy_file_path)
 
-        copy_path_action = context_menu.addAction("复制文件路径")
-        copy_path_action.triggered.connect(self.copy_file_path)
+            context_menu.addSeparator()
+            
+            # 移动到...
+            move_menu = context_menu.addMenu("移动到...")
+            online_folders = self.core.get_online_folders()
+            if online_folders:
+                for folder in online_folders:
+                    folder_name = os.path.basename(folder)
+                    action = move_menu.addAction(folder_name)
+                    # 使用闭包捕获变量
+                    action.triggered.connect(lambda checked, vid=video_id, f=folder: self.move_file_single(vid, f))
+            else:
+                move_menu.addAction("无在线文件夹").setEnabled(False)
+            
+            clean_filename_action = context_menu.addAction("清理文件名")
+            clean_filename_action.triggered.connect(lambda: self.clean_filename_single(video_id))
+            
+            auto_tag_action = context_menu.addAction("自动标签")
+            auto_tag_action.triggered.connect(lambda: self.auto_tag_single(video_id))
+            
+            context_menu.addSeparator()
 
-        context_menu.addSeparator()
+            # 快速设置星级子菜单
+            star_menu = context_menu.addMenu("快速设置星级")
+            clear_star_action = star_menu.addAction("清除星级")
+            clear_star_action.triggered.connect(lambda: self.quick_set_star(0))
+            for i in range(1, 6):
+                star_action = star_menu.addAction(f"{i}星")
+                star_action.triggered.connect(lambda checked, star=i: self.quick_set_star(star))
 
-        # 快速设置星级子菜单
-        star_menu = context_menu.addMenu("快速设置星级")
+            context_menu.addSeparator()
 
-        # 清除星级
-        clear_star_action = star_menu.addAction("清除星级")
-        clear_star_action.triggered.connect(lambda: self.quick_set_star(0))
+            refresh_thumbnail_action = context_menu.addAction("刷新封面")
+            refresh_thumbnail_action.triggered.connect(self.refresh_thumbnail)
 
-        # 1-5星选项
-        for i in range(1, 6):
-            star_action = star_menu.addAction(f"{i}星")
-            star_action.triggered.connect(lambda checked, star=i: self.quick_set_star(star))
+            context_menu.addSeparator()
 
-        context_menu.addSeparator()
-
-        refresh_thumbnail_action = context_menu.addAction("刷新封面")
-        refresh_thumbnail_action.triggered.connect(self.refresh_thumbnail)
-
-        context_menu.addSeparator()
-
-        delete_action = context_menu.addAction("删除视频")
-        delete_action.triggered.connect(self.delete_video)
+            delete_action = context_menu.addAction("删除视频")
+            delete_action.triggered.connect(self.delete_video)
+            
+        else:
+            # 批量操作
+            context_menu.addAction(f"已选择 {count} 个文件").setEnabled(False)
+            context_menu.addSeparator()
+            
+            # 批量设置星级
+            star_menu = context_menu.addMenu("批量设置星级")
+            clear_star_action = star_menu.addAction("清除星级")
+            clear_star_action.triggered.connect(lambda: self.quick_set_star(0))
+            for i in range(1, 6):
+                star_action = star_menu.addAction(f"{i}星")
+                star_action.triggered.connect(lambda checked, star=i: self.quick_set_star(star))
+            
+            context_menu.addSeparator()
+            
+            # 批量移动
+            move_menu = context_menu.addMenu(f"批量移动到... ({count})")
+            online_folders = self.core.get_online_folders()
+            if online_folders:
+                for folder in online_folders:
+                    folder_name = os.path.basename(folder)
+                    action = move_menu.addAction(folder_name)
+                    action.triggered.connect(lambda checked, f=folder: self.batch_move_files_to_folder(f))
+            else:
+                move_menu.addAction("无在线文件夹").setEnabled(False)
+                
+            # 批量迁移JavSP
+            migrate_menu = context_menu.addMenu(f"批量迁移JavSP到... ({count})")
+            if online_folders:
+                for folder in online_folders:
+                    folder_name = os.path.basename(folder)
+                    action = migrate_menu.addAction(folder_name)
+                    action.triggered.connect(lambda checked, f=folder: self.batch_migrate_javsp_selected(f, False))
+            else:
+                migrate_menu.addAction("无在线文件夹").setEnabled(False)
+            
+            # 批量复制JavSP
+            copy_menu = context_menu.addMenu(f"批量复制JavSP到... ({count})")
+            if online_folders:
+                for folder in online_folders:
+                    folder_name = os.path.basename(folder)
+                    action = copy_menu.addAction(folder_name)
+                    action.triggered.connect(lambda checked, f=folder: self.batch_migrate_javsp_selected(f, True))
+            else:
+                copy_menu.addAction("无在线文件夹").setEnabled(False)
+                
+            batch_clean_action = context_menu.addAction(f"批量清理文件名 ({count})")
+            batch_clean_action.triggered.connect(self.batch_clean_filename_selected)
+            
+            batch_delete_action = context_menu.addAction(f"批量删除文件 ({count})")
+            batch_delete_action.triggered.connect(self.batch_delete_selected)
 
         # 显示菜单
         context_menu.exec_(self.video_list.mapToGlobal(position))
@@ -3338,13 +3797,37 @@ class MainWindow(QMainWindow):
 
     def on_remove_duplicates(self):
         """去重复"""
-        try:
-            if hasattr(self, 'original_remove_duplicates'):
-                self.original_remove_duplicates()
-            else:
-                self.show_info("提示", "去重复功能正在集成中...")
-        except Exception as e:
-            self.show_error("错误", f"去重复失败: {e}")
+        progress = TaskProgressDialog("查找重复文件", self)
+        progress.show()
+        
+        def scan_task(progress_callback, cancel_check):
+            progress_callback("正在查询数据库...", 10)
+            self.core.cursor.execute("""
+                SELECT md5_hash, COUNT(*) as count
+                FROM videos 
+                WHERE md5_hash IS NOT NULL AND md5_hash != ''
+                GROUP BY md5_hash 
+                HAVING count > 1
+            """)
+            dups = self.core.cursor.fetchall()
+            
+            if not dups:
+                return "没有发现重复文件"
+            
+            total_files = sum(c for _, c in dups)
+            groups = len(dups)
+            
+            return f"发现 {groups} 组重复文件，共 {total_files} 个文件。\n目前PySide版本暂未实现完整的去重界面，建议使用旧版处理复杂去重。"
+            
+        worker = GenericWorker(scan_task)
+        
+        def on_finished(result):
+            progress.close()
+            self.show_info("查找结果", result)
+            
+        worker.finished_signal.connect(on_finished)
+        worker.start()
+        self._current_worker = worker
 
     def on_batch_import_nfo_for_no_actors(self):
         """批量导入NFO信息（为没有演员信息的视频）"""
@@ -3431,10 +3914,139 @@ class MainWindow(QMainWindow):
     def on_batch_calculate_md5(self):
         """批量计算MD5"""
         try:
-            if hasattr(self, 'original_batch_calculate_md5'):
-                self.original_batch_calculate_md5()
+            # 询问用户选择
+            reply = QMessageBox.question(
+                self, "批量计算MD5",
+                "选择计算范围：\n\n"
+                "Yes - 仅计算缺失MD5的文件\n"
+                "No - 重新计算所有文件的MD5\n"
+                "Cancel - 取消操作",
+                QMessageBox.Yes | QMessageBox.No | QMessageBox.Cancel
+            )
+
+            if reply == QMessageBox.Cancel:
+                return
+
+            operation_type = ""
+            if reply == QMessageBox.Yes:
+                self.core.cursor.execute("SELECT id, file_path, file_name FROM videos WHERE md5_hash IS NULL OR md5_hash = ''")
+                operation_type = "计算缺失MD5"
             else:
-                self.show_info("提示", "批量计算MD5功能正在集成中...")
+                self.core.cursor.execute("SELECT id, file_path, file_name FROM videos")
+                operation_type = "重新计算所有MD5"
+
+            videos = self.core.cursor.fetchall()
+
+            if not videos:
+                self.show_info("信息", "没有需要计算MD5的文件")
+                return
+
+            # 创建进度对话框
+            progress_dialog = TaskProgressDialog(f"批量计算MD5 - {operation_type}", self)
+            progress_dialog.show()
+
+            # 定义任务函数
+            def calculate_task(progress_callback, cancel_check, videos=videos):
+                processed_count = 0
+                calculated_count = 0
+                failed_count = 0
+                skipped_count = 0
+                total_files = len(videos)
+
+                import time
+                start_time = time.time()
+                batch_size = 20
+
+                progress_callback(f"开始{operation_type}，共 {total_files} 个文件")
+
+                for i, (video_id, file_path, file_name) in enumerate(videos):
+                    if cancel_check():
+                        progress_callback("用户取消操作")
+                        break
+
+                    processed_count += 1
+
+                    try:
+                        if not os.path.exists(file_path):
+                            progress_callback(f"文件不存在，跳过: {file_name}")
+                            skipped_count += 1
+                            continue
+
+                        # 计算MD5
+                        md5_hash = self.core.calculate_md5_hash(file_path)
+                        if md5_hash:
+                            self.core.cursor.execute(
+                                "UPDATE videos SET md5_hash = ? WHERE id = ?",
+                                (md5_hash, video_id)
+                            )
+                            calculated_count += 1
+                        else:
+                            progress_callback(f"MD5计算失败: {file_name}")
+                            failed_count += 1
+
+                    except Exception as e:
+                        progress_callback(f"处理文件失败: {file_name} - {str(e)}")
+                        failed_count += 1
+
+                    # 更新进度
+                    if processed_count % 5 == 0 or processed_count == total_files:
+                        progress = int((processed_count / total_files) * 100)
+                        message = f"正在处理: {file_name} ({processed_count}/{total_files})"
+                        progress_callback(message, progress)
+
+                    # 批量提交
+                    if processed_count % batch_size == 0:
+                        self.core.conn.commit()
+
+                self.core.conn.commit()
+                
+                total_time = time.time() - start_time
+                return {
+                    "processed": processed_count,
+                    "calculated": calculated_count,
+                    "failed": failed_count,
+                    "skipped": skipped_count,
+                    "total_time": total_time,
+                    "cancelled": cancel_check()
+                }
+
+            # 创建并启动线程
+            worker = GenericWorker(calculate_task, videos=videos)
+
+            def on_progress(message, progress, data):
+                progress_dialog.update_progress(progress, message)
+                progress_dialog.append_log(message)
+
+            def on_finished(result):
+                progress_dialog.close()
+                if result.get("cancelled"):
+                    self.show_info("提示", "操作已取消")
+                    return
+                
+                msg = (
+                    f"{operation_type}完成！\n\n"
+                    f"总处理: {result['processed']}\n"
+                    f"成功: {result['calculated']}\n"
+                    f"失败: {result['failed']}\n"
+                    f"跳过: {result['skipped']}\n"
+                    f"耗时: {result['total_time']:.1f}秒"
+                )
+                self.show_info("完成", msg)
+                # 异步刷新列表
+                QTimer.singleShot(100, self.load_videos)
+
+            def on_error(error_msg):
+                progress_dialog.close()
+                self.show_error("错误", f"执行失败: {error_msg}")
+
+            worker.progress_signal.connect(on_progress)
+            worker.finished_signal.connect(on_finished)
+            worker.error_signal.connect(on_error)
+            progress_dialog.cancel_signal.connect(worker.cancel)
+
+            worker.start()
+            self._current_worker = worker
+
         except Exception as e:
             self.show_error("错误", f"批量计算MD5失败: {e}")
 
@@ -3457,6 +4069,283 @@ class MainWindow(QMainWindow):
                 self.show_info("提示", "文件移动管理功能正在集成中...")
         except Exception as e:
             self.show_error("错误", f"文件移动管理失败: {e}")
+
+    def batch_process_task(self, title, items, task_func, success_msg="操作完成"):
+        """通用的批量处理任务启动器"""
+        if not items:
+            return
+
+        progress_dialog = TaskProgressDialog(title, self)
+        progress_dialog.show()
+
+        def task_wrapper(progress_callback, cancel_check, items=items):
+            success_count = 0
+            failed_items = []
+            total = len(items)
+
+            for i, item in enumerate(items):
+                if cancel_check():
+                    break
+
+                try:
+                    msg = task_func(item, progress_callback)
+                    success_count += 1
+                except Exception as e:
+                    failed_items.append(f"{item.get('name', 'Unknown')}: {str(e)}")
+                
+                progress = int(((i + 1) / total) * 100)
+                progress_callback(f"正在处理: {item.get('name', '')}", progress)
+
+            return {
+                "success": success_count,
+                "failed": failed_items,
+                "cancelled": cancel_check()
+            }
+
+        worker = GenericWorker(task_wrapper)
+
+        def on_finished(result):
+            progress_dialog.close()
+            if result.get("cancelled"):
+                self.show_info("提示", "操作已取消")
+                return
+            
+            msg = f"{success_msg}\n成功: {result['success']}"
+            if result['failed']:
+                msg += f"\n失败: {len(result['failed'])}\n" + "\n".join(result['failed'][:5])
+            
+            self.show_info("完成", msg)
+            self.load_videos()
+
+        worker.progress_signal.connect(lambda m, p, d: progress_dialog.update_progress(p, m))
+        worker.finished_signal.connect(on_finished)
+        worker.error_signal.connect(lambda e: (progress_dialog.close(), self.show_error("错误", e)))
+        progress_dialog.cancel_signal.connect(worker.cancel)
+        
+        worker.start()
+        self._current_worker = worker
+
+    def batch_move_files_to_folder(self, target_folder):
+        """批量移动文件"""
+        selected_items = self.video_list.selectedItems()
+        if not selected_items:
+            return
+
+        videos = []
+        for item in selected_items:
+            vid = item.data(0, Qt.UserRole)
+            # Need to get path and name
+            self.core.cursor.execute("SELECT file_path, file_name FROM videos WHERE id = ?", (vid,))
+            res = self.core.cursor.fetchone()
+            if res:
+                videos.append({'id': vid, 'path': res[0], 'name': res[1]})
+
+        if not videos:
+            return
+
+        target_name = os.path.basename(target_folder)
+        if not self.ask_yes_no("确认移动", f"确定要将 {len(videos)} 个文件移动到 {target_name} 吗？"):
+            return
+
+        def move_func(item, cb):
+            import shutil
+            file_name = os.path.basename(item['path'])
+            new_path = os.path.join(target_folder, file_name)
+            
+            if os.path.exists(new_path):
+                 new_path = self.core.handle_filename_conflict(new_path)
+            
+            shutil.move(item['path'], new_path)
+            self.core.cursor.execute("UPDATE videos SET file_path = ?, source_folder = ? WHERE id = ?", (new_path, target_folder, item['id']))
+            self.core.conn.commit()
+            return "Moved"
+
+        self.batch_process_task("批量移动文件", videos, move_func)
+
+    def batch_clean_filename_selected(self):
+        """批量清理文件名"""
+        selected_items = self.video_list.selectedItems()
+        videos = []
+        for item in selected_items:
+            vid = item.data(0, Qt.UserRole)
+            self.core.cursor.execute("SELECT file_path, file_name FROM videos WHERE id = ?", (vid,))
+            res = self.core.cursor.fetchone()
+            if res:
+                videos.append({'id': vid, 'path': res[0], 'name': res[1]})
+        
+        if not videos: return
+
+        if not self.ask_yes_no("确认清理", f"确定要清理 {len(videos)} 个文件的文件名吗？"):
+            return
+
+        def clean_func(item, cb):
+            success, msg = self.core.clean_filename_for_video(item['id'])
+            if not success:
+                raise Exception(msg)
+            return msg
+
+        self.batch_process_task("批量清理文件名", videos, clean_func)
+
+    def batch_delete_selected(self):
+        """批量删除"""
+        selected_items = self.video_list.selectedItems()
+        videos = []
+        for item in selected_items:
+            vid = item.data(0, Qt.UserRole)
+            self.core.cursor.execute("SELECT file_path, file_name FROM videos WHERE id = ?", (vid,))
+            res = self.core.cursor.fetchone()
+            if res:
+                videos.append({'id': vid, 'path': res[0], 'name': res[1]})
+        
+        if not videos: return
+
+        if not self.ask_yes_no("确认删除", f"确定要删除 {len(videos)} 个文件吗？\n此操作不可撤销！"):
+            return
+
+        def delete_func(item, cb):
+            if os.path.exists(item['path']):
+                os.remove(item['path'])
+            self.core.cursor.execute("DELETE FROM videos WHERE id = ?", (item['id'],))
+            self.core.conn.commit()
+            return "Deleted"
+
+        self.batch_process_task("批量删除文件", videos, delete_func)
+
+    def auto_tag_single(self, video_id):
+        """为单个视频自动打标签"""
+        self.core.cursor.execute("SELECT file_path FROM videos WHERE id = ?", (video_id,))
+        res = self.core.cursor.fetchone()
+        if not res: return
+        path = res[0]
+        
+        progress = TaskProgressDialog("自动标签", self)
+        progress.show()
+        progress.update_progress(10, "正在分析视频内容...")
+        
+        # 这是一个耗时操作，应该在线程中运行
+        def task_func(progress_callback, cancel_check, path=path):
+            progress_callback("开始分析...", 10)
+            success, msg = self.core.auto_tag_video(path)
+            return success, msg
+            
+        worker = GenericWorker(task_func)
+        
+        def on_finished(result):
+            progress.close()
+            success, msg = result
+            if success:
+                self.show_info("成功", msg)
+                # 如果当前显示的视频就是这个，刷新详情
+                if self.core.current_video and self.core.current_video[0] == video_id:
+                    self.load_video_detail(video_id)
+            else:
+                self.show_error("失败", msg)
+                
+        worker.finished_signal.connect(on_finished)
+        worker.start()
+        self._current_worker = worker
+
+    def batch_auto_tag_selected(self):
+        """批量自动标签"""
+        selected_items = self.video_list.selectedItems()
+        videos = []
+        for item in selected_items:
+            vid = item.data(0, Qt.UserRole)
+            self.core.cursor.execute("SELECT file_path, file_name FROM videos WHERE id = ?", (vid,))
+            res = self.core.cursor.fetchone()
+            if res:
+                videos.append({'id': vid, 'path': res[0], 'name': res[1]})
+        
+        if not videos: return
+        
+        if not self.ask_yes_no("确认自动标签", f"确定要为 {len(videos)} 个视频自动生成标签吗？\n这将分析视频内容，可能需要较长时间。"):
+            return
+            
+        def tag_func(item, cb):
+            success, msg = self.core.auto_tag_video(item['path'])
+            if not success:
+                raise Exception(msg)
+            return msg
+            
+        self.batch_process_task("批量自动标签", videos, tag_func)
+
+    def migrate_javsp_single(self, video_id, target_folder, is_copy=False):
+        """迁移/复制单个JavSP文件"""
+        self.core.cursor.execute("SELECT file_path FROM videos WHERE id = ?", (video_id,))
+        res = self.core.cursor.fetchone()
+        if not res: return
+        path = res[0]
+        
+        op_name = "复制" if is_copy else "迁移"
+        
+        try:
+            if is_copy:
+                result = self.core.copy_javsp_file(video_id, path, target_folder)
+            else:
+                result = self.core.migrate_javsp_file(video_id, path, target_folder)
+                
+            if result.get("ok"):
+                msg = "已合并到目标媒体库" if result.get("merged") else f"文件已{op_name}到: {result.get('final_path')}"
+                self.show_info("成功", msg)
+                self.load_videos()
+            else:
+                self.show_error("失败", f"{op_name}失败: {result.get('error')}")
+        except Exception as e:
+            self.show_error("错误", f"{op_name}异常: {e}")
+
+    def batch_migrate_javsp_selected(self, target_folder, is_copy=False):
+        """批量迁移/复制JavSP文件"""
+        selected_items = self.video_list.selectedItems()
+        videos = []
+        for item in selected_items:
+            vid = item.data(0, Qt.UserRole)
+            self.core.cursor.execute("SELECT file_path, file_name FROM videos WHERE id = ?", (vid,))
+            res = self.core.cursor.fetchone()
+            if res:
+                videos.append({'id': vid, 'path': res[0], 'name': res[1]})
+        
+        if not videos: return
+        
+        op_name = "复制" if is_copy else "迁移"
+        target_name = os.path.basename(target_folder)
+        
+        if not self.ask_yes_no(f"确认{op_name}", f"确定要将 {len(videos)} 个视频{op_name}到 {target_name} 吗？"):
+            return
+            
+        def task_func(item, cb):
+            if is_copy:
+                res = self.core.copy_javsp_file(item['id'], item['path'], target_folder)
+            else:
+                res = self.core.migrate_javsp_file(item['id'], item['path'], target_folder)
+                
+            if not res.get("ok"):
+                raise Exception(res.get("error"))
+            return "OK"
+            
+        self.batch_process_task(f"批量{op_name}JavSP", videos, task_func)
+
+    def clean_filename_single(self, video_id):
+        """清理单个文件名"""
+        success, msg = self.core.clean_filename_for_video(video_id)
+        if success:
+            self.show_info("成功", msg)
+            self.load_videos()
+        else:
+            self.show_error("失败", msg)
+
+    def move_file_single(self, video_id, target_folder):
+        """移动单个文件"""
+        try:
+            self.core.cursor.execute("SELECT file_path FROM videos WHERE id = ?", (video_id,))
+            res = self.core.cursor.fetchone()
+            if not res: return
+            old_path = res[0]
+            
+            self.core.move_file(video_id, old_path, target_folder)
+            self.show_info("成功", f"文件已移动到: {target_folder}")
+            self.load_videos()
+        except Exception as e:
+            self.show_error("错误", f"移动文件失败: {e}")
 
     def refresh_data(self):
         """刷新数据"""
