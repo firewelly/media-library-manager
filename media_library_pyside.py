@@ -154,22 +154,24 @@ class MediaLibraryCore:
 
         # 默认列配置
         self.default_columns = {
-            'title': {'width': 300, 'position': 0, 'text': '标题'},
-            'file_name': {'width': 200, 'position': 1, 'text': '文件名'},
+            'title': {'width': 400, 'position': 0, 'text': '标题'},
+            'actors': {'width': 150, 'position': 1, 'text': '演员'},
             'stars': {'width': 75, 'position': 2, 'text': '星级'},
             'tags': {'width': 120, 'position': 3, 'text': '标签'},
-            'file_size': {'width': 80, 'position': 4, 'text': '大小'},
-            'duration': {'width': 80, 'position': 5, 'text': '时长'},
-            'resolution': {'width': 100, 'position': 6, 'text': '分辨率'},
-            'year': {'width': 60, 'position': 7, 'text': '年份'},
-            'is_nas_online': {'width': 60, 'position': 8, 'text': '在线'},
-            'source_folder': {'width': 150, 'position': 9, 'text': '来源文件夹'},
-            'file_created_time': {'width': 120, 'position': 10, 'text': '文件创建时间'},
-            'created_at': {'width': 120, 'position': 11, 'text': '入库时间'},
-            'javdb_code': {'width': 100, 'position': 12, 'text': '番号'},
-            'javdb_title': {'width': 250, 'position': 13, 'text': 'JAVDB标题'},
-            'javdb_rating': {'width': 80, 'position': 14, 'text': 'JAVDB评分'},
-            'file_path': {'width': 400, 'position': 15, 'text': '文件路径'}
+            'size': {'width': 80, 'position': 4, 'text': '大小'},
+            'status': {'width': 60, 'position': 5, 'text': '状态'},
+            'device': {'width': 120, 'position': 6, 'text': '设备'},
+            'duration': {'width': 120, 'position': 7, 'text': '时长'},
+            'resolution': {'width': 150, 'position': 8, 'text': '分辨率'},
+            'file_created_time': {'width': 120, 'position': 9, 'text': '创建时间'},
+            'top_folder': {'width': 120, 'position': 10, 'text': '顶层文件夹'},
+            'full_path': {'width': 200, 'position': 11, 'text': '完整路径'},
+            'year': {'width': 60, 'position': 12, 'text': '年份'},
+            'javdb_code': {'width': 100, 'position': 13, 'text': '番号'},
+            'javdb_title': {'width': 300, 'position': 14, 'text': 'JAVDB标题'},
+            'release_date': {'width': 100, 'position': 15, 'text': '发行日期'},
+            'javdb_rating': {'width': 80, 'position': 16, 'text': 'JAVDB评分'},
+            'javdb_tags': {'width': 200, 'position': 17, 'text': 'JAVDB标签'}
         }
 
         # 初始化数据库连接
@@ -1701,6 +1703,46 @@ class SearchWidget(QWidget):
             if hasattr(self.parent_window, 'load_videos') and callable(self.parent_window.load_videos):
                 self.parent_window.load_videos()
 
+class JavInfoDialog(QDialog):
+    def __init__(self, parent):
+        super().__init__(parent)
+        self.setWindowTitle("JAV信息面板")
+        self.resize(480, 360)
+        layout = QVBoxLayout()
+        self.code_edit = QLineEdit()
+        self.code_edit.setPlaceholderText("输入番号，例如 ABP-123")
+        layout.addWidget(QLabel("番号"))
+        layout.addWidget(self.code_edit)
+        self.search_btn = QPushButton("搜索并保存")
+        layout.addWidget(self.search_btn)
+        self.result_text = QTextEdit()
+        self.result_text.setReadOnly(True)
+        layout.addWidget(QLabel("结果"))
+        layout.addWidget(self.result_text)
+        self.setLayout(layout)
+        self.search_btn.clicked.connect(self.on_search)
+
+    def on_search(self):
+        code = self.code_edit.text().strip()
+        if not code:
+            QMessageBox.warning(self, "提示", "请输入番号")
+            return
+        info = utils_jav.search_movie_info(code)
+        if not info:
+            QMessageBox.information(self, "提示", "未获取到信息")
+            return
+        # 展示
+        self.result_text.setPlainText(json.dumps(info, ensure_ascii=False, indent=2))
+        # 如果当前选中视频存在，则尝试保存
+        main = self.parent()
+        if hasattr(main, 'core') and main.core.current_video:
+            vid = main.core.current_video[0]
+            if utils_jav.save_movie_info_to_db(main.core.conn, vid, info):
+                QMessageBox.information(self, "成功", "已保存到数据库")
+                main.load_videos()
+            else:
+                QMessageBox.critical(self, "错误", "保存失败")
+
 class MainWindow(QMainWindow):
     """主窗口类"""
 
@@ -1916,46 +1958,6 @@ class MainWindow(QMainWindow):
 
     def on_file_move_manager(self):
         self.status_bar.showMessage("文件移动管理", 2000)
-
-class JavInfoDialog(QDialog):
-    def __init__(self, parent: QMainWindow):
-        super().__init__(parent)
-        self.setWindowTitle("JAV信息面板")
-        self.resize(480, 360)
-        layout = QVBoxLayout()
-        self.code_edit = QLineEdit()
-        self.code_edit.setPlaceholderText("输入番号，例如 ABP-123")
-        layout.addWidget(QLabel("番号"))
-        layout.addWidget(self.code_edit)
-        self.search_btn = QPushButton("搜索并保存")
-        layout.addWidget(self.search_btn)
-        self.result_text = QTextEdit()
-        self.result_text.setReadOnly(True)
-        layout.addWidget(QLabel("结果"))
-        layout.addWidget(self.result_text)
-        self.setLayout(layout)
-        self.search_btn.clicked.connect(self.on_search)
-
-    def on_search(self):
-        code = self.code_edit.text().strip()
-        if not code:
-            QMessageBox.warning(self, "提示", "请输入番号")
-            return
-        info = utils_jav.search_movie_info(code)
-        if not info:
-            QMessageBox.information(self, "提示", "未获取到信息")
-            return
-        # 展示
-        self.result_text.setPlainText(json.dumps(info, ensure_ascii=False, indent=2))
-        # 如果当前选中视频存在，则尝试保存
-        main: MainWindow = self.parent()
-        if hasattr(main, 'core') and main.core.current_video:
-            vid = main.core.current_video[0]
-            if utils_jav.save_movie_info_to_db(main.core.conn, vid, info):
-                QMessageBox.information(self, "成功", "已保存到数据库")
-                main.load_videos()
-            else:
-                QMessageBox.critical(self, "错误", "保存失败")
 
     def create_menus(self):
         """创建菜单栏"""
@@ -2268,44 +2270,124 @@ class JavInfoDialog(QDialog):
                 # 获取JAVDB标签
                 javdb_tags_display = self._get_javdb_tags(video_id)
 
+                # 合并标签显示：优先显示JAVDB标签，然后显示自动标签
+                combined_tags = []
+                if javdb_tags_display:
+                    combined_tags.append(javdb_tags_display)
+                if tags:
+                    combined_tags.append(tags)
+                tags_display = ", ".join(combined_tags)
+
+                # 格式化大小显示
+                size_display = self.format_file_size(file_size) if file_size else ""
+
+                # 格式化在线状态显示
+                is_online = self._is_video_online(video_id, source_folder, is_nas_online)
+                status_display = "在线" if is_online else "离线"
+
+                # 格式化年份显示 - 如果数据库中没有年份，尝试从文件名中提取
+                year_display = ""
+                if year:
+                    year_display = str(year)
+                else:
+                    year_display = self._extract_year_from_filename(file_name or title)
+
+                # 格式化文件创建时间显示
+                file_created_display = self._format_timestamp(file_created_time) if file_created_time else ""
+
+                # 格式化顶层文件夹和完整路径显示
+                top_folder_display = ""
+                full_path_display = ""
+                device_display = "Unknown"
+
+                if source_folder:
+                    # 找到对应的顶层文件夹
+                    if hasattr(self, 'folder_path_mapping'):
+                        for folder_name, folder_path in self.folder_path_mapping.items():
+                            if folder_path and source_folder.startswith(folder_path):
+                                top_folder_display = folder_name
+                                break
+
+                    if not top_folder_display and source_folder:
+                        path_parts = source_folder.strip('/').split('/')
+                        if len(path_parts) >= 3:
+                            top_folder_display = path_parts[-1] if len(path_parts) > 3 else path_parts[2]
+                        else:
+                            top_folder_display = os.path.basename(source_folder)
+
+                    full_path_display = source_folder
+
+                    # 获取设备名称显示
+                    self.core.cursor.execute("""
+                        SELECT folder_type, device_name FROM folders
+                        WHERE ? LIKE folder_path || '%'
+                        ORDER BY LENGTH(folder_path) DESC
+                        LIMIT 1
+                    """, (source_folder,))
+                    folder_info = self.core.cursor.fetchone()
+
+                    if folder_info:
+                        folder_type, device_name = folder_info
+
+                        if folder_type == "nas":
+                            if source_folder.startswith("smb://"):
+                                import re
+                                ip_match = re.search(r'@([0-9.]+)/', source_folder)
+                                if ip_match:
+                                    device_display = ip_match.group(1)
+                                else:
+                                    domain_match = re.search(r'smb://(?:[^@]+@)?([^/]+)/', source_folder)
+                                    if domain_match:
+                                        device_display = domain_match.group(1)
+                                    else:
+                                        device_display = "NAS"
+                            elif source_folder.startswith("/Volumes/"):
+                                volume_name = source_folder.split('/')[2] if len(source_folder.split('/')) > 2 else "NAS"
+                                device_display = volume_name
+                            else:
+                                device_display = "NAS"
+                        else:
+                            device_display = device_name if device_name and device_name != "Unknown" else "Unknown"
+
                 # 格式化显示值
                 for col in column_names:
                     value = ""
                     if col == 'title':
-                        value = title or file_name or ""
-                    elif col == 'file_name':
-                        value = file_name or ""
+                        value = javdb_title if javdb_title else (title or file_name or "")
+                    elif col == 'actors':
+                        value = actors_display
                     elif col == 'stars':
                         value = self.format_stars_display(stars) if stars else ""
                     elif col == 'tags':
-                        value = tags if tags else ""
-                    elif col == 'file_size':
-                        value = self.format_file_size(file_size) if file_size else ""
+                        value = tags_display if tags_display else ""
+                    elif col == 'size':
+                        value = size_display
+                    elif col == 'status':
+                        value = status_display
+                    elif col == 'device':
+                        value = device_display
                     elif col == 'duration':
                         value = self.format_duration(duration) if duration else ""
                     elif col == 'resolution':
                         value = resolution if resolution else ""
-                    elif col == 'year':
-                        if year:
-                            value = str(year)
-                        else:
-                            value = self._extract_year_from_filename(file_name or title)
-                    elif col == 'is_nas_online':
-                        value = "在线" if self._is_video_online(video_id, source_folder, is_nas_online) else "离线"
-                    elif col == 'source_folder':
-                        value = source_folder or ""
                     elif col == 'file_created_time':
-                        value = self._format_timestamp(file_created_time) if file_created_time else ""
-                    elif col == 'created_at':
-                        value = self._format_timestamp(created_at) if created_at else ""
+                        value = file_created_display
+                    elif col == 'top_folder':
+                        value = top_folder_display
+                    elif col == 'full_path':
+                        value = full_path_display
+                    elif col == 'year':
+                        value = year_display
                     elif col == 'javdb_code':
                         value = javdb_code or ""
                     elif col == 'javdb_title':
                         value = javdb_title or ""
+                    elif col == 'release_date':
+                        value = release_date or ""
                     elif col == 'javdb_rating':
                         value = str(javdb_rating) if javdb_rating else ""
-                    elif col == 'file_path':
-                        value = file_path or ""
+                    elif col == 'javdb_tags':
+                        value = javdb_tags_display
 
                     item_data.append(value)
 
@@ -2349,10 +2431,10 @@ class JavInfoDialog(QDialog):
         try:
             self.core.cursor.execute("""
                 SELECT GROUP_CONCAT(jt.tag_name, ', ')
-                FROM javdb_info jit
-                JOIN javdb_info_tags jitt ON jit.id = jitt.javdb_info_id
-                JOIN javdb_tags jt ON jitt.tag_id = jt.id
-                WHERE jit.video_id = ?
+                FROM javdb_info ji
+                JOIN javdb_info_tags jit ON ji.id = jit.javdb_info_id
+                JOIN javdb_tags jt ON jit.tag_id = jt.id
+                WHERE ji.video_id = ?
                 ORDER BY jt.tag_name
             """, (video_id,))
             result = self.core.cursor.fetchone()
