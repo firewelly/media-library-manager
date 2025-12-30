@@ -7,6 +7,7 @@ PySide6版本的媒体库管理器
 
 import sys
 import os
+import time
 import sqlite3
 import threading
 import json
@@ -43,6 +44,7 @@ from utils.maintenance import MaintenanceManager
 from utils.thumbnails import ThumbnailGenerator
 from utils.database import DatabaseManager
 from utils.file_utils import FileUtils
+from utils import video_rotate
 
 # 导入非GUI类和函数
 class LogLevel:
@@ -317,28 +319,38 @@ class MediaLibraryCore:
             self.gpu_acceleration = False
 
     def get_ffmpeg_command(self):
-        """获取可用的FFmpeg命令路径"""
+        """获取可用的FFmpeg命令路径，优先使用homebrew版本"""
+        # macOS下优先使用homebrew版本的ffmpeg
+        if platform.system() == 'Darwin':
+            # 优先检查homebrew路径
+            homebrew_ffmpeg = '/opt/homebrew/bin/ffmpeg'
+            if os.path.exists(homebrew_ffmpeg):
+                try:
+                    subprocess.run([homebrew_ffmpeg, "-version"], capture_output=True, check=True)
+                    return homebrew_ffmpeg
+                except (subprocess.CalledProcessError, FileNotFoundError):
+                    pass
+        
         # 首先尝试相对路径（用户通过homebrew安装的情况）
         try:
             subprocess.run(["ffmpeg", "-version"], capture_output=True, check=True)
             return "ffmpeg"
         except (subprocess.CalledProcessError, FileNotFoundError):
             pass
-
+            
         # 如果相对路径失败，尝试常见的绝对路径
         possible_paths = [
-            "/opt/homebrew/bin/ffmpeg",
             "/usr/local/bin/ffmpeg",
             "/usr/bin/ffmpeg"
         ]
-
+        
         for path in possible_paths:
             try:
                 subprocess.run([path, "-version"], capture_output=True, check=True)
                 return path
             except (subprocess.CalledProcessError, FileNotFoundError):
                 continue
-
+                
         return None
 
     def detect_gpu_acceleration(self):
@@ -804,12 +816,14 @@ class MediaLibraryCore:
              raise FileExistsError(f"目标位置已存在同名文件: {new_file_path}")
         
         # 移动文件
-        shutil.move(old_file_path, new_file_path)
+        success, final_path, error_msg = FileUtils.move_file_smart(old_file_path, new_file_path)
+        if not success:
+            raise OSError(error_msg)
         
         # 更新数据库记录
         self.cursor.execute(
             "UPDATE videos SET file_path = ?, source_folder = ? WHERE id = ?",
-            (new_file_path, target_folder, video_id)
+            (final_path, target_folder, video_id)
         )
         self.conn.commit()
         return new_file_path
@@ -974,13 +988,13 @@ class MediaLibraryCore:
         except Exception as e:
             return False, str(e)
 
-    def migrate_javsp_file(self, video_id, old_file_path, target_library_path):
+    def migrate_javsp_file(self, video_id, old_file_path, target_library_path, progress_callback=None):
         """迁移JavSP文件到媒体库"""
-        return javsp_migration.migrate_single(self.cursor, self.conn, old_file_path, video_id, target_library_path)
+        return javsp_migration.migrate_single(self.cursor, self.conn, old_file_path, video_id, target_library_path, progress_callback=progress_callback)
 
-    def copy_javsp_file(self, video_id, old_file_path, target_library_path):
+    def copy_javsp_file(self, video_id, old_file_path, target_library_path, progress_callback=None):
         """复制JavSP文件到媒体库"""
-        return javsp_copy.copy_single(self.cursor, self.conn, old_file_path, video_id, target_library_path)
+        return javsp_copy.copy_single(self.cursor, self.conn, old_file_path, video_id, target_library_path, progress_callback=progress_callback)
 
     def search_videos(self, title="", tags="", actors="", stars=0, folder_path=""):
         """搜索视频的简化接口"""
@@ -1311,6 +1325,18 @@ class TaskProgressDialog(QDialog):
         self.progress_bar.setValue(0)
         layout.addWidget(self.progress_bar)
 
+        # 当前文件进度条
+        self.file_progress_bar = QProgressBar()
+        self.file_progress_bar.setRange(0, 100)
+        self.file_progress_bar.setValue(0)
+        self.file_progress_bar.setFormat("当前文件: %p%")
+        layout.addWidget(self.file_progress_bar)
+
+        # 速度标签
+        self.speed_label = QLabel("")
+        self.speed_label.setAlignment(Qt.AlignCenter)
+        layout.addWidget(self.speed_label)
+
         # 状态标签
         self.status_label = QLabel("准备开始...")
         layout.addWidget(self.status_label)
@@ -1340,10 +1366,24 @@ class TaskProgressDialog(QDialog):
 
         self.setLayout(layout)
 
-    def update_progress(self, value, message=""):
-        self.progress_bar.setValue(value)
+    def update_progress(self, value, message="", data=None):
+        if value >= 0:
+            self.progress_bar.setValue(value)
         if message:
             self.status_label.setText(message)
+        
+        if data and 'file_progress' in data:
+            fp = data['file_progress']
+            current = fp.get('current', 0)
+            total = fp.get('total', 0)
+            speed_str = fp.get('speed_str', '')
+            
+            if total > 0:
+                pct = int((current / total) * 100)
+                self.file_progress_bar.setValue(pct)
+            
+            if speed_str:
+                self.speed_label.setText(speed_str)
 
     def set_stats(self, text):
         self.stats_label.setText(text)
@@ -3025,6 +3065,20 @@ class MainWindow(QMainWindow):
             refresh_thumbnail_action.triggered.connect(self.refresh_thumbnail)
 
             context_menu.addSeparator()
+            
+            # 视频旋转子菜单
+            rotate_menu = context_menu.addMenu("视频顺时针旋转")
+            
+            rotate_90_action = rotate_menu.addAction("旋转 90°")
+            rotate_90_action.triggered.connect(lambda: self.rotate_video_handler(video_id, 90))
+            
+            rotate_180_action = rotate_menu.addAction("旋转 180°")
+            rotate_180_action.triggered.connect(lambda: self.rotate_video_handler(video_id, 180))
+            
+            rotate_270_action = rotate_menu.addAction("旋转 270°")
+            rotate_270_action.triggered.connect(lambda: self.rotate_video_handler(video_id, 270))
+            
+            context_menu.addSeparator()
 
             delete_action = context_menu.addAction("删除视频")
             delete_action.triggered.connect(self.delete_video)
@@ -4118,7 +4172,7 @@ class MainWindow(QMainWindow):
             self.show_info("完成", msg)
             self.load_videos()
 
-        worker.progress_signal.connect(lambda m, p, d: progress_dialog.update_progress(p, m))
+        worker.progress_signal.connect(lambda m, p, d: progress_dialog.update_progress(p, m, d))
         worker.finished_signal.connect(on_finished)
         worker.error_signal.connect(lambda e: (progress_dialog.close(), self.show_error("错误", e)))
         progress_dialog.cancel_signal.connect(worker.cancel)
@@ -4156,8 +4210,12 @@ class MainWindow(QMainWindow):
             if os.path.exists(new_path):
                  new_path = self.core.handle_filename_conflict(new_path)
             
-            shutil.move(item['path'], new_path)
-            self.core.cursor.execute("UPDATE videos SET file_path = ?, source_folder = ? WHERE id = ?", (new_path, target_folder, item['id']))
+            # 使用智能移动
+            success, final_path, error_msg = FileUtils.move_file_smart(item['path'], new_path)
+            if not success:
+                 raise Exception(error_msg)
+
+            self.core.cursor.execute("UPDATE videos SET file_path = ?, source_folder = ? WHERE id = ?", (final_path, target_folder, item['id']))
             self.core.conn.commit()
             return "Moved"
 
@@ -4314,10 +4372,51 @@ class MainWindow(QMainWindow):
             return
             
         def task_func(item, cb):
+            # 进度回调闭包
+            last_update_time = [time.time()]
+            last_bytes = [0]
+            
+            def file_progress_callback(current, total):
+                now = time.time()
+                dt = now - last_update_time[0]
+                # 限制UI更新频率 (每0.1秒更新一次)
+                if dt >= 0.1 or current == total:
+                    db = current - last_bytes[0]
+                    speed = db / dt if dt > 0 else 0
+                    last_update_time[0] = now
+                    last_bytes[0] = current
+                    
+                    # 格式化速度
+                    if speed < 1024:
+                        speed_str = f"{speed:.1f} B/s"
+                    elif speed < 1024 * 1024:
+                        speed_str = f"{speed/1024:.1f} KB/s"
+                    else:
+                        speed_str = f"{speed/(1024*1024):.1f} MB/s"
+                    
+                    # 估算剩余时间
+                    if speed > 0:
+                        remaining = (total - current) / speed
+                        if remaining < 60:
+                            time_str = f"{remaining:.0f}秒"
+                        else:
+                            time_str = f"{remaining/60:.0f}分{remaining%60:.0f}秒"
+                        speed_str += f" | 剩余: {time_str}"
+                    
+                    # 通过cb传递文件进度数据
+                    # progress=-1 表示不更新主进度条
+                    cb(message="", progress=-1, data={
+                        'file_progress': {
+                            'current': current,
+                            'total': total,
+                            'speed_str': speed_str
+                        }
+                    })
+
             if is_copy:
-                res = self.core.copy_javsp_file(item['id'], item['path'], target_folder)
+                res = self.core.copy_javsp_file(item['id'], item['path'], target_folder, progress_callback=file_progress_callback)
             else:
-                res = self.core.migrate_javsp_file(item['id'], item['path'], target_folder)
+                res = self.core.migrate_javsp_file(item['id'], item['path'], target_folder, progress_callback=file_progress_callback)
                 
             if not res.get("ok"):
                 raise Exception(res.get("error"))
@@ -4333,6 +4432,53 @@ class MainWindow(QMainWindow):
             self.load_videos()
         else:
             self.show_error("失败", msg)
+
+    def rotate_video_handler(self, video_id, degrees):
+        """处理视频旋转请求"""
+        # 获取视频路径
+        self.core.cursor.execute("SELECT file_path FROM videos WHERE id = ?", (video_id,))
+        res = self.core.cursor.fetchone()
+        if not res:
+            return
+        file_path = res[0]
+        
+        if not self.ask_yes_no("确认旋转", f"确定要将视频顺时针旋转 {degrees}° 吗？\n此操作将重新编码视频并覆盖原文件，可能需要一些时间。"):
+            return
+            
+        # 创建进度对话框
+        progress_dialog = TaskProgressDialog(f"正在旋转视频 ({degrees}°)", self)
+        progress_dialog.show()
+        progress_dialog.update_progress(0, "正在初始化转码...", None)
+        
+        def worker_func(progress_callback, cancel_check):
+            # 包装回调以适配 video_rotate 模块
+            def cb(percent, msg):
+                if cancel_check():
+                    return
+                # 转换百分比（-1表示未知）
+                p = 50 if percent == -1 else percent
+                progress_callback(msg, p)
+                
+            success, msg = video_rotate.rotate_video(file_path, degrees, cb)
+            return success, msg
+            
+        worker = GenericWorker(worker_func)
+        
+        def on_finished(result):
+            progress_dialog.close()
+            success, msg = result
+            if success:
+                self.show_info("成功", f"视频已旋转 {degrees}°")
+                # 重新生成缩略图
+                self.core.generate_thumbnail(video_id, file_path)
+                # 刷新显示
+                self.load_video_detail(video_id)
+            else:
+                self.show_error("失败", f"旋转失败: {msg}")
+                
+        worker.finished_signal.connect(on_finished)
+        worker.start()
+        self._current_worker = worker
 
     def move_file_single(self, video_id, target_folder):
         """移动单个文件"""
