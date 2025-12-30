@@ -33,6 +33,8 @@ import sys
 import logging
 from fast_smart_media_updater import run_fast_update, load_active_folders
 from utils import javsp_migration, javsp_copy
+from utils.file_utils import FileUtils
+from utils import video_rotate
 
 # 日志级别配置
 class LogLevel:
@@ -155,6 +157,21 @@ class ProgressWindow:
         # 进度文本
         self.progress_text = ttk.Label(main_frame, text=f"0/{total_items} (0%)", font=('Arial', 9))
         self.progress_text.pack(pady=(0, 5))
+
+        # 当前文件进度条
+        self.file_progress_var = tk.DoubleVar()
+        self.file_progress_bar = ttk.Progressbar(
+            main_frame, 
+            variable=self.file_progress_var, 
+            maximum=100, 
+            length=500,
+            mode='determinate'
+        )
+        self.file_progress_bar.pack(pady=(0, 5))
+
+        # 速度标签
+        self.speed_label = ttk.Label(main_frame, text="", font=('Arial', 9))
+        self.speed_label.pack(pady=(0, 10))
         
         # 统计信息
         self.stats_label = ttk.Label(main_frame, text="成功: 0 | 失败: 0", font=('Arial', 9), foreground="blue")
@@ -174,6 +191,23 @@ class ProgressWindow:
         self.success_count = 0
         self.failed_count = 0
         
+    def update_file_progress(self, current_bytes, total_bytes, speed_str=""):
+        """更新当前文件进度和速度"""
+        if self.cancelled:
+            return
+            
+        try:
+            if total_bytes > 0:
+                percentage = (current_bytes / total_bytes) * 100
+                self.file_progress_var.set(percentage)
+            
+            if speed_str:
+                self.speed_label.config(text=speed_str)
+                
+            self.window.update()
+        except tk.TclError:
+            pass
+
     def update_progress(self, current, message="", success=None):
         """更新进度"""
         if self.cancelled:
@@ -2013,7 +2047,18 @@ class MediaLibrary:
             return None, None
             
     def get_ffmpeg_command(self):
-        """获取可用的FFmpeg命令路径"""
+        """获取可用的FFmpeg命令路径，优先使用homebrew版本"""
+        # macOS下优先使用homebrew版本的ffmpeg
+        if platform.system() == 'Darwin':
+            # 优先检查homebrew路径
+            homebrew_ffmpeg = '/opt/homebrew/bin/ffmpeg'
+            if os.path.exists(homebrew_ffmpeg):
+                try:
+                    subprocess.run([homebrew_ffmpeg, "-version"], capture_output=True, check=True)
+                    return homebrew_ffmpeg
+                except (subprocess.CalledProcessError, FileNotFoundError):
+                    pass
+        
         # 首先尝试相对路径（用户通过homebrew安装的情况）
         try:
             subprocess.run(["ffmpeg", "-version"], capture_output=True, check=True)
@@ -2023,7 +2068,6 @@ class MediaLibrary:
             
         # 如果相对路径失败，尝试常见的绝对路径
         possible_paths = [
-            "/opt/homebrew/bin/ffmpeg",
             "/usr/local/bin/ffmpeg",
             "/usr/bin/ffmpeg"
         ]
@@ -6062,6 +6106,13 @@ class MediaLibrary:
             context_menu.add_separator()
             context_menu.add_command(label="删除文件", command=lambda: self.delete_file_from_context(video_info['id'], video_info['path']))
             
+            # 视频旋转子菜单
+            rotate_menu = tk.Menu(context_menu, tearoff=0)
+            context_menu.add_cascade(label="视频顺时针旋转", menu=rotate_menu)
+            rotate_menu.add_command(label="旋转 90°", command=lambda: self.rotate_video_handler(video_info['id'], video_info['path'], 90))
+            rotate_menu.add_command(label="旋转 180°", command=lambda: self.rotate_video_handler(video_info['id'], video_info['path'], 180))
+            rotate_menu.add_command(label="旋转 270°", command=lambda: self.rotate_video_handler(video_info['id'], video_info['path'], 270))
+            
             # 添加移动到子菜单
             move_menu = tk.Menu(context_menu, tearoff=0)
             context_menu.add_cascade(label="移动到", menu=move_menu)
@@ -6318,6 +6369,47 @@ class MediaLibrary:
             print(error_msg)
             messagebox.showerror("错误", error_msg)
     
+    def rotate_video_handler(self, video_id, file_path, degrees):
+        """处理视频旋转请求"""
+        if not messagebox.askyesno("确认旋转", f"确定要将视频顺时针旋转 {degrees}° 吗？\n此操作将重新编码视频并覆盖原文件，可能需要一些时间。"):
+            return
+            
+        # 创建进度窗口
+        progress_window = ProgressWindow(self.root, f"正在旋转视频 ({degrees}°)", 100)
+        progress_window.current_file_label.config(text="正在初始化转码...")
+        progress_window.file_progress_bar.config(mode='indeterminate')
+        progress_window.file_progress_bar.start(10)
+        
+        def worker():
+            try:
+                def progress_callback(percent, msg):
+                    if progress_window.cancelled:
+                        return
+                    # 更新进度条和文本
+                    self.root.after(0, lambda: progress_window.file_progress_var.set(percent))
+                    self.root.after(0, lambda: progress_window.current_file_label.config(text=msg))
+                
+                success, msg = video_rotate.rotate_video(file_path, degrees, progress_callback)
+                
+                self.root.after(0, progress_window.close)
+                
+                if success:
+                    self.root.after(0, lambda: messagebox.showinfo("成功", f"视频已旋转 {degrees}°"))
+                    # 可能需要重新生成缩略图，因为画面变了
+                    self.root.after(0, lambda: self.generate_thumbnail_from_context(video_id))
+                else:
+                    self.root.after(0, lambda: messagebox.showerror("失败", f"旋转失败: {msg}"))
+                    
+            except Exception as e:
+                self.root.after(0, progress_window.close)
+                self.root.after(0, lambda: messagebox.showerror("错误", f"发生异常: {str(e)}"))
+                
+        # 在新线程中执行
+        import threading
+        thread = threading.Thread(target=worker)
+        thread.daemon = True
+        thread.start()
+
     def batch_process_auto_tag(self, video_ids):
         """批量处理自动标签"""
         try:
@@ -6468,13 +6560,16 @@ class MediaLibrary:
                                     new_file_path = os.path.join(target_folder, new_file_name)
                                     counter += 1
                             
-                            # 移动文件
-                            shutil.move(video_info['path'], new_file_path)
+                            # 移动文件 (使用智能移动)
+                            success, final_path, error_msg = FileUtils.move_file_smart(video_info['path'], new_file_path)
+                            
+                            if not success:
+                                raise Exception(error_msg)
                             
                             # 更新数据库记录
                             self.cursor.execute(
                                 "UPDATE videos SET file_path = ?, source_folder = ? WHERE id = ?",
-                                (new_file_path, target_folder, video_info['id'])
+                                (final_path, target_folder, video_info['id'])
                             )
                             success_count += 1
                             
@@ -6845,13 +6940,16 @@ class MediaLibrary:
                 if not messagebox.askyesno("文件已存在", f"目标位置已存在同名文件，是否覆盖？\n{new_file_path}"):
                     return
             
-            # 移动文件
-            shutil.move(old_file_path, new_file_path)
+            # 移动文件 (使用智能移动)
+            success, final_path, error_msg = FileUtils.move_file_smart(old_file_path, new_file_path)
+            
+            if not success:
+                raise Exception(error_msg)
             
             # 更新数据库记录
             self.cursor.execute(
                 "UPDATE videos SET file_path = ?, source_folder = ? WHERE id = ?",
-                (new_file_path, target_folder, video_id)
+                (final_path, target_folder, video_id)
             )
             self.conn.commit()
             
@@ -6926,7 +7024,48 @@ class MediaLibrary:
                     for i, info in enumerate(videos):
                         if progress_window.cancelled:
                             break
-                        result = javsp_migration.migrate_single(self.cursor, self.conn, info['path'], info['id'], target_library_path)
+                        
+                        # 进度回调闭包
+                        last_update_time = [time.time()]
+                        last_bytes = [0]
+                        
+                        def progress_callback(current, total):
+                            now = time.time()
+                            dt = now - last_update_time[0]
+                            # 限制UI更新频率 (每0.1秒更新一次)
+                            if dt >= 0.1 or current == total:
+                                db = current - last_bytes[0]
+                                speed = db / dt if dt > 0 else 0
+                                last_update_time[0] = now
+                                last_bytes[0] = current
+                                
+                                # 格式化速度
+                                if speed < 1024:
+                                    speed_str = f"{speed:.1f} B/s"
+                                elif speed < 1024 * 1024:
+                                    speed_str = f"{speed/1024:.1f} KB/s"
+                                else:
+                                    speed_str = f"{speed/(1024*1024):.1f} MB/s"
+                                
+                                # 估算剩余时间
+                                if speed > 0:
+                                    remaining = (total - current) / speed
+                                    if remaining < 60:
+                                        time_str = f"{remaining:.0f}秒"
+                                    else:
+                                        time_str = f"{remaining/60:.0f}分{remaining%60:.0f}秒"
+                                    speed_str += f" | 剩余: {time_str}"
+                                
+                                progress_window.update_file_progress(current, total, speed_str)
+
+                        result = javsp_migration.migrate_single(
+                            self.cursor, 
+                            self.conn, 
+                            info['path'], 
+                            info['id'], 
+                            target_library_path,
+                            progress_callback=progress_callback
+                        )
                         if result.get("ok"):
                             success_count += 1
                             progress_window.update_progress(i + 1, info['name'], success=True)
@@ -6982,7 +7121,48 @@ class MediaLibrary:
                     for i, info in enumerate(videos):
                         if progress_window.cancelled:
                             break
-                        result = javsp_copy.copy_single(self.cursor, self.conn, info['path'], info['id'], target_library_path)
+                        
+                        # 进度回调闭包
+                        last_update_time = [time.time()]
+                        last_bytes = [0]
+                        
+                        def progress_callback(current, total):
+                            now = time.time()
+                            dt = now - last_update_time[0]
+                            # 限制UI更新频率 (每0.1秒更新一次)
+                            if dt >= 0.1 or current == total:
+                                db = current - last_bytes[0]
+                                speed = db / dt if dt > 0 else 0
+                                last_update_time[0] = now
+                                last_bytes[0] = current
+                                
+                                # 格式化速度
+                                if speed < 1024:
+                                    speed_str = f"{speed:.1f} B/s"
+                                elif speed < 1024 * 1024:
+                                    speed_str = f"{speed/1024:.1f} KB/s"
+                                else:
+                                    speed_str = f"{speed/(1024*1024):.1f} MB/s"
+                                
+                                # 估算剩余时间
+                                if speed > 0:
+                                    remaining = (total - current) / speed
+                                    if remaining < 60:
+                                        time_str = f"{remaining:.0f}秒"
+                                    else:
+                                        time_str = f"{remaining/60:.0f}分{remaining%60:.0f}秒"
+                                    speed_str += f" | 剩余: {time_str}"
+                                
+                                progress_window.update_file_progress(current, total, speed_str)
+
+                        result = javsp_copy.copy_single(
+                            self.cursor, 
+                            self.conn, 
+                            info['path'], 
+                            info['id'], 
+                            target_library_path,
+                            progress_callback=progress_callback
+                        )
                         if result.get("ok"):
                             success_count += 1
                             progress_window.update_progress(i + 1, info['name'], success=True)

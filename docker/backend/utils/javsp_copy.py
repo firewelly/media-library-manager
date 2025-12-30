@@ -133,16 +133,8 @@ def copy_single(cursor, conn, old_file_path, video_id, target_library_path, prog
         source_root = find_source_root_for_path(cursor, old_file_path)
         rel = compute_javsp_relative_subdir(source_root, video_dir)
         dest_dir = os.path.join(target_library_path, rel) if rel else target_library_path
-        
-        # 确保目标目录路径安全
-        dest_dir = FileUtils.ensure_safe_path(dest_dir)
-        
         if not os.path.exists(dest_dir):
             os.makedirs(dest_dir, exist_ok=True)
-            
-        # 确保目标文件名安全
-        file_name = FileUtils.ensure_safe_path(file_name)
-        
         dest_file_path = os.path.join(dest_dir, file_name)
         
         final_path, existing_dir = resolve_copy_conflict(cursor, dest_file_path, file_name, target_library_path)
@@ -168,9 +160,7 @@ def copy_single(cursor, conn, old_file_path, video_id, target_library_path, prog
                     new_path = os.path.join(dst_dir, new_name)
                     c += 1
                 dst = new_path
-            
-            # 使用智能复制处理可能的长路径问题
-            FileUtils.copy_file_smart(src, dst)
+            shutil.copy2(src, dst)  # 使用copy2保留文件元数据
 
         def copy_side_dir(src_dir, dst_parent):
             """复制附属目录，如果目标目录已存在则重命名"""
@@ -253,10 +243,8 @@ def copy_single(cursor, conn, old_file_path, video_id, target_library_path, prog
             }
 
         # 复制主文件
-        success, actual_final_path, error_msg = FileUtils.copy_file_smart(old_file_path, final_path, callback=progress_callback)
-        if not success:
-            return {"ok": False, "error": f"复制文件失败: {error_msg}"}
-        final_path = actual_final_path
+        if not FileUtils.copy_file_with_progress(old_file_path, final_path, callback=progress_callback):
+            return {"ok": False, "error": f"复制文件失败: {old_file_path}"}
         
         # 复制附属文件
         for f in side_files:

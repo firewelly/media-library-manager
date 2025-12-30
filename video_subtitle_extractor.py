@@ -13,7 +13,34 @@ import tempfile
 from pathlib import Path
 import json
 import re
+import platform
+import shutil
 from datetime import timedelta
+
+def get_ffmpeg_command():
+    """获取可用的FFmpeg命令路径，优先使用homebrew版本"""
+    # macOS下优先使用homebrew版本的ffmpeg
+    if platform.system() == 'Darwin':
+        # 优先检查homebrew路径
+        homebrew_ffmpeg = '/opt/homebrew/bin/ffmpeg'
+        if os.path.exists(homebrew_ffmpeg):
+            return homebrew_ffmpeg
+    
+    # 检查系统PATH中的ffmpeg
+    if shutil.which('ffmpeg'):
+        return 'ffmpeg'
+    
+    # 检查其他常见路径
+    common_paths = [
+        '/usr/local/bin/ffmpeg',
+        '/usr/bin/ffmpeg',
+    ]
+    
+    for path in common_paths:
+        if os.path.exists(path):
+            return path
+    
+    return None
 
 def check_and_activate_venv():
     """检查并激活虚拟环境"""
@@ -73,17 +100,22 @@ def check_dependencies():
         print("❌ mlx-whisper 未安装")
     
     # 检查 ffmpeg
-    try:
-        result = subprocess.run(['ffmpeg', '-version'], 
-                              capture_output=True, text=True, timeout=5)
-        if result.returncode == 0:
-            print("✅ ffmpeg 已安装")
-        else:
+    ffmpeg_cmd = get_ffmpeg_command()
+    if ffmpeg_cmd:
+        try:
+            result = subprocess.run([ffmpeg_cmd, '-version'], 
+                                  capture_output=True, text=True, timeout=5)
+            if result.returncode == 0:
+                print("✅ ffmpeg 已安装")
+            else:
+                missing.append('ffmpeg')
+                print("❌ ffmpeg 未安装")
+        except (subprocess.TimeoutExpired, FileNotFoundError):
             missing.append('ffmpeg')
-            print("❌ ffmpeg 未安装")
-    except (subprocess.TimeoutExpired, FileNotFoundError):
+            print("❌ ffmpeg 未安装或无法访问")
+    else:
         missing.append('ffmpeg')
-        print("❌ ffmpeg 未安装或无法访问")
+        print("❌ ffmpeg 未安装")
     
     if missing:
         print(f"\n缺少依赖: {', '.join(missing)}")
@@ -101,9 +133,15 @@ def extract_audio(video_path: str, audio_path: str) -> bool:
     try:
         print(f"正在从视频中提取音频: {os.path.basename(video_path)}")
         
+        # 获取ffmpeg命令
+        ffmpeg_cmd = get_ffmpeg_command()
+        if not ffmpeg_cmd:
+            print("❌ 未找到FFmpeg")
+            return False
+        
         # 使用ffmpeg提取音频为wav格式
         cmd = [
-            'ffmpeg', '-i', video_path,
+            ffmpeg_cmd, '-i', video_path,
             '-vn',  # 不包含视频
             '-acodec', 'pcm_s16le',  # 16位PCM编码
             '-ar', '16000',  # 16kHz采样率

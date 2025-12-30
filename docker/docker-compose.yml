@@ -1,0 +1,26 @@
+version: '3.8'
+
+services:
+  backend:
+    build: ./backend
+    container_name: media-library-backend
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./data:/app/data
+      # Mount your NAS media folders here. 
+      # The internal path should match what is in the database if you want to keep existing paths,
+      # or you will need to update the database paths.
+      # Example:
+      # - /Volume/Video:/Volume/Video
+      # - /mnt/user/media:/mnt/user/media
+    restart: always
+
+  frontend:
+    build: ./frontend
+    container_name: media-library-frontend
+    ports:
+      - "80:80"
+    depends_on:
+      - backend
+    restart: always
