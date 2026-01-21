@@ -340,6 +340,16 @@ class MediaLibrary:
         self.gpu_acceleration = None
         self.check_gpu_acceleration_status()
         
+        # 文件夹在线状态缓存，避免重复检查
+        self.folder_online_cache = {}
+        self.last_cache_update = 0
+        self.cache_update_interval = 5  # 缓存更新间隔（秒）
+        
+        # 输入法状态跟踪，避免输入法输入时触发搜索
+        self.is_ime_active = False
+        self.ime_last_key_time = 0
+        self.ime_delay = 1000  # 输入法输入延迟（毫秒）
+        
         # 绑定窗口关闭事件保存配置
         self.root.protocol("WM_DELETE_WINDOW", self.on_closing)
         
@@ -819,10 +829,69 @@ class MediaLibrary:
                 current_device = self.get_current_device_name()
                 self.cursor.execute('UPDATE folders SET device_name = ? WHERE device_name IS NULL', (current_device,))
                 print(f"为现有文件夹设置设备名称: {current_device}")
+            
+            # 创建数据库索引以优化查询性能
+            self.create_database_indexes()
                 
         except Exception as e:
             print(f"数据库迁移失败: {str(e)}")
-        
+    
+    def create_database_indexes(self):
+        """创建数据库索引以优化查询性能"""
+        try:
+            # 检查已存在的索引
+            self.cursor.execute("SELECT name FROM sqlite_master WHERE type='index'")
+            existing_indexes = set(row[0] for row in self.cursor.fetchall())
+            
+            # 创建videos表的索引
+            indexes_to_create = [
+                ('idx_videos_title', 'CREATE INDEX IF NOT EXISTS idx_videos_title ON videos(title)'),
+                ('idx_videos_file_name', 'CREATE INDEX IF NOT EXISTS idx_videos_file_name ON videos(file_name)'),
+                ('idx_videos_tags', 'CREATE INDEX IF NOT EXISTS idx_videos_tags ON videos(tags)'),
+                ('idx_videos_source_folder', 'CREATE INDEX IF NOT EXISTS idx_videos_source_folder ON videos(source_folder)'),
+                ('idx_videos_stars', 'CREATE INDEX IF NOT EXISTS idx_videos_stars ON videos(stars)'),
+                ('idx_videos_year', 'CREATE INDEX IF NOT EXISTS idx_videos_year ON videos(year)'),
+            ]
+            
+            # 创建folders表的索引
+            indexes_to_create.extend([
+                ('idx_folders_folder_path', 'CREATE INDEX IF NOT EXISTS idx_folders_folder_path ON folders(folder_path)'),
+                ('idx_folders_is_active', 'CREATE INDEX IF NOT EXISTS idx_folders_is_active ON folders(is_active)'),
+            ])
+            
+            # 检查JAVDB相关表是否存在，如果存在则创建索引
+            self.cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='javdb_info'")
+            if self.cursor.fetchone():
+                indexes_to_create.extend([
+                    ('idx_javdb_info_video_id', 'CREATE INDEX IF NOT EXISTS idx_javdb_info_video_id ON javdb_info(video_id)'),
+                    ('idx_javdb_info_javdb_code', 'CREATE INDEX IF NOT EXISTS idx_javdb_info_javdb_code ON javdb_info(javdb_code)'),
+                    ('idx_javdb_info_javdb_title', 'CREATE INDEX IF NOT EXISTS idx_javdb_info_javdb_title ON javdb_info(javdb_title)'),
+                    ('idx_javdb_info_release_date', 'CREATE INDEX IF NOT EXISTS idx_javdb_info_release_date ON javdb_info(release_date)'),
+                    ('idx_javdb_info_score', 'CREATE INDEX IF NOT EXISTS idx_javdb_info_score ON javdb_info(score)'),
+                ])
+            
+            # 检查actors相关表是否存在，如果存在则创建索引
+            self.cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='video_actors'")
+            if self.cursor.fetchone():
+                indexes_to_create.extend([
+                    ('idx_video_actors_video_id', 'CREATE INDEX IF NOT EXISTS idx_video_actors_video_id ON video_actors(video_id)'),
+                    ('idx_video_actors_actor_id', 'CREATE INDEX IF NOT EXISTS idx_video_actors_actor_id ON video_actors(actor_id)'),
+                ])
+            
+            # 创建索引
+            for index_name, create_sql in indexes_to_create:
+                if index_name not in existing_indexes:
+                    self.cursor.execute(create_sql)
+                    print(f"创建索引: {index_name}")
+                else:
+                    print(f"索引已存在: {index_name}")
+            
+            self.conn.commit()
+            print("数据库索引创建完成")
+            
+        except Exception as e:
+            print(f"创建数据库索引失败: {str(e)}")
+    
     def create_gui(self):
         """创建主界面"""
         # 主菜单
@@ -898,7 +967,8 @@ class MediaLibrary:
         self.title_search_var = tk.StringVar()
         title_search_entry = ttk.Entry(title_search_frame, textvariable=self.title_search_var)
         title_search_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(5, 0))
-        title_search_entry.bind('<KeyRelease>', self.on_search)
+        title_search_entry.bind('<Return>', self.on_search)
+        title_search_entry.bind('<Key>', lambda e: self.on_search_key_press(e))
         
         # 标签搜索
         tag_search_frame = ttk.Frame(search_frame)
@@ -908,7 +978,8 @@ class MediaLibrary:
         self.tag_search_var = tk.StringVar()
         tag_search_entry = ttk.Entry(tag_search_frame, textvariable=self.tag_search_var)
         tag_search_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(5, 0))
-        tag_search_entry.bind('<KeyRelease>', self.on_search)
+        tag_search_entry.bind('<Return>', self.on_search)
+        tag_search_entry.bind('<Key>', lambda e: self.on_search_key_press(e))
         
         # 演员搜索
         actor_search_frame = ttk.Frame(search_frame)
@@ -918,7 +989,13 @@ class MediaLibrary:
         self.actor_search_var = tk.StringVar()
         actor_search_entry = ttk.Entry(actor_search_frame, textvariable=self.actor_search_var)
         actor_search_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(5, 0))
-        actor_search_entry.bind('<KeyRelease>', self.on_search)
+        actor_search_entry.bind('<Return>', self.on_search)
+        actor_search_entry.bind('<Key>', lambda e: self.on_search_key_press(e))
+        
+        # 搜索按钮
+        search_button_frame = ttk.Frame(search_frame)
+        search_button_frame.pack(fill=tk.X, padx=5, pady=(2, 5))
+        ttk.Button(search_button_frame, text="搜索", command=self.on_search).pack(side=tk.LEFT, fill=tk.X, expand=True)
         
         # 星级筛选
         stars_frame = ttk.LabelFrame(left_frame, text="星级筛选")
@@ -2359,13 +2436,13 @@ class MediaLibrary:
                 # NAS状态筛选 - 基于路径存在性判断
                 nas_filter = self.nas_filter.get()
                 if nas_filter == "online":
-                    # 获取所有视频的路径并检查是否存在
+                    # 获取所有视频的路径并检查是否存在（使用缓存）
                     self.cursor.execute("SELECT DISTINCT source_folder FROM videos WHERE source_folder IS NOT NULL")
                     all_video_folders = [row[0] for row in self.cursor.fetchall()]
                     
                     online_video_folders = []
                     for folder_path in all_video_folders:
-                        if os.path.exists(folder_path) and os.path.isdir(folder_path):
+                        if self.get_folder_online_status(folder_path):
                             online_video_folders.append(folder_path)
                     
                     if online_video_folders:
@@ -2378,13 +2455,13 @@ class MediaLibrary:
                         # 如果没有在线文件夹，不显示任何视频
                         conditions.append("1 = 0")
                 elif nas_filter == "offline":
-                    # 获取所有视频的路径并检查是否不存在
+                    # 获取所有视频的路径并检查是否不存在（使用缓存）
                     self.cursor.execute("SELECT DISTINCT source_folder FROM videos WHERE source_folder IS NOT NULL")
                     all_video_folders = [row[0] for row in self.cursor.fetchall()]
                     
                     offline_video_folders = []
                     for folder_path in all_video_folders:
-                        if not (os.path.exists(folder_path) and os.path.isdir(folder_path)):
+                        if not self.get_folder_online_status(folder_path):
                             offline_video_folders.append(folder_path)
                     
                     if offline_video_folders:
@@ -2500,16 +2577,96 @@ class MediaLibrary:
                     direction = "DESC" if self.sort_reverse else "ASC"
                     order_clause = f"ORDER BY {db_column} {direction}"
             
-            # 构建最终查询 - 使用LEFT JOIN连接javdb_info表
+            # 构建最终查询 - 使用LEFT JOIN连接javdb_info表，并使用子查询获取演员和标签信息
             if conditions:
                 where_clause = f"WHERE {' AND '.join(conditions)}"
             else:
                 where_clause = ""
-                
-            query = f"SELECT v.* FROM videos v LEFT JOIN javdb_info j ON v.id = j.video_id {where_clause} {order_clause}"
+            
+            # 使用更高效的查询，一次性获取所有相关数据
+            query = f"""
+                SELECT 
+                    v.*,
+                    j.javdb_code, j.javdb_title, j.release_date, j.score
+                FROM videos v 
+                LEFT JOIN javdb_info j ON v.id = j.video_id
+                {where_clause}
+                {order_clause}
+            """
             self.cursor.execute(query, params)
             
             videos = self.cursor.fetchall()
+            
+            # 批量获取所有文件夹信息、演员和标签信息，减少循环中的查询
+            folder_cache = {}
+            actors_cache = {}
+            javdb_tags_cache = {}
+            if videos:
+                source_folders = set()
+                video_ids = []
+                for video in videos:
+                    video_data = list(video)
+                    if len(video_data) >= 23:
+                        source_folder = video_data[21]
+                        if source_folder and source_folder not in folder_cache:
+                            source_folders.add(source_folder)
+                    if len(video_data) >= 1:
+                        video_ids.append(video_data[0])
+                
+                # 批量查询文件夹信息
+                for folder in source_folders:
+                    self.cursor.execute(
+                        """
+                        SELECT folder_path, is_active, device_name, folder_type
+                        FROM folders
+                        WHERE ? LIKE folder_path || '%'
+                        ORDER BY LENGTH(folder_path) DESC
+                        LIMIT 1
+                        """,
+                        (folder,)
+                    )
+                    result = self.cursor.fetchone()
+                    if result:
+                        folder_cache[folder] = {
+                            'folder_path': result[0],
+                            'is_active': result[1],
+                            'device_name': result[2],
+                            'folder_type': result[3],
+                            'is_online': bool(result[1]) and os.path.exists(result[0]) if result[0] else False
+                        }
+                
+                # 批量查询演员信息
+                if video_ids:
+                    placeholders = ','.join(['?' for _ in video_ids])
+                    self.cursor.execute(
+                        f"""
+                        SELECT va.video_id, GROUP_CONCAT(a.name, ', ')
+                        FROM video_actors va
+                        JOIN actors a ON va.actor_id = a.id
+                        WHERE va.video_id IN ({placeholders})
+                        GROUP BY va.video_id
+                        """,
+                        video_ids
+                    )
+                    for video_id, actors_str in self.cursor.fetchall():
+                        actors_cache[video_id] = actors_str or ""
+                
+                # 批量查询JAVDB标签信息
+                if video_ids:
+                    placeholders = ','.join(['?' for _ in video_ids])
+                    self.cursor.execute(
+                        f"""
+                        SELECT j.video_id, GROUP_CONCAT(jt.tag_name, ', ')
+                        FROM javdb_info j
+                        JOIN javdb_info_tags jit ON j.id = jit.javdb_info_id
+                        JOIN javdb_tags jt ON jit.tag_id = jt.id
+                        WHERE j.video_id IN ({placeholders})
+                        GROUP BY j.video_id
+                        """,
+                        video_ids
+                    )
+                    for video_id, tags_str in self.cursor.fetchall():
+                        javdb_tags_cache[video_id] = tags_str or ""
             
             for video in videos:
                 # 安全解包，处理可能的字段数量不匹配
@@ -2517,49 +2674,38 @@ class MediaLibrary:
                 while len(video_data) < 23:  # 确保有足够的字段
                     video_data.append(None)
                 
-                video_id, file_path, file_name, file_size, _, title, description, genre, year, rating, stars, tags, nas_path, is_nas_online, created_at, updated_at, thumbnail_data, thumbnail_path, duration, resolution, file_created_time, source_folder, md5_hash = video_data[:23]
+                video_id, file_path, file_name, file_size, _, title, description, genre, year, rating, stars, tags, nas_path, is_nas_online, created_at, updated_at, thumbnail_data, thumbnail_path, duration, resolution, file_created_time, source_folder, md5_hash, javdb_code, javdb_title, release_date, javdb_rating = video_data[:27]
                 
                 # 格式化星级显示（实心/空心星星组合）
                 star_display = self.format_stars_display(stars)
                 size_display = self.format_file_size(file_size) if file_size else ""
-                # 在线状态：与演员详情页一致，优先依据管理文件夹激活与路径存在性
+                
+                # 使用缓存的文件夹信息来确定在线状态
                 is_online = False
-                try:
-                    if source_folder:
-                        self.cursor.execute(
-                            """
-                            SELECT folder_path, is_active
-                            FROM folders
-                            WHERE ? LIKE folder_path || '%'
-                            ORDER BY LENGTH(folder_path) DESC
-                            LIMIT 1
-                            """,
-                            (source_folder,)
-                        )
-                        mf_row = self.cursor.fetchone()
-                        if mf_row:
-                            managed_folder_path, is_active = mf_row
-                            try:
-                                is_online = bool(is_active) and os.path.exists(managed_folder_path)
-                            except Exception:
-                                is_online = False
-                        elif is_nas_online is not None:
-                            is_online = bool(is_nas_online)
-                        else:
-                            is_online = self.is_video_online(int(video_id))
-                    else:
-                        if is_nas_online is not None:
-                            is_online = bool(is_nas_online)
-                        else:
-                            is_online = self.is_video_online(int(video_id))
-                except Exception:
-                    if is_nas_online is not None:
-                        is_online = bool(is_nas_online)
-                    else:
-                        is_online = self.is_video_online(int(video_id))
+                if source_folder and source_folder in folder_cache:
+                    folder_info = folder_cache[source_folder]
+                    is_online = folder_info['is_online']
+                elif is_nas_online is not None:
+                    is_online = bool(is_nas_online)
+                else:
+                    is_online = self.is_video_online(int(video_id))
                 status_display = "在线" if is_online else "离线"
-                # 初始化标签显示，稍后会在获取JAVDB标签后更新
-                tags_display = tags if tags else ""
+                
+                # 初始化标签显示
+                javdb_code = javdb_code or ""
+                javdb_title = javdb_title or ""
+                release_date = release_date or ""
+                javdb_rating = javdb_rating or ""
+                javdb_tags = javdb_tags_cache.get(video_id, "")
+                actors_display = actors_cache.get(video_id, "")
+                
+                # 合并标签显示：优先显示JAVDB标签，然后显示自动标签
+                combined_tags = []
+                if javdb_tags:
+                    combined_tags.append(javdb_tags)
+                if tags:
+                    combined_tags.append(tags)
+                tags_display = ", ".join(combined_tags)
                 
                 # 格式化年份显示 - 如果数据库中没有年份，尝试从文件名中提取
                 year_display = ""
@@ -2624,99 +2770,35 @@ class MediaLibrary:
                     
                     # 获取设备名称显示
                     device_display = "Unknown"
-                    if source_folder:
-                        # 查找匹配的文件夹记录
-                        self.cursor.execute("""
-                            SELECT folder_type, device_name FROM folders 
-                            WHERE ? LIKE folder_path || '%' 
-                            ORDER BY LENGTH(folder_path) DESC 
-                            LIMIT 1
-                        """, (source_folder,))
-                        folder_info = self.cursor.fetchone()
+                    if source_folder and source_folder in folder_cache:
+                        folder_info = folder_cache[source_folder]
+                        folder_type = folder_info['folder_type']
+                        device_name = folder_info['device_name']
                         
-                        if folder_info:
-                            folder_type, device_name = folder_info
-                            
-                            if folder_type == "nas":
-                                # NAS设备：显示IP或域名
-                                if source_folder.startswith("smb://"):
-                                    # 从smb://username@192.168.1.100/folder格式中提取IP
-                                    import re
-                                    ip_match = re.search(r'@([0-9.]+)/', source_folder)
-                                    if ip_match:
-                                        device_display = ip_match.group(1)
-                                    else:
-                                        # 尝试提取域名
-                                        domain_match = re.search(r'smb://(?:[^@]+@)?([^/]+)/', source_folder)
-                                        if domain_match:
-                                            device_display = domain_match.group(1)
-                                        else:
-                                            device_display = "NAS"
-                                elif source_folder.startswith("/Volumes/"):
-                                    # macOS挂载的网络驱动器，尝试从路径提取名称
-                                    volume_name = source_folder.split('/')[2] if len(source_folder.split('/')) > 2 else "NAS"
-                                    device_display = volume_name
+                        if folder_type == "nas":
+                            # NAS设备：显示IP或域名
+                            if source_folder.startswith("smb://"):
+                                # 从smb://username@192.168.1.100/folder格式中提取IP
+                                import re
+                                ip_match = re.search(r'@([0-9.]+)/', source_folder)
+                                if ip_match:
+                                    device_display = ip_match.group(1)
                                 else:
-                                    device_display = "NAS"
+                                    # 尝试提取域名
+                                    domain_match = re.search(r'smb://(?:[^@]+@)?([^/]+)/', source_folder)
+                                    if domain_match:
+                                        device_display = domain_match.group(1)
+                                    else:
+                                        device_display = "NAS"
+                            elif source_folder.startswith("/Volumes/"):
+                                # macOS挂载的网络驱动器，尝试从路径提取名称
+                                volume_name = source_folder.split('/')[2] if len(source_folder.split('/')) > 2 else "NAS"
+                                device_display = volume_name
                             else:
-                                # 本地设备：显示设备名称
-                                device_display = device_name if device_name and device_name != "Unknown" else "Unknown"
-                
-                # 查询JAVDB信息
-                javdb_code = ""
-                javdb_title = ""
-                release_date = ""
-                javdb_rating = ""
-                javdb_tags = ""
-                actors_display = ""
-                
-                try:
-                    # 查询JAVDB信息
-                    self.cursor.execute("""
-                        SELECT javdb_code, javdb_title, release_date, score 
-                        FROM javdb_info 
-                        WHERE video_id = ?
-                    """, (video_id,))
-                    javdb_result = self.cursor.fetchone()
-                    
-                    if javdb_result:
-                        javdb_code, javdb_title, release_date, javdb_rating = javdb_result
-                        javdb_code = javdb_code or ""
-                        javdb_title = javdb_title or ""
-                        release_date = release_date or ""
-                        javdb_rating = javdb_rating or ""
-                        
-                        # 查询JAVDB标签
-                        self.cursor.execute("""
-                            SELECT GROUP_CONCAT(jt.tag_name, ', ') 
-                            FROM javdb_info ji
-                            JOIN javdb_info_tags jit ON ji.id = jit.javdb_info_id
-                            JOIN javdb_tags jt ON jit.tag_id = jt.id
-                            WHERE ji.video_id = ?
-                        """, (video_id,))
-                        javdb_tags_result = self.cursor.fetchone()
-                        javdb_tags = javdb_tags_result[0] if javdb_tags_result and javdb_tags_result[0] else ""
-                    
-                    # 查询演员信息
-                    self.cursor.execute("""
-                        SELECT GROUP_CONCAT(a.name, ', ') 
-                        FROM video_actors va
-                        JOIN actors a ON va.actor_id = a.id
-                        WHERE va.video_id = ?
-                    """, (video_id,))
-                    actors_result = self.cursor.fetchone()
-                    actors_display = actors_result[0] if actors_result and actors_result[0] else ""
-                    
-                except Exception as e:
-                    print(f"查询JAVDB信息失败: {e}")
-                
-                # 合并标签显示：优先显示JAVDB标签，然后显示自动标签
-                combined_tags = []
-                if javdb_tags:
-                    combined_tags.append(javdb_tags)
-                if tags:
-                    combined_tags.append(tags)
-                tags_display = ", ".join(combined_tags)
+                                device_display = "NAS"
+                        else:
+                            # 本地设备：显示设备名称
+                            device_display = device_name if device_name and device_name != "Unknown" else "Unknown"
                 
                 # 根据列配置的位置顺序插入数据
                 sorted_columns = sorted(self.column_config.items(), key=lambda x: x[1]['position'])
@@ -5159,7 +5241,7 @@ class MediaLibrary:
                                 
                                 offline_video_folders = []
                                 for folder_path in all_video_folders:
-                                    if not (os.path.exists(folder_path) and os.path.isdir(folder_path)):
+                                    if not self.get_folder_online_status(folder_path):
                                         offline_video_folders.append(folder_path)
                                 
                                 if offline_video_folders:
@@ -5192,7 +5274,7 @@ class MediaLibrary:
                             
                             online_folders = []
                             for folder_path in all_folders:
-                                if os.path.exists(folder_path) and os.path.isdir(folder_path):
+                                if self.get_folder_online_status(folder_path):
                                     online_folders.append(folder_path)
                             
                             if online_folders:
@@ -5953,7 +6035,35 @@ class MediaLibrary:
     
     def on_search(self, event=None):
         """搜索事件"""
+        # 检查是否在输入法输入过程中
+        if self.is_ime_active:
+            import time
+            current_time = time.time() * 1000  # 转换为毫秒
+            if current_time - self.ime_last_key_time < self.ime_delay:
+                # 输入法输入中，延迟搜索
+                return
         self.filter_videos()
+    
+    def on_search_key_press(self, event):
+        """处理搜索框按键事件，检测输入法状态"""
+        import time
+        current_time = time.time() * 1000  # 转换为毫秒
+        
+        # 检测输入法激活状态
+        # 在 macOS 上，当输入法激活时，按键会触发特殊的事件序列
+        if event.keysym == 'BackSpace' or event.keysym == 'Delete':
+            # 删除键，允许触发搜索
+            self.is_ime_active = False
+        elif len(event.char) > 0 and ord(event.char) < 32:
+            # 控制字符（如回车），允许触发搜索
+            self.is_ime_active = False
+        elif event.keysym == 'Return' or event.keysym == 'KP_Enter':
+            # 回车键，允许触发搜索
+            self.is_ime_active = False
+        else:
+            # 普通字符，标记为可能正在输入
+            self.is_ime_active = True
+            self.ime_last_key_time = current_time
         
     def filter_videos(self, event=None):
         """筛选视频"""
@@ -5964,22 +6074,59 @@ class MediaLibrary:
     def get_online_folders(self):
         """获取所有活跃且在线的文件夹路径"""
         try:
-            self.cursor.execute("SELECT folder_path FROM folders WHERE is_active = 1")
-            all_folders = [row[0] for row in self.cursor.fetchall()]
+            import time
+            current_time = time.time()
             
-            # 只返回在线（可访问）的文件夹
-            online_folders = []
-            for folder in all_folders:
-                if os.path.exists(folder) and os.path.isdir(folder):
-                    online_folders.append(folder)
-                    print(f"✓ 在线文件夹: {folder}")
-                else:
-                    print(f"✗ 离线文件夹: {folder}")
+            # 检查是否需要更新缓存
+            if current_time - self.last_cache_update > self.cache_update_interval:
+                self.folder_online_cache = {}
+                self.cursor.execute("SELECT folder_path FROM folders WHERE is_active = 1")
+                all_folders = [row[0] for row in self.cursor.fetchall()]
+                
+                # 更新缓存
+                for folder in all_folders:
+                    is_online = os.path.exists(folder) and os.path.isdir(folder)
+                    self.folder_online_cache[folder] = is_online
+                    if is_online:
+                        print(f"✓ 在线文件夹: {folder}")
+                    else:
+                        print(f"✗ 离线文件夹: {folder}")
+                
+                self.last_cache_update = current_time
             
+            # 从缓存返回在线文件夹
+            online_folders = [folder for folder, is_online in self.folder_online_cache.items() if is_online]
             return online_folders
         except Exception as e:
             print(f"获取活跃文件夹失败: {e}")
             return []
+    
+    def get_folder_online_status(self, folder_path):
+        """获取文件夹在线状态（使用缓存）"""
+        import time
+        current_time = time.time()
+        
+        # 检查是否需要更新缓存
+        if current_time - self.last_cache_update > self.cache_update_interval:
+            self.folder_online_cache = {}
+            try:
+                self.cursor.execute("SELECT folder_path FROM folders WHERE is_active = 1")
+                all_folders = [row[0] for row in self.cursor.fetchall()]
+                
+                # 更新缓存
+                for folder in all_folders:
+                    is_online = os.path.exists(folder) and os.path.isdir(folder)
+                    self.folder_online_cache[folder] = is_online
+                
+                self.last_cache_update = current_time
+            except Exception as e:
+                print(f"更新文件夹缓存失败: {e}")
+        
+        # 从缓存返回状态，如果缓存中没有则直接检查
+        if folder_path in self.folder_online_cache:
+            return self.folder_online_cache[folder_path]
+        else:
+            return os.path.exists(folder_path) and os.path.isdir(folder_path)
     
     def format_folder_display_name(self, folder_path):
         """格式化文件夹显示名称 - 显示足够信息以区分重名文件夹"""
@@ -11193,8 +11340,20 @@ class ActorDetailWindow:
         self.actor_name = actor_name
         self.media_library = media_library
         # 默认头像图片路径（用于无头像时显示）
-        self.default_avatar_path = \
-            '/Users/firewell/Library/CloudStorage/OneDrive-个人/bioinfo/media/covers/default.JPEG'
+        # 使用相对路径以支持不同环境(OneDrive-Personal/OneDrive-个人)
+        current_dir = os.path.dirname(os.path.abspath(__file__))
+        self.default_avatar_path = os.path.join(current_dir, 'covers', 'default.JPEG')
+        
+        # 兼容性检查：如果相对路径不存在，尝试硬编码路径
+        if not os.path.exists(self.default_avatar_path):
+            possible_paths = [
+                '/Users/firewell/Library/CloudStorage/OneDrive-Personal/bioinfo/media/covers/default.JPEG',
+                '/Users/firewell/Library/CloudStorage/OneDrive-个人/bioinfo/media/covers/default.JPEG'
+            ]
+            for p in possible_paths:
+                if os.path.exists(p):
+                    self.default_avatar_path = p
+                    break
         
         # 获取演员信息
         self.actor_info = media_library.get_actor_info_by_name(actor_name)
@@ -11363,8 +11522,19 @@ class ActorDetailWindow:
         movies_frame = ttk.LabelFrame(parent, text=f"在媒体库中的影片 ({len(self.actor_movies)} 部)")
         movies_frame.pack(fill=tk.BOTH, expand=True, pady=(0, 10))
         
+        # 创建控制区域（用于放置复选框）
+        control_frame = ttk.Frame(movies_frame)
+        control_frame.pack(fill=tk.X, padx=5, pady=5)
+        
+        # 添加"仅显示在线"复选框
+        self.show_online_only_var = tk.BooleanVar(value=True)
+        online_checkbox = ttk.Checkbutton(control_frame, text="仅显示在线",
+                                         variable=self.show_online_only_var,
+                                         command=self.on_online_filter_changed)
+        online_checkbox.pack(side=tk.LEFT)
+        
         # 创建Treeview
-        columns = ('title', 'code', 'release_date', 'file_name', 'file_source', 'online_status')
+        columns = ('title', 'code', 'release_date', 'file_name', 'file_source', 'online_status', 'full_path')
         self.movies_tree = ttk.Treeview(movies_frame, columns=columns, show='headings')
         
         # 设置列标题
@@ -11374,6 +11544,7 @@ class ActorDetailWindow:
         self.movies_tree.heading('file_name', text='文件名')
         self.movies_tree.heading('file_source', text='文件来源')
         self.movies_tree.heading('online_status', text='是否在线')
+        self.movies_tree.heading('full_path', text='完整路径')
         
         # 设置列宽
         self.movies_tree.column('title', width=220)
@@ -11382,14 +11553,17 @@ class ActorDetailWindow:
         self.movies_tree.column('file_name', width=220)
         self.movies_tree.column('file_source', width=120)
         self.movies_tree.column('online_status', width=30)
+        self.movies_tree.column('full_path', width=400)
         
-        # 添加滚动条
-        scrollbar = ttk.Scrollbar(movies_frame, orient=tk.VERTICAL, command=self.movies_tree.yview)
-        self.movies_tree.configure(yscrollcommand=scrollbar.set)
+        # 添加滚动条（垂直和水平）
+        v_scrollbar = ttk.Scrollbar(movies_frame, orient=tk.VERTICAL, command=self.movies_tree.yview)
+        h_scrollbar = ttk.Scrollbar(movies_frame, orient=tk.HORIZONTAL, command=self.movies_tree.xview)
+        self.movies_tree.configure(yscrollcommand=v_scrollbar.set, xscrollcommand=h_scrollbar.set)
         
         # 布局
         self.movies_tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        v_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        h_scrollbar.pack(side=tk.BOTTOM, fill=tk.X)
         
         # 预处理数据集用于排序与展示
         self.movies_data = []
@@ -11433,7 +11607,8 @@ class ActorDetailWindow:
                 'release_date': release_date or '',
                 'file_name': file_name or '',
                 'file_source': file_source or '',
-                'online_status': online_status
+                'online_status': online_status,
+                'full_path': file_path or ''
             })
 
         # 排序状态管理
@@ -11457,7 +11632,8 @@ class ActorDetailWindow:
             'release_date': '发行日期',
             'file_name': '文件名',
             'file_source': '文件来源',
-            'online_status': '是否在线'
+            'online_status': '是否在线',
+            'full_path': '完整路径'
         }
         return mapping.get(col, col)
 
@@ -11466,16 +11642,28 @@ class ActorDetailWindow:
         for item in self.movies_tree.get_children():
             self.movies_tree.delete(item)
 
+        # 根据"仅显示在线"复选框过滤数据
+        show_online_only = hasattr(self, 'show_online_only_var') and self.show_online_only_var.get()
+        
         # 插入当前数据
         for row in self.movies_data:
+            # 如果勾选了"仅显示在线"，则只显示在线的视频
+            if show_online_only and row['online_status'] != '在线':
+                continue
+            
             self.movies_tree.insert('', 'end', values=(
                 row['title'],
                 row['code'],
                 row['release_date'],
                 row['file_name'],
                 row['file_source'],
-                row['online_status']
+                row['online_status'],
+                row['full_path']
             ), tags=(row['video_id'],))
+    
+    def on_online_filter_changed(self):
+        """当'仅显示在线'复选框状态改变时调用"""
+        self._populate_movies_tree()
 
     def on_heading_click(self, column):
         # 切换升降序

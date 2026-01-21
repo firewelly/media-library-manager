@@ -67,10 +67,26 @@ def modify_get_ffmpeg_command(file_path):
         return False
 
 if __name__ == "__main__":
+    current_dir = os.path.dirname(os.path.abspath(__file__))
     files = [
-        "/Users/firewell/Library/CloudStorage/OneDrive-个人/bioinfo/media/media_library.py",
-        "/Users/firewell/Library/CloudStorage/OneDrive-个人/bioinfo/media/media_library_pyside.py"
+        os.path.join(current_dir, "media_library.py"),
+        os.path.join(current_dir, "media_library_pyside.py")
     ]
+    
+    # 简单的兼容性检查 - 如果文件不存在，尝试硬编码路径
+    if not os.path.exists(files[0]):
+        possible_roots = [
+            "/Users/firewell/Library/CloudStorage/OneDrive-Personal/bioinfo/media",
+            "/Users/firewell/Library/CloudStorage/OneDrive-个人/bioinfo/media"
+        ]
+        for root in possible_roots:
+             candidate = os.path.join(root, "media_library.py")
+             if os.path.exists(candidate):
+                 files = [
+                     os.path.join(root, "media_library.py"),
+                     os.path.join(root, "media_library_pyside.py")
+                 ]
+                 break
     
     for file_path in files:
         modify_get_ffmpeg_command(file_path)

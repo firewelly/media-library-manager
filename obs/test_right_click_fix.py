@@ -5,7 +5,17 @@
 
 import sys
 import os
-sys.path.append('/Users/firewell/Library/CloudStorage/OneDrive-个人/bioinfo/media')
+# 使用相对路径以支持不同环境
+current_dir = os.path.dirname(os.path.abspath(__file__))
+parent_dir = os.path.dirname(current_dir)
+sys.path.append(parent_dir)
+
+# 备选硬编码路径
+if not os.path.exists(os.path.join(parent_dir, 'media_library.py')):
+    if os.path.exists('/Users/firewell/Library/CloudStorage/OneDrive-Personal/bioinfo/media'):
+        sys.path.append('/Users/firewell/Library/CloudStorage/OneDrive-Personal/bioinfo/media')
+    elif os.path.exists('/Users/firewell/Library/CloudStorage/OneDrive-个人/bioinfo/media'):
+        sys.path.append('/Users/firewell/Library/CloudStorage/OneDrive-个人/bioinfo/media')
 
 from media_library import MediaLibrary
 import tkinter as tk
