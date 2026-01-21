@@ -103,9 +103,26 @@ def merge_csv_files(original_file, reprocessed_file, output_file):
 
 if __name__ == "__main__":
     # 定义文件路径
-    original_file = "/Users/firewell/Library/CloudStorage/OneDrive-个人/bioinfo/media/HC530_1_待整理_enhanced_parallel_analysis.csv"
-    reprocessed_file = "/Users/firewell/Library/CloudStorage/OneDrive-个人/bioinfo/media/HC530_1_待整理_reprocessed_failed.csv"
-    output_file = "/Users/firewell/Library/CloudStorage/OneDrive-个人/bioinfo/media/HC530_1_待整理_merged_analysis.csv"
+    # 使用相对路径以支持不同环境(OneDrive-Personal/OneDrive-个人)
+    current_dir = os.path.dirname(os.path.abspath(__file__))
+    root_dir = os.path.dirname(current_dir) # obs/.. -> media/
+    
+    original_file = os.path.join(root_dir, "HC530_1_待整理_enhanced_parallel_analysis.csv")
+    reprocessed_file = os.path.join(root_dir, "HC530_1_待整理_reprocessed_failed.csv")
+    output_file = os.path.join(root_dir, "HC530_1_待整理_merged_analysis.csv")
+    
+    # 简单的兼容性检查(检查第一个文件)
+    if not os.path.exists(original_file):
+        root_paths = [
+            "/Users/firewell/Library/CloudStorage/OneDrive-Personal/bioinfo/media",
+            "/Users/firewell/Library/CloudStorage/OneDrive-个人/bioinfo/media"
+        ]
+        for r in root_paths:
+            if os.path.exists(os.path.join(r, "HC530_1_待整理_enhanced_parallel_analysis.csv")):
+                original_file = os.path.join(r, "HC530_1_待整理_enhanced_parallel_analysis.csv")
+                reprocessed_file = os.path.join(r, "HC530_1_待整理_reprocessed_failed.csv")
+                output_file = os.path.join(r, "HC530_1_待整理_merged_analysis.csv")
+                break
 
     print(f"开始合并CSV文件...")
     print(f"原始文件: {original_file}")

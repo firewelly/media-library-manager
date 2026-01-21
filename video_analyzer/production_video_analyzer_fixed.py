@@ -509,7 +509,20 @@ def main():
     import argparse
     
     # 默认数据库路径
-    default_db_path = "/Users/firewell/Library/CloudStorage/OneDrive-个人/bioinfo/media/media_library.db"
+    # 使用相对路径以支持不同环境(OneDrive-Personal/OneDrive-个人)
+    current_dir = os.path.dirname(os.path.abspath(__file__))
+    # 假设数据库在父目录
+    default_db_path = os.path.join(os.path.dirname(current_dir), 'media_library.db')
+    
+    if not os.path.exists(default_db_path):
+         possible_paths = [
+             "/Users/firewell/Library/CloudStorage/OneDrive-Personal/bioinfo/media/media_library.db",
+             "/Users/firewell/Library/CloudStorage/OneDrive-个人/bioinfo/media/media_library.db"
+         ]
+         for p in possible_paths:
+             if os.path.exists(p):
+                 default_db_path = p
+                 break
     
     parser = argparse.ArgumentParser(description='Production版本视频分析工具')
     parser.add_argument('--db', default=default_db_path, help=f'数据库文件路径（默认: {default_db_path}）')

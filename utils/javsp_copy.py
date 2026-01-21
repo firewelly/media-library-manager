@@ -270,7 +270,7 @@ def copy_single(cursor, conn, old_file_path, video_id, target_library_path, prog
         # 构建插入语句，复制除id、file_path、source_folder外的所有字段
         values = list(original_video)
         
-        # 更新file_path、file_size、source_folder
+        # 更新file_path、file_size、source_folder、file_name
         file_path_idx = video_column_names.index('file_path')
         file_size_idx = video_column_names.index('file_size')
         source_folder_idx = video_column_names.index('source_folder')
@@ -278,6 +278,10 @@ def copy_single(cursor, conn, old_file_path, video_id, target_library_path, prog
         values[file_path_idx] = final_path
         values[file_size_idx] = new_file_size
         values[source_folder_idx] = dest_dir
+        
+        if 'file_name' in video_column_names:
+            file_name_idx = video_column_names.index('file_name')
+            values[file_name_idx] = os.path.basename(final_path)
         
         # 构建插入语句
         placeholders = ', '.join(['?' for _ in values[1:]])  # 跳过id列

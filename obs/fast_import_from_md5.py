@@ -15,8 +15,21 @@ import logging
 from pathlib import Path
 
 # 配置
-MD5_CSV_PATH = "/Users/firewell/Library/CloudStorage/OneDrive-个人/bioinfo/media/video_md5.csv"
-DB_PATH = "/Users/firewell/Library/CloudStorage/OneDrive-个人/bioinfo/media/media_library.db"
+# 使用相对路径
+current_dir = os.path.dirname(os.path.abspath(__file__))
+root_dir = os.path.dirname(current_dir)
+MD5_CSV_PATH = os.path.join(root_dir, "video_md5.csv")
+DB_PATH = os.path.join(root_dir, "media_library.db")
+
+# 兼容性检查
+if not os.path.exists(DB_PATH):
+    for r in ["/Users/firewell/Library/CloudStorage/OneDrive-Personal/bioinfo/media", 
+              "/Users/firewell/Library/CloudStorage/OneDrive-个人/bioinfo/media"]:
+        if os.path.exists(os.path.join(r, "media_library.db")):
+            DB_PATH = os.path.join(r, "media_library.db")
+            MD5_CSV_PATH = os.path.join(r, "video_md5.csv")
+            break
+
 MIN_SIZE = 10 * 1024 * 1024  # 10MB
 NAS_REMOTE_PREFIX = "/volume1/Video"
 NAS_LOCAL_PREFIX = "/Volumes/Video"
