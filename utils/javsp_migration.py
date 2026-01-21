@@ -172,8 +172,8 @@ def migrate_single(cursor, conn, old_file_path, video_id, target_library_path, p
         for d in side_dirs:
             move_side_dir(d, dest_dir)
         cursor.execute(
-            "UPDATE videos SET file_path = ?, source_folder = ? WHERE id = ?",
-            (final_path, dest_dir, video_id)
+            "UPDATE videos SET file_path = ?, file_name = ?, source_folder = ? WHERE id = ?",
+            (final_path, os.path.basename(final_path), dest_dir, video_id)
         )
         conn.commit()
         return {

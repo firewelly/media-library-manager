@@ -168,7 +168,7 @@ def setup_driver(user_data_dir=None, profile_directory=None, headless=False, use
         # 设置代理
         if use_proxy:
             opts.add_argument(f'--proxy-server=socks5://{SOCKS5_PROXY_HOST}:{SOCKS5_PROXY_PORT}')
-            opts.add_argument('--proxy-bypass-list=<-loopback>')
+            opts.add_argument('--proxy-bypass-list=localhost,127.0.0.1')
         
         # 设置无头模式
         if headless:

@@ -224,7 +224,19 @@ class VideoDescriptionUpdater:
 def main():
     """主函数"""
     # 设置文件路径
-    csv_path = "/Users/firewell/Library/CloudStorage/OneDrive-个人/bioinfo/media/analysis_out.csv"
+    # 使用相对路径以支持不同环境(OneDrive-Personal/OneDrive-个人)
+    current_dir = os.path.dirname(os.path.abspath(__file__))
+    csv_path = os.path.join(current_dir, "analysis_out.csv")
+    
+    if not os.path.exists(csv_path):
+        possible_paths = [
+            "/Users/firewell/Library/CloudStorage/OneDrive-Personal/bioinfo/media/analysis_out.csv",
+            "/Users/firewell/Library/CloudStorage/OneDrive-个人/bioinfo/media/analysis_out.csv"
+        ]
+        for p in possible_paths:
+            if os.path.exists(p):
+                csv_path = p
+                break
     db_path = "media_library.db"
     
     # 检查文件是否存在

@@ -32,6 +32,16 @@ env/
 ENV/
 env.bak/
 venv.bak/
+mlx_whisper_env/
+
+# 打包和压缩文件
+*.zip
+*.tar.gz
+*.rar
+media-library.app/
+
+# 备份文件
+*.backup
 
 # IDE文件
 .vscode/

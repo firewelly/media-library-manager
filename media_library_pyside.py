@@ -45,6 +45,7 @@ from utils.thumbnails import ThumbnailGenerator
 from utils.database import DatabaseManager
 from utils.file_utils import FileUtils
 from utils import video_rotate
+from utils.advanced_tools import AdvancedToolsManager
 
 # 导入非GUI类和函数
 class LogLevel:
@@ -162,7 +163,7 @@ class MediaLibraryCore:
 
         # 默认列配置
         self.default_columns = {
-            'title': {'width': 400, 'position': 0, 'text': '标题'},
+            'title': {'width': 400, 'position': 0, 'text': '标题'},  # 宽度改回400
             'actors': {'width': 150, 'position': 1, 'text': '演员'},
             'stars': {'width': 75, 'position': 2, 'text': '星级'},
             'tags': {'width': 120, 'position': 3, 'text': '标签'},
@@ -320,6 +321,7 @@ class MediaLibraryCore:
 
     def get_ffmpeg_command(self):
         """获取可用的FFmpeg命令路径，优先使用homebrew版本"""
+        import platform
         # macOS下优先使用homebrew版本的ffmpeg
         if platform.system() == 'Darwin':
             # 优先检查homebrew路径
@@ -1497,11 +1499,17 @@ class VideoListWidget(QTreeWidget):
         self.setSelectionMode(QTreeWidget.ExtendedSelection)
         self.setAlternatingRowColors(True)
         self.setSortingEnabled(False)  # 禁用默认排序，使用自定义排序
+        
+        # 设置表头属性：允许调整列宽和移动列顺序
+        self.header().setStretchLastSection(False)
+        self.header().setSectionsMovable(True)  # 允许移动列
+        self.header().setSectionsClickable(True)
+        self.header().setSortIndicatorShown(True)  # 显示排序指示器
 
         # 连接信号
         self.itemSelectionChanged.connect(self.trigger_selection_changed)
         self.itemDoubleClicked.connect(self.trigger_double_clicked)
-        self.header().sectionClicked.connect(self.trigger_header_clicked)
+        self.header().sectionDoubleClicked.connect(self.trigger_header_clicked)  # 改为双击表头排序
 
         # 设置右键菜单
         self.setContextMenuPolicy(Qt.CustomContextMenu)
@@ -1509,12 +1517,15 @@ class VideoListWidget(QTreeWidget):
 
     def mouseDoubleClickEvent(self, event):
         """重写双击事件，支持星级列的快速编辑"""
+        print(f"[DEBUG] mouseDoubleClickEvent called, pos={event.pos()}")
         item = self.itemAt(event.pos())
         if not item:
+            print(f"[DEBUG] No item at click position")
             return
 
-        # 获取点击的列
-        column = self.columnAt(event.pos())
+        # 获取点击的列 - 使用event.pos().x()而不是event.pos()
+        column = self.columnAt(event.pos().x())
+        print(f"[DEBUG] Clicked column: {column}")
 
         # 获取列名
         sorted_columns = sorted(self.parent_window.core.column_config.items(), key=lambda x: x[1]['position'])
@@ -1522,9 +1533,11 @@ class VideoListWidget(QTreeWidget):
 
         if column < len(column_names) and column_names[column] == 'stars':
             # 点击的是星级列，显示快速设置对话框
+            print(f"[DEBUG] Star column clicked, showing quick star dialog")
             video_id = item.data(0, Qt.UserRole)
             self.parent_window.show_quick_star_dialog(video_id)
         else:
+            print(f"[DEBUG] Non-star column clicked, calling super()")
             super().mouseDoubleClickEvent(event)
 
     def trigger_context_menu(self, position):
@@ -1556,11 +1569,16 @@ class VideoListWidget(QTreeWidget):
                 self.parent_window.load_video_detail(video_id)
 
     def trigger_double_clicked(self, item, column):
+        print(f"[DEBUG] trigger_double_clicked called, item={item}, column={column}")
         if hasattr(self.parent_window, 'on_video_double_clicked') and callable(self.parent_window.on_video_double_clicked):
+            print(f"[DEBUG] Calling on_video_double_clicked")
             self.parent_window.on_video_double_clicked(item, column)
         else:
             if hasattr(self.parent_window, 'play_video') and callable(self.parent_window.play_video):
+                print(f"[DEBUG] Calling play_video")
                 self.parent_window.play_video()
+            else:
+                print(f"[DEBUG] play_video not found or not callable")
 
     def trigger_header_clicked(self, column):
         if hasattr(self.parent_window, 'on_video_header_clicked') and callable(self.parent_window.on_video_header_clicked):
@@ -1875,7 +1893,8 @@ class SearchWidget(QWidget):
         title_layout = QHBoxLayout()
         title_layout.addWidget(QLabel("标题:"))
         self.title_search = QLineEdit()
-        self.title_search.textChanged.connect(self.trigger_search)
+        # 移除textChanged自动搜索，改为手动按钮触发
+        # self.title_search.textChanged.connect(self.trigger_search)
         title_layout.addWidget(self.title_search)
         search_layout.addLayout(title_layout)
 
@@ -1883,7 +1902,8 @@ class SearchWidget(QWidget):
         tag_layout = QHBoxLayout()
         tag_layout.addWidget(QLabel("标签:"))
         self.tag_search = QLineEdit()
-        self.tag_search.textChanged.connect(self.trigger_search)
+        # 移除textChanged自动搜索，改为手动按钮触发
+        # self.tag_search.textChanged.connect(self.trigger_search)
         tag_layout.addWidget(self.tag_search)
         search_layout.addLayout(tag_layout)
 
@@ -1891,9 +1911,24 @@ class SearchWidget(QWidget):
         actor_layout = QHBoxLayout()
         actor_layout.addWidget(QLabel("演员:"))
         self.actor_search = QLineEdit()
-        self.actor_search.textChanged.connect(self.trigger_search)
+        # 移除textChanged自动搜索，改为手动按钮触发
+        # self.actor_search.textChanged.connect(self.trigger_search)
         actor_layout.addWidget(self.actor_search)
         search_layout.addLayout(actor_layout)
+
+        # 搜索按钮
+        button_layout = QHBoxLayout()
+        self.search_button = QPushButton("搜索")
+        self.search_button.setMinimumWidth(80)  # 设置按钮最小宽度
+        self.search_button.clicked.connect(self.on_search_button_clicked)
+        button_layout.addWidget(self.search_button)
+        
+        self.clear_button = QPushButton("清除")
+        self.clear_button.setMinimumWidth(80)  # 设置按钮最小宽度
+        self.clear_button.clicked.connect(self.on_clear_button_clicked)
+        button_layout.addWidget(self.clear_button)
+        
+        search_layout.addLayout(button_layout)
 
         search_group.setLayout(search_layout)
         layout.addWidget(search_group)
@@ -2057,10 +2092,64 @@ class SearchWidget(QWidget):
         if hasattr(self.parent_window, 'on_online_only_changed') and callable(self.parent_window.on_online_only_changed):
             self.parent_window.on_online_only_changed(state)
         else:
-            setattr(self.parent_window, 'show_online_only', state == Qt.Checked)
-            setattr(self.parent_window, 'is_filtering', True)
+            if hasattr(self.parent_window, 'show_online_only'):
+                self.parent_window.show_online_only = (state == Qt.Checked)
+            else:
+                setattr(self.parent_window, 'show_online_only', state == Qt.Checked)
+            
+            if hasattr(self.parent_window, 'is_filtering'):
+                self.parent_window.is_filtering = True
+            else:
+                setattr(self.parent_window, 'is_filtering', True)
+                
             if hasattr(self.parent_window, 'load_videos') and callable(self.parent_window.load_videos):
                 self.parent_window.load_videos()
+
+    def on_search_button_clicked(self):
+        """搜索按钮点击事件"""
+        # 检查所有搜索框是否都为空
+        title_text = self.title_search.text().strip()
+        tag_text = self.tag_search.text().strip()
+        actor_text = self.actor_search.text().strip()
+        
+        if not title_text and not tag_text and not actor_text:
+            # 所有搜索框为空，清除筛选器
+            self.on_clear_button_clicked()
+            return
+        
+        # 设置筛选标志并触发搜索
+        if hasattr(self.parent_window, 'is_filtering'):
+            self.parent_window.is_filtering = True
+        else:
+            setattr(self.parent_window, 'is_filtering', True)
+            
+        if hasattr(self.parent_window, 'load_videos') and callable(self.parent_window.load_videos):
+            self.parent_window.load_videos()
+
+    def on_clear_button_clicked(self):
+        """清除按钮点击事件"""
+        # 清空所有搜索框
+        self.title_search.clear()
+        self.tag_search.clear()
+        self.actor_search.clear()
+        
+        # 重置星级筛选为"全部"
+        if hasattr(self, 'star_button_group'):
+            self.star_button_group.button(0).setChecked(True)  # 选择"全部"按钮
+        
+        # 重置文件夹筛选为"全部"
+        if hasattr(self, 'folder_button_group'):
+            self.folder_button_group.button(0).setChecked(True)  # 选择"全部"按钮
+        
+        # 清除筛选标志
+        if hasattr(self.parent_window, 'is_filtering'):
+            self.parent_window.is_filtering = False
+        else:
+            setattr(self.parent_window, 'is_filtering', False)
+        
+        # 重新加载视频（不应用任何筛选）
+        if hasattr(self.parent_window, 'load_videos') and callable(self.parent_window.load_videos):
+            self.parent_window.load_videos()
 
 class JavInfoDialog(QDialog):
     def __init__(self, parent):
@@ -2108,10 +2197,16 @@ class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.core = MediaLibraryCore()
+        # 初始化筛选状态
+        self.show_online_only = True  # 默认选中"仅显示在线"
+        self.is_filtering = False
         self.setup_ui()
         self.setup_connections()
         self.setup_function_integration()
         self.load_data()
+
+        # 初始化高级工具管理器
+        self.advanced_tools_manager = AdvancedToolsManager(self.core.db_manager)
 
         # 应用扩展功能
         try:
@@ -2142,7 +2237,8 @@ class MainWindow(QMainWindow):
 
         # 左侧面板
         left_widget = QWidget()
-        left_widget.setMaximumWidth(300)
+        left_widget.setMinimumWidth(350)  # 增加最小宽度确保按钮可见
+        left_widget.setMaximumWidth(400)  # 增加最大宽度
         left_layout = QVBoxLayout()
         left_widget.setLayout(left_layout)
 
@@ -2155,6 +2251,25 @@ class MainWindow(QMainWindow):
         right_widget = QWidget()
         right_layout = QVBoxLayout()
         right_widget.setLayout(right_layout)
+
+        # 快速搜索工具栏
+        search_toolbar_layout = QHBoxLayout()
+        search_toolbar_layout.addWidget(QLabel("快速搜索:"))
+        self.quick_search_input = QLineEdit()
+        self.quick_search_input.setPlaceholderText("输入标题、标签或演员进行搜索...")
+        self.quick_search_input.setMinimumWidth(200)
+        search_toolbar_layout.addWidget(self.quick_search_input)
+        
+        self.quick_search_button = QPushButton("搜索")
+        self.quick_search_button.clicked.connect(self.on_quick_search_clicked)
+        search_toolbar_layout.addWidget(self.quick_search_button)
+        
+        self.quick_clear_button = QPushButton("清除")
+        self.quick_clear_button.clicked.connect(self.on_quick_clear_clicked)
+        search_toolbar_layout.addWidget(self.quick_clear_button)
+        
+        search_toolbar_layout.addStretch()
+        right_layout.addLayout(search_toolbar_layout)
 
         # 视频列表
         self.video_list = VideoListWidget(self)
@@ -2176,7 +2291,7 @@ class MainWindow(QMainWindow):
         splitter.addWidget(right_widget)
 
         # 设置分割比例
-        splitter.setSizes([300, 900])
+        splitter.setSizes([350, 850])
 
         # 创建菜单栏
         self.create_menus()
@@ -2216,13 +2331,27 @@ class MainWindow(QMainWindow):
         tools_menu.addAction("批量计算MD5", self.on_batch_calculate_md5)
         tools_menu.addAction("智能去重", self.on_smart_remove_duplicates)
         tools_menu.addAction("文件移动管理", self.on_file_move_manager)
-
+        tools_menu.addSeparator()
+        tools_menu.addAction("清理演员信息", self.on_clean_actor_data)
+        tools_menu.addAction("重新导入元数据", self.on_reimport_metadata)
+        tools_menu.addAction("完全重置数据库", self.on_full_database_reset)
+        tools_menu.addSeparator()
+        tools_menu.addAction("批量生成封面", self.on_batch_generate_thumbnails)
+        tools_menu.addAction("批量自动更新所有标签", self.on_batch_auto_tag_all)
+        tools_menu.addAction("批量标注没有标签的文件", self.on_batch_auto_tag_no_tags)
+        tools_menu.addAction("批量清理文件名", self.on_batch_clean_filenames)
+        tools_menu.addSeparator()
+        tools_menu.addAction("修正JAVDB错误信息", self.on_fix_javdb_error_titles)
+        tools_menu.addSeparator()
+        tools_menu.addAction("快速智能媒体库更新", self.on_quick_smart_media_update)
         tools_menu.addSeparator()
         tools_menu.addAction("JAV信息面板", self.open_jav_info_dialog)
 
         view_menu = menubar.addMenu("界面")
         view_menu.addAction("刷新", self.refresh_data)
         view_menu.addAction("清空筛选", self.clear_filters)
+        view_menu.addSeparator()
+        view_menu.addAction("重置界面布局", self.on_reset_gui_layout)
 
         help_menu = menubar.addMenu("帮助")
         help_menu.addAction("关于", self.show_about)
@@ -2291,23 +2420,9 @@ class MainWindow(QMainWindow):
     def on_import_videos(self):
         self.status_bar.showMessage("导入视频文件", 2000)
 
-    def on_batch_import_nfo_for_no_actors(self):
-        reply = QMessageBox.question(self, "批量导入NFO", "是否为所有缺失演员信息的视频导入NFO？",
-                                   QMessageBox.Yes | QMessageBox.No, QMessageBox.Yes)
-        if reply == QMessageBox.Yes:
-            videos = self.core.db_manager.get_videos()
-            video_ids = [v['id'] for v in videos]
-            self.run_batch_task("批量导入NFO", self.core.batch_manager.batch_import_nfo, 
-                              video_ids=video_ids, filter_no_actors=True)
 
-    def on_batch_import_javdb_for_no_title(self):
-        reply = QMessageBox.question(self, "批量导入JavDB", "是否为标题可能是番号的视频获取JavDB信息？",
-                                   QMessageBox.Yes | QMessageBox.No, QMessageBox.Yes)
-        if reply == QMessageBox.Yes:
-            videos = self.core.db_manager.get_videos()
-            video_ids = [v['id'] for v in videos]
-            self.run_batch_task("批量导入JavDB", self.core.batch_manager.batch_import_javdb,
-                              video_ids=video_ids, filter_no_title=True)
+
+
 
     def on_remove_duplicates(self):
         duplicates = self.core.maintenance_manager.find_duplicates()
@@ -2624,17 +2739,12 @@ class MainWindow(QMainWindow):
                 else:
                     conditions.append("1 = 0")
             else:
-                # 显示所有激活文件夹中的视频
-                conditions.append("""
-                    EXISTS (
-                        SELECT 1 FROM folders f
-                        WHERE f.is_active = 1
-                        AND v.source_folder LIKE f.folder_path || '%'
-                    )
-                """)
+                # 不添加任何文件夹条件，显示所有视频
+                # 参考media_library.py中的"全部"模式，不进行文件夹过滤
+                pass
 
             # 构建排序查询
-            order_clause = "ORDER BY v.title"  # 默认排序
+            order_clause = "ORDER BY v.file_created_time DESC"  # 默认按文件创建时间降序排列
             if hasattr(self.core, 'sort_column_name') and self.core.sort_column_name:
                 column_mapping = {
                     'title': 'v.title',
@@ -2829,6 +2939,20 @@ class MainWindow(QMainWindow):
             # 更新状态栏
             self.status_bar.showMessage(f"已加载 {video_count} 个视频{filter_status}", 3000)
             self.video_count_label.setText(f"{video_count} 个视频")
+            
+            # 设置标题列宽度
+            if hasattr(self, 'video_list') and self.video_list and self.video_list.columnCount() > 0:
+                try:
+                    # 查找标题列的索引
+                    column_index = 0  # 默认标题列是第0列
+                    # 遍历所有列，查找标题列
+                    for i in range(self.video_list.columnCount()):
+                        if self.video_list.headerItem() and self.video_list.headerItem().text(i) == '标题':
+                            column_index = i
+                            break
+                    self.video_list.setColumnWidth(column_index, 400)
+                except Exception as e:
+                    print(f"设置列宽失败: {e}")
 
         except Exception as e:
             error_msg = f"加载视频失败: {e}"
@@ -3851,55 +3975,358 @@ class MainWindow(QMainWindow):
             self.show_error("错误", f"导入视频文件失败: {e}")
 
     def on_remove_duplicates(self):
-        """去重复"""
-        progress = TaskProgressDialog("查找重复文件", self)
-        progress.show()
-        
-        def scan_task(progress_callback, cancel_check):
-            progress_callback("正在查询数据库...", 10)
-            self.core.cursor.execute("""
-                SELECT md5_hash, COUNT(*) as count
-                FROM videos 
-                WHERE md5_hash IS NOT NULL AND md5_hash != ''
-                GROUP BY md5_hash 
-                HAVING count > 1
-            """)
-            dups = self.core.cursor.fetchall()
+        """去重复 - 完整的去重界面"""
+        try:
+            from PySide6.QtWidgets import (
+                QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
+                QTableWidget, QTableWidgetItem, QHeaderView, QAbstractItemView,
+                QMessageBox, QProgressDialog, QCheckBox, QGroupBox, QSplitter,
+                QTextEdit, QListWidget, QListWidgetItem
+            )
+            from PySide6.QtCore import Qt, QThread, Signal
             
-            if not dups:
-                return "没有发现重复文件"
+            # 查找重复文件
+            progress = QProgressDialog("正在扫描重复文件...", "取消", 0, 100, self)
+            progress.setWindowTitle("去重界面")
+            progress.setWindowModality(Qt.WindowModal)
+            progress.show()
             
-            total_files = sum(c for _, c in dups)
-            groups = len(dups)
+            # 扫描重复文件
+            duplicate_groups = []
+            total_duplicates = 0
             
-            return f"发现 {groups} 组重复文件，共 {total_files} 个文件。\n目前PySide版本暂未实现完整的去重界面，建议使用旧版处理复杂去重。"
+            def scan_duplicates():
+                progress.setLabelText("正在查询数据库...")
+                progress.setValue(10)
+                
+                self.core.cursor.execute("""
+                    SELECT md5_hash, COUNT(*) as count
+                    FROM videos 
+                    WHERE md5_hash IS NOT NULL AND md5_hash != ''
+                    GROUP BY md5_hash 
+                    HAVING count > 1
+                """)
+                dup_groups = self.core.cursor.fetchall()
+                
+                if not dup_groups:
+                    return []
+                
+                progress.setLabelText("正在获取重复文件详细信息...")
+                progress.setValue(30)
+                
+                groups = []
+                for i, (md5_hash, count) in enumerate(dup_groups):
+                    self.core.cursor.execute("""
+                        SELECT id, file_name, file_path, size, duration, resolution, stars, tags
+                        FROM videos 
+                        WHERE md5_hash = ? 
+                        ORDER BY size DESC
+                    """, (md5_hash,))
+                    
+                    files = self.core.cursor.fetchall()
+                    groups.append({
+                        'md5_hash': md5_hash,
+                        'count': count,
+                        'files': files
+                    })
+                    
+                    progress.setValue(30 + int((i + 1) / len(dup_groups) * 60))
+                
+                return groups
             
-        worker = GenericWorker(scan_task)
-        
-        def on_finished(result):
+            # 执行扫描
+            duplicate_groups = scan_duplicates()
             progress.close()
-            self.show_info("查找结果", result)
             
-        worker.finished_signal.connect(on_finished)
-        worker.start()
-        self._current_worker = worker
+            if not duplicate_groups:
+                self.show_info("提示", "没有发现重复文件")
+                return
+            
+            total_duplicates = sum(g['count'] for g in duplicate_groups)
+            total_groups = len(duplicate_groups)
+            
+            # 创建去重对话框
+            dialog = QDialog(self)
+            dialog.setWindowTitle(f"去重界面 - 发现 {total_groups} 组重复文件，共 {total_duplicates} 个文件")
+            dialog.setMinimumSize(1000, 700)
+            
+            main_layout = QVBoxLayout()
+            
+            # 顶部信息栏
+            info_label = QLabel(f"发现 {total_groups} 组重复文件，共 {total_duplicates} 个文件。请选择要保留的文件：")
+            main_layout.addWidget(info_label)
+            
+            # 分割器：左侧组列表，右侧文件详情
+            splitter = QSplitter(Qt.Horizontal)
+            
+            # 左侧：重复组列表
+            group_widget = QListWidget()
+            group_widget.setSelectionMode(QAbstractItemView.SingleSelection)
+            for i, group in enumerate(duplicate_groups):
+                item_text = f"组 {i+1}: {group['md5_hash'][:8]}... ({group['count']} 个文件)"
+                item = QListWidgetItem(item_text)
+                item.setData(Qt.UserRole, i)  # 存储组索引
+                group_widget.addItem(item)
+            
+            splitter.addWidget(group_widget)
+            
+            # 右侧：文件详情和选择
+            right_widget = QWidget()
+            right_layout = QVBoxLayout()
+            
+            # 文件列表表格
+            file_table = QTableWidget()
+            file_table.setColumnCount(5)
+            file_table.setHorizontalHeaderLabels(["保留", "文件名", "大小", "时长", "操作"])
+            file_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+            file_table.setSelectionMode(QAbstractItemView.SingleSelection)
+            file_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
+            
+            right_layout.addWidget(file_table)
+            
+            # 操作按钮
+            button_layout = QHBoxLayout()
+            select_all_btn = QPushButton("全选当前组")
+            select_none_btn = QPushButton("取消全选")
+            keep_largest_btn = QPushButton("保留最大的文件")
+            keep_highest_rated_btn = QPushButton("保留评分最高的文件")
+            preview_btn = QPushButton("预览选中文件")
+            remove_selected_btn = QPushButton("删除选中的文件")
+            remove_selected_btn.setStyleSheet("background-color: #ffcccc;")
+            
+            button_layout.addWidget(select_all_btn)
+            button_layout.addWidget(select_none_btn)
+            button_layout.addWidget(keep_largest_btn)
+            button_layout.addWidget(keep_highest_rated_btn)
+            button_layout.addWidget(preview_btn)
+            button_layout.addWidget(remove_selected_btn)
+            
+            right_layout.addLayout(button_layout)
+            right_widget.setLayout(right_layout)
+            splitter.addWidget(right_widget)
+            
+            main_layout.addWidget(splitter)
+            
+            # 底部按钮
+            bottom_layout = QHBoxLayout()
+            auto_remove_btn = QPushButton("自动去重（保留最大的文件）")
+            auto_remove_btn.setStyleSheet("background-color: #ccffcc;")
+            close_btn = QPushButton("关闭")
+            bottom_layout.addWidget(auto_remove_btn)
+            bottom_layout.addStretch()
+            bottom_layout.addWidget(close_btn)
+            main_layout.addLayout(bottom_layout)
+            
+            dialog.setLayout(main_layout)
+            
+            # 当前选中的组索引
+            current_group_index = 0
+            
+            def update_file_table(group_idx):
+                """更新文件表格以显示指定组的文件"""
+                nonlocal current_group_index
+                current_group_index = group_idx
+                
+                file_table.setRowCount(0)
+                if group_idx < 0 or group_idx >= len(duplicate_groups):
+                    return
+                
+                group = duplicate_groups[group_idx]
+                files = group['files']
+                
+                file_table.setRowCount(len(files))
+                
+                for row, (video_id, file_name, file_path, size, duration, resolution, stars, tags) in enumerate(files):
+                    # 保留复选框
+                    checkbox = QCheckBox()
+                    checkbox.setChecked(row == 0)  # 默认选中第一个（最大的）
+                    file_table.setCellWidget(row, 0, checkbox)
+                    
+                    # 文件名
+                    file_table.setItem(row, 1, QTableWidgetItem(file_name))
+                    # 大小
+                    size_str = f"{size / (1024*1024):.2f} MB" if size else "未知"
+                    file_table.setItem(row, 2, QTableWidgetItem(size_str))
+                    # 时长
+                    duration_str = f"{duration // 60}:{duration % 60:02d}" if duration else "未知"
+                    file_table.setItem(row, 3, QTableWidgetItem(duration_str))
+                    # 操作按钮
+                    preview_btn = QPushButton("预览")
+                    preview_btn.setProperty('file_path', file_path)
+                    preview_btn.clicked.connect(lambda checked, fp=file_path: preview_file(fp))
+                    file_table.setCellWidget(row, 4, preview_btn)
+            
+            def preview_file(file_path):
+                """预览文件"""
+                import os
+                import subprocess
+                try:
+                    if os.path.exists(file_path):
+                        subprocess.run(['open', file_path], check=False)
+                    else:
+                        self.show_error("错误", f"文件不存在: {file_path}")
+                except Exception as e:
+                    self.show_error("错误", f"预览文件失败: {e}")
+            
+            def select_all_in_group():
+                """全选当前组的所有文件"""
+                for row in range(file_table.rowCount()):
+                    checkbox = file_table.cellWidget(row, 0)
+                    if checkbox:
+                        checkbox.setChecked(True)
+            
+            def select_none_in_group():
+                """取消全选当前组的所有文件"""
+                for row in range(file_table.rowCount()):
+                    checkbox = file_table.cellWidget(row, 0)
+                    if checkbox:
+                        checkbox.setChecked(False)
+            
+            def keep_largest_in_group():
+                """保留当前组中最大的文件"""
+                if duplicate_groups and current_group_index < len(duplicate_groups):
+                    for row in range(file_table.rowCount()):
+                        checkbox = file_table.cellWidget(row, 0)
+                        if checkbox:
+                            checkbox.setChecked(row == 0)  # 第一个是最大的（按大小排序）
+            
+            def keep_highest_rated_in_group():
+                """保留当前组中评分最高的文件"""
+                if duplicate_groups and current_group_index < len(duplicate_groups):
+                    group = duplicate_groups[current_group_index]
+                    files = group['files']
+                    
+                    # 找到评分最高的文件
+                    max_stars = -1
+                    max_stars_row = 0
+                    for row, (_, _, _, _, _, _, stars, _) in enumerate(files):
+                        if stars and stars > max_stars:
+                            max_stars = stars
+                            max_stars_row = row
+                    
+                    for row in range(file_table.rowCount()):
+                        checkbox = file_table.cellWidget(row, 0)
+                        if checkbox:
+                            checkbox.setChecked(row == max_stars_row)
+            
+            def remove_selected_files():
+                """删除当前组中选中的文件"""
+                if not duplicate_groups or current_group_index >= len(duplicate_groups):
+                    return
+                
+                # 获取选中的文件ID
+                files_to_remove = []
+                group = duplicate_groups[current_group_index]
+                files = group['files']
+                
+                for row, (video_id, file_name, file_path, size, duration, resolution, stars, tags) in enumerate(files):
+                    checkbox = file_table.cellWidget(row, 0)
+                    if checkbox and not checkbox.isChecked():  # 未选中的文件将被删除
+                        files_to_remove.append((video_id, file_path))
+                
+                if not files_to_remove:
+                    self.show_info("提示", "没有选择要删除的文件")
+                    return
+                
+                # 确认删除
+                reply = QMessageBox.question(
+                    dialog, "确认删除",
+                    f"确定要删除 {len(files_to_remove)} 个文件吗？\n"
+                    "删除操作不可恢复！",
+                    QMessageBox.Yes | QMessageBox.No,
+                    QMessageBox.No
+                )
+                
+                if reply == QMessageBox.Yes:
+                    # 删除文件
+                    removed_count = 0
+                    for video_id, file_path in files_to_remove:
+                        try:
+                            # 从数据库删除记录
+                            self.core.cursor.execute("DELETE FROM videos WHERE id = ?", (video_id,))
+                            # 删除关联表记录
+                            self.core.cursor.execute("DELETE FROM video_actors WHERE video_id = ?", (video_id,))
+                            self.core.cursor.execute("DELETE FROM javdb_info WHERE video_id = ?", (video_id,))
+                            removed_count += 1
+                        except Exception as e:
+                            logger.error(f"删除视频记录失败 {video_id}: {e}")
+                    
+                    self.core.conn.commit()
+                    
+                    # 从当前组中移除已删除的文件
+                    remaining_files = [f for f in files if f[0] not in [vid for vid, _ in files_to_remove]]
+                    duplicate_groups[current_group_index]['files'] = remaining_files
+                    duplicate_groups[current_group_index]['count'] = len(remaining_files)
+                    
+                    # 如果组中只剩下一个文件，移除整个组
+                    if len(remaining_files) <= 1:
+                        duplicate_groups.pop(current_group_index)
+                        # 更新组列表
+                        group_widget.clear()
+                        for i, group in enumerate(duplicate_groups):
+                            item_text = f"组 {i+1}: {group['md5_hash'][:8]}... ({group['count']} 个文件)"
+                            item = QListWidgetItem(item_text)
+                            item.setData(Qt.UserRole, i)
+                            group_widget.addItem(item)
+                        
+                        if duplicate_groups:
+                            group_widget.setCurrentRow(0)
+                            update_file_table(0)
+                        else:
+                            self.show_info("成功", f"已删除 {removed_count} 个文件，所有重复组已处理完成")
+                            dialog.accept()
+                            self.load_videos()  # 刷新主界面
+                            return
+                    else:
+                        update_file_table(current_group_index)
+                    
+                    self.show_info("成功", f"已删除 {removed_count} 个文件")
+                    self.load_videos()  # 刷新主界面
+            
+            def auto_remove_all():
+                """自动去重 - 保留每组中最大的文件"""
+                reply = QMessageBox.question(
+                    dialog, "确认自动去重",
+                    "此操作将自动删除所有重复文件，每组保留最大的文件。\n"
+                    "删除操作不可恢复！确定要继续吗？",
+                    QMessageBox.Yes | QMessageBox.No,
+                    QMessageBox.No
+                )
+                
+                if reply == QMessageBox.Yes:
+                    # 使用现有的智能去重功能
+                    dialog.close()
+                    self.on_smart_remove_duplicates()
+            
+            # 连接信号
+            group_widget.currentRowChanged.connect(update_file_table)
+            select_all_btn.clicked.connect(select_all_in_group)
+            select_none_btn.clicked.connect(select_none_in_group)
+            keep_largest_btn.clicked.connect(keep_largest_in_group)
+            keep_highest_rated_btn.clicked.connect(keep_highest_rated_in_group)
+            remove_selected_btn.clicked.connect(remove_selected_files)
+            auto_remove_btn.clicked.connect(auto_remove_all)
+            close_btn.clicked.connect(dialog.accept)
+            
+            # 显示第一个组
+            if duplicate_groups:
+                group_widget.setCurrentRow(0)
+                update_file_table(0)
+            
+            dialog.exec_()
+            
+        except Exception as e:
+            self.show_error("错误", f"去重界面加载失败: {e}")
+            logger.error(f"去重界面错误: {e}")
 
     def on_batch_import_nfo_for_no_actors(self):
-        """批量导入NFO信息（为没有演员信息的视频）"""
-        try:
-            from PySide6.QtWidgets import QMessageBox
-            reply = QMessageBox.question(
-                self, "确认操作",
-                "此功能将为没有演员信息的视频批量导入NFO文件。\n"
-                "这可能需要较长时间，确定要继续吗？",
-                QMessageBox.Yes | QMessageBox.No,
-                QMessageBox.No
-            )
-
-            if reply == QMessageBox.Yes:
-                self.show_info("提示", "批量NFO导入功能正在开发中...")
-        except Exception as e:
-            self.show_error("错误", f"批量NFO导入失败: {e}")
+        reply = QMessageBox.question(self, "批量导入NFO", "是否为所有缺失演员信息的视频导入NFO？",
+                                   QMessageBox.Yes | QMessageBox.No, QMessageBox.Yes)
+        if reply == QMessageBox.Yes:
+            videos = self.core.db_manager.get_videos()
+            video_ids = [v['id'] for v in videos]
+            self.run_batch_task("批量导入NFO", self.core.batch_manager.batch_import_nfo, 
+                              video_ids=video_ids, filter_no_actors=True)
 
     def on_batch_import_javdb_for_no_title(self):
         """批量导入JAV信息（为没有标题的视频），使用 JavSP 回退"""
@@ -4597,16 +5024,46 @@ class MainWindow(QMainWindow):
         dialog.setLayout(layout)
         dialog.exec_()
 
+    def on_quick_search_clicked(self):
+        """快速搜索按钮点击事件"""
+        search_text = self.quick_search_input.text().strip()
+        if not search_text:
+            # 如果搜索框为空，清除筛选
+            self.on_quick_clear_clicked()
+            return
+        
+        # 设置快速搜索文本到左侧搜索框（标题搜索）
+        if hasattr(self, 'search_widget') and hasattr(self.search_widget, 'title_search'):
+            self.search_widget.title_search.setText(search_text)
+            self.search_widget.tag_search.clear()
+            self.search_widget.actor_search.clear()
+        
+        # 触发搜索
+        if hasattr(self.search_widget, 'on_search_button_clicked'):
+            self.search_widget.on_search_button_clicked()
+
+    def on_quick_clear_clicked(self):
+        """快速清除按钮点击事件"""
+        # 清空快速搜索框
+        self.quick_search_input.clear()
+        
+        # 清除左侧搜索框
+        if hasattr(self, 'search_widget') and hasattr(self.search_widget, 'on_clear_button_clicked'):
+            self.search_widget.on_clear_button_clicked()
+
     def play_video(self):
         """播放视频（跨平台）"""
+        print(f"[DEBUG] play_video called")
         try:
             # 获取当前选中的视频
             selected_items = self.video_list.selectedItems()
+            print(f"[DEBUG] selected_items count: {len(selected_items)}")
             if not selected_items:
                 self.show_warning("提示", "请先选择一个视频")
                 return
 
             video_id = selected_items[0].data(0, Qt.UserRole)
+            print(f"[DEBUG] video_id: {video_id}")
 
             # 从数据库获取视频信息
             self.core.cursor.execute("SELECT file_path, source_folder, is_nas_online FROM videos WHERE id = ?", (video_id,))
@@ -4733,6 +5190,274 @@ class MainWindow(QMainWindow):
         except Exception as e:
             self.show_error("错误", f"快速设置星级失败: {e}")
 
+    # ============================================================================
+    # 高级工具菜单功能
+    # ============================================================================
+
+    def on_clean_actor_data(self):
+        """清理演员信息"""
+        try:
+            # 使用 maintenance_manager 中的现有功能
+            result = self.core.maintenance_manager.clean_actor_data()
+            if result['status'] == 'success':
+                self.show_info("成功", f"演员信息清理完成: {result['message']}")
+                self.load_videos()  # 刷新数据
+            else:
+                self.show_error("错误", f"演员信息清理失败: {result['message']}")
+        except Exception as e:
+            self.show_error("错误", f"清理演员信息失败: {e}")
+
+    def on_reimport_metadata(self):
+        """重新导入元数据不完整的视频"""
+        try:
+            from PySide6.QtWidgets import QProgressDialog
+            from PySide6.QtCore import Qt
+            
+            progress_dialog = QProgressDialog("重新导入元数据...", "取消", 0, 100, self)
+            progress_dialog.setWindowTitle("重新导入元数据")
+            progress_dialog.setWindowModality(Qt.WindowModal)
+            progress_dialog.show()
+            
+            def progress_callback(message, progress, details):
+                progress_dialog.setLabelText(message)
+                progress_dialog.setValue(progress)
+                progress_dialog.setWindowTitle(f"重新导入元数据 ({progress}%)")
+                
+            def cancel_check():
+                return progress_dialog.wasCanceled()
+            
+            result = self.advanced_tools_manager.reimport_incomplete_metadata(
+                progress_callback=progress_callback,
+                cancel_check=cancel_check
+            )
+            
+            progress_dialog.close()
+            
+            if result['status'] == 'success':
+                self.show_info("成功", f"重新导入元数据完成: {result['message']}")
+                self.load_videos()  # 刷新数据
+            elif result['status'] == 'cancelled':
+                self.show_info("已取消", "重新导入元数据操作已取消")
+            else:
+                self.show_error("错误", f"重新导入元数据失败: {result['message']}")
+        except Exception as e:
+            self.show_error("错误", f"重新导入元数据失败: {e}")
+
+    def on_full_database_reset(self):
+        """完全重置数据库"""
+        try:
+            from PySide6.QtWidgets import QMessageBox
+            reply = QMessageBox.question(
+                self, 
+                "确认",
+                "此操作将完全重置数据库（保留标签和评分信息）。\n"
+                "所有视频需要重新扫描才能恢复元数据。\n\n"
+                "确定要继续吗？",
+                QMessageBox.Yes | QMessageBox.No,
+                QMessageBox.No
+            )
+            
+            if reply == QMessageBox.Yes:
+                from PySide6.QtWidgets import QProgressDialog
+                from PySide6.QtCore import Qt
+                
+                progress_dialog = QProgressDialog("重置数据库...", "取消", 0, 100, self)
+                progress_dialog.setWindowTitle("重置数据库")
+                progress_dialog.setWindowModality(Qt.WindowModal)
+                progress_dialog.show()
+                
+                def progress_callback(message, progress, details):
+                    progress_dialog.setLabelText(message)
+                    progress_dialog.setValue(progress)
+                
+                def cancel_check():
+                    return progress_dialog.wasCanceled()
+                
+                result = self.advanced_tools_manager.full_database_reset(
+                    progress_callback=progress_callback,
+                    cancel_check=cancel_check
+                )
+                
+                progress_dialog.close()
+                
+                if result['status'] == 'success':
+                    self.show_info("成功", f"数据库重置完成: {result['message']}")
+                    self.load_videos()  # 刷新数据
+                elif result['status'] == 'cancelled':
+                    self.show_info("已取消", "数据库重置操作已取消")
+                else:
+                    self.show_error("错误", f"数据库重置失败: {result['message']}")
+        except Exception as e:
+            self.show_error("错误", f"数据库重置失败: {e}")
+
+    def on_batch_generate_thumbnails(self):
+        """批量生成封面"""
+        try:
+            # 使用现有的 batch_manager 功能
+            result = self.core.batch_manager.batch_generate_thumbnails()
+            if result['status'] == 'success':
+                self.show_info("成功", f"批量生成封面完成: {result['message']}")
+                self.load_videos()  # 刷新数据
+            else:
+                self.show_error("错误", f"批量生成封面失败: {result['message']}")
+        except Exception as e:
+            self.show_error("错误", f"批量生成封面失败: {e}")
+
+    def on_batch_auto_tag_all(self):
+        """批量自动更新所有标签"""
+        try:
+            result = self.advanced_tools_manager.batch_auto_tag_all()
+            if result['status'] == 'info':
+                self.show_info("提示", f"{result['message']}\n\n此功能需要视频内容分析器模块支持。")
+            elif result['status'] == 'success':
+                self.show_info("成功", f"批量自动更新所有标签完成: {result['message']}")
+                self.load_videos()  # 刷新数据
+            else:
+                self.show_error("错误", f"批量自动更新所有标签失败: {result['message']}")
+        except Exception as e:
+            self.show_error("错误", f"批量自动更新所有标签失败: {e}")
+
+    def on_batch_auto_tag_no_tags(self):
+        """批量标注没有标签的文件"""
+        try:
+            result = self.advanced_tools_manager.batch_auto_tag_no_tags()
+            if result['status'] == 'success':
+                self.show_info("成功", f"所有视频都已有关标签")
+            elif result['status'] == 'info':
+                self.show_info("提示", f"{result['message']}\n\n此功能需要视频内容分析器模块支持。")
+            else:
+                self.show_error("错误", f"批量标注没有标签的文件失败: {result['message']}")
+        except Exception as e:
+            self.show_error("错误", f"批量标注没有标签的文件失败: {e}")
+
+    def on_batch_clean_filenames(self):
+        """批量清理文件名"""
+        try:
+            # 使用现有的 batch_manager 功能
+            result = self.core.batch_manager.batch_clean_filenames()
+            if result['status'] == 'success':
+                self.show_info("成功", f"批量清理文件名完成: {result['message']}")
+                self.load_videos()  # 刷新数据
+            else:
+                self.show_error("错误", f"批量清理文件名失败: {result['message']}")
+        except Exception as e:
+            self.show_error("错误", f"批量清理文件名失败: {e}")
+
+    def on_fix_javdb_error_titles(self):
+        """修正JAVDB错误信息"""
+        try:
+            from PySide6.QtWidgets import QProgressDialog
+            from PySide6.QtCore import Qt
+            
+            progress_dialog = QProgressDialog("修正JAVDB错误标题...", "取消", 0, 100, self)
+            progress_dialog.setWindowTitle("修正JAVDB错误信息")
+            progress_dialog.setWindowModality(Qt.WindowModal)
+            progress_dialog.show()
+            
+            def progress_callback(message, progress, details):
+                progress_dialog.setLabelText(message)
+                progress_dialog.setValue(progress)
+                
+            def cancel_check():
+                return progress_dialog.wasCanceled()
+            
+            result = self.advanced_tools_manager.fix_javdb_error_titles(
+                progress_callback=progress_callback,
+                cancel_check=cancel_check
+            )
+            
+            progress_dialog.close()
+            
+            if result['status'] == 'success':
+                self.show_info("成功", f"JAVDB错误信息修正完成: {result['message']}")
+                self.load_videos()  # 刷新数据
+            elif result['status'] == 'cancelled':
+                self.show_info("已取消", "JAVDB错误信息修正操作已取消")
+            else:
+                self.show_error("错误", f"JAVDB错误信息修正失败: {result['message']}")
+        except Exception as e:
+            self.show_error("错误", f"修正JAVDB错误信息失败: {e}")
+
+    def on_quick_smart_media_update(self):
+        """快速智能媒体库更新"""
+        try:
+            from PySide6.QtWidgets import QFileDialog
+            
+            # 让用户选择文件夹
+            folder_path = QFileDialog.getExistingDirectory(
+                self, 
+                "选择要快速更新的文件夹",
+                "", 
+                QFileDialog.ShowDirsOnly
+            )
+            
+            if folder_path:
+                from PySide6.QtWidgets import QProgressDialog
+                from PySide6.QtCore import Qt
+                
+                progress_dialog = QProgressDialog("快速智能媒体库更新...", "取消", 0, 100, self)
+                progress_dialog.setWindowTitle("快速智能媒体库更新")
+                progress_dialog.setWindowModality(Qt.WindowModal)
+                progress_dialog.show()
+                
+                def progress_callback(message, progress, details):
+                    progress_dialog.setLabelText(message)
+                    progress_dialog.setValue(progress)
+                    
+                def cancel_check():
+                    return progress_dialog.wasCanceled()
+                
+                result = self.advanced_tools_manager.quick_smart_media_update(
+                    folder_paths=[folder_path],
+                    progress_callback=progress_callback,
+                    cancel_check=cancel_check
+                )
+                
+                progress_dialog.close()
+                
+                if result['status'] == 'success':
+                    self.show_info("成功", f"快速智能媒体库更新完成: {result['message']}")
+                    self.load_videos()  # 刷新数据
+                elif result['status'] == 'cancelled':
+                    self.show_info("已取消", "快速智能媒体库更新操作已取消")
+                else:
+                    self.show_error("错误", f"快速智能媒体库更新失败: {result['message']}")
+        except Exception as e:
+            self.show_error("错误", f"快速智能媒体库更新失败: {e}")
+
+    def on_reset_gui_layout(self):
+        """重置界面布局"""
+        try:
+            from PySide6.QtWidgets import QMessageBox
+            reply = QMessageBox.question(
+                self, 
+                "确认",
+                "此操作将重置所有界面布局设置（列宽、顺序、窗口大小等）\n"
+                "并恢复为默认布局。确定要继续吗？",
+                QMessageBox.Yes | QMessageBox.No,
+                QMessageBox.No
+            )
+            
+            if reply == QMessageBox.Yes:
+                # 重置列配置到默认值
+                self.core.column_config = self.core.default_columns.copy()
+                self.core.save_column_config()
+                
+                # 重置表格列
+                self.setup_table_columns()
+                
+                # 重置窗口尺寸和位置
+                self.resize(1400, 800)
+                self.move(100, 100)
+                
+                self.show_info("成功", "界面布局已重置为默认设置")
+        except Exception as e:
+            self.show_error("错误", f"重置界面布局失败: {e}")
+
+    # ============================================================================
+    # 右键菜单功能
+    # ============================================================================
+
     def show_actor_detail(self, actor_name):
         """显示演员详情窗口"""
         try:
@@ -4751,7 +5476,20 @@ class ActorDetailWindow(QDialog):
         self.core = parent.core
 
         # 默认头像图片路径
-        self.default_avatar_path = '/Users/firewell/Library/CloudStorage/OneDrive-个人/bioinfo/media/covers/default.JPEG'
+        # 使用相对路径以支持不同环境(OneDrive-Personal/OneDrive-个人)
+        current_dir = os.path.dirname(os.path.abspath(__file__))
+        self.default_avatar_path = os.path.join(current_dir, 'covers', 'default.JPEG')
+        
+        # 兼容性检查：如果相对路径不存在，尝试硬编码路径
+        if not os.path.exists(self.default_avatar_path):
+            possible_paths = [
+                '/Users/firewell/Library/CloudStorage/OneDrive-Personal/bioinfo/media/covers/default.JPEG',
+                '/Users/firewell/Library/CloudStorage/OneDrive-个人/bioinfo/media/covers/default.JPEG'
+            ]
+            for p in possible_paths:
+                if os.path.exists(p):
+                    self.default_avatar_path = p
+                    break
 
         # 获取演员信息
         self.actor_info = self.get_actor_info_by_name(actor_name)
