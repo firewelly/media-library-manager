@@ -16,33 +16,21 @@ import socks
 import socket
 import subprocess
 from config import SOCKS5_PROXY_HOST, SOCKS5_PROXY_PORT, BASE_URL, LOGIN_EMAIL, LOGIN_PASSWORD, MIN_DELAY, MAX_DELAY
+from utils.runtime import runtime_dir, runtime_path
 
-# Create results directory
-if not os.path.exists('results'):
-    os.makedirs('results')
-
-# Create images directory
-if not os.path.exists('results/images'):
-    os.makedirs('results/images')
-
-# Absolute covers directory (unified path)
-COVERS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'results', 'images')
-os.makedirs(COVERS_DIR, exist_ok=True)
+RESULTS_DIR = runtime_path('results')
+IMAGES_DIR = runtime_path('results', 'images')
+os.makedirs(IMAGES_DIR, exist_ok=True)
+COVERS_DIR = IMAGES_DIR
 
 def get_dedicated_edge_user_data_dir():
     """Return and create a dedicated Edge user data dir to persist login state"""
     try:
-        base = os.path.dirname(os.path.abspath(__file__))
-        d = os.path.join(base, '.edge_driver_user_data')
+        d = runtime_path('.edge_driver_user_data')
         os.makedirs(d, exist_ok=True)
         return d
     except Exception:
-        try:
-            d = os.path.join(os.getcwd(), '.edge_driver_user_data')
-            os.makedirs(d, exist_ok=True)
-            return d
-        except Exception:
-            return None
+        return None
 
 def is_login_page(driver):
     """Heuristically detect if the current page is a login page"""
@@ -96,11 +84,13 @@ def setup_driver():
     # Headless mode
     edge_options.add_argument('--headless')
 
+    last_error = None
     try:
         # Determine EdgeDriver path based on system
         system = platform.system().lower()
         if system == "windows":
-            driver_path = r"C:\bin\edgedriver_win64\msedgedriver.exe"
+            bundled_driver = runtime_path('tools', 'msedgedriver.exe')
+            driver_path = bundled_driver if os.path.exists(bundled_driver) else r"C:\bin\edgedriver_win64\msedgedriver.exe"
         elif system == "darwin":  # macOS
             machine = platform.machine().lower()
             if machine in ['arm64', 'aarch64']:
@@ -117,13 +107,31 @@ def setup_driver():
         if os.path.exists(user_driver_path):
             driver_path = user_driver_path
 
-        driver = webdriver.Edge(service=webdriver.edge.service.Service(driver_path), options=edge_options)
+        if driver_path and os.path.exists(driver_path):
+            try:
+                driver = webdriver.Edge(service=webdriver.edge.service.Service(driver_path), options=edge_options)
+                driver.set_page_load_timeout(60)
+                driver.set_script_timeout(30)
+                try:
+                    driver.execute_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
+                except Exception:
+                    pass
+                return driver
+            except Exception as e:
+                last_error = e
+
+        driver = webdriver.Edge(options=edge_options)
         driver.set_page_load_timeout(60)
         driver.set_script_timeout(30)
-        driver.execute_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
+        try:
+            driver.execute_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
+        except Exception:
+            pass
         return driver
     except Exception as e:
         print(f"MS Edge driver startup failed: {e}", file=sys.stderr)
+        if last_error and last_error is not e:
+            print(f"MS Edge driver startup failed (with explicit driver_path): {last_error}", file=sys.stderr)
         print("Please make sure MS Edge browser and EdgeDriver are installed", file=sys.stderr)
         print("You can run update_msedge_driver.py to install the driver", file=sys.stderr)
         return None
@@ -567,9 +575,12 @@ def crawl_single_video(video_code):
         try:
             if is_login_page(driver):
                 print("登录状态缺失，调用登录助手以持久化登录态...", file=sys.stderr)
-                cwd_dir = os.path.dirname(os.path.abspath(__file__))
+                cwd_dir = runtime_dir()
                 try:
-                    subprocess.run(['python3', 'javdb_login_helper.py'], cwd=cwd_dir, check=True)
+                    if getattr(sys, 'frozen', False):
+                        subprocess.run([runtime_path('javdb_login_helper.exe')], cwd=cwd_dir, check=True)
+                    else:
+                        subprocess.run([sys.executable, 'javdb_login_helper.py'], cwd=cwd_dir, check=True)
                 except Exception as e:
                     print(f"登录助手运行失败: {e}", file=sys.stderr)
                     return None
@@ -590,9 +601,12 @@ def crawl_single_video(video_code):
         random_delay(1, 2)
         if is_login_page(driver):
             print("访问详情页需要登录，启动登录助手后重试...", file=sys.stderr)
-            cwd_dir = os.path.dirname(os.path.abspath(__file__))
+            cwd_dir = runtime_dir()
             try:
-                subprocess.run(['python3', 'javdb_login_helper.py'], cwd=cwd_dir, check=True)
+                if getattr(sys, 'frozen', False):
+                    subprocess.run([runtime_path('javdb_login_helper.exe')], cwd=cwd_dir, check=True)
+                else:
+                    subprocess.run([sys.executable, 'javdb_login_helper.py'], cwd=cwd_dir, check=True)
             except Exception as e:
                 print(f"登录助手运行失败: {e}", file=sys.stderr)
                 return None
