@@ -35,6 +35,7 @@ from fast_smart_media_updater import run_fast_update, load_active_folders
 from utils import javsp_migration, javsp_copy
 from utils.file_utils import FileUtils
 from utils import video_rotate
+from utils.runtime import ensure_file_in_runtime, runtime_dir, runtime_path
 
 # 日志级别配置
 class LogLevel:
@@ -296,7 +297,7 @@ class MediaLibrary:
         self.root.geometry("1200x800")
         
         # 配置文件路径
-        self.config_path = os.path.join(os.path.dirname(__file__), 'gui_config.json')
+        self.config_path = ensure_file_in_runtime('gui_config.json')
         
         # 默认列配置
         self.default_columns = {
@@ -727,7 +728,7 @@ class MediaLibrary:
         
     def init_database(self):
         """初始化SQLite数据库"""
-        self.db_path = os.path.join(os.path.dirname(__file__), 'media_library.db')
+        self.db_path = runtime_path('media_library.db')
         self.conn = sqlite3.connect(self.db_path, check_same_thread=False)
         self.cursor = self.conn.cursor()
         
@@ -6819,10 +6820,14 @@ class MediaLibrary:
                             result_data = None
                             blocked_titles = ['官方App下載', '官方App下载', 'Official App Download']
                             cwd_dir = os.path.dirname(os.path.abspath(__file__))
+                            cwd_dir = runtime_dir()
                             
                             # ① JavDB 优先
                             try:
-                                cmd = ["python", "javdb_crawler_single.py", av_code]
+                                if getattr(sys, 'frozen', False):
+                                    cmd = [os.path.join(runtime_dir(), "javdb_crawler_single.exe"), av_code]
+                                else:
+                                    cmd = ["python", "javdb_crawler_single.py", av_code]
                                 process = subprocess.run(cmd, capture_output=True, text=True, cwd=cwd_dir, timeout=60)
                                 if process.returncode == 0 and process.stdout:
                                     try:
@@ -6847,7 +6852,10 @@ class MediaLibrary:
                                 # 先尝试 JavBus
                                 try:
                                     progress_window.update_status("尝试JavBus回退...")
-                                    cmd_bus = ["python", "javbus_crawler_single.py", av_code]
+                                    if getattr(sys, 'frozen', False):
+                                        cmd_bus = [os.path.join(runtime_dir(), "javbus_crawler_single.exe"), av_code]
+                                    else:
+                                        cmd_bus = ["python", "javbus_crawler_single.py", av_code]
                                     p_bus = subprocess.run(cmd_bus, capture_output=True, text=True, cwd=cwd_dir, timeout=60)
                                     if p_bus.returncode == 0 and p_bus.stdout:
                                         try:
@@ -8638,13 +8646,16 @@ class MediaLibrary:
                 try:
                     import subprocess
                     import json
-                    cwd_dir = os.path.dirname(os.path.abspath(__file__))
+                    cwd_dir = runtime_dir()
 
                     # 一级：JavDB 优先获取
                     self.root.after(0, lambda: status_label.config(text="使用JavDB爬虫获取..."))
                     result_data = None
                     try:
-                        cmd = ["python", "javdb_crawler_single.py", av_code]
+                        if getattr(sys, 'frozen', False):
+                            cmd = [os.path.join(runtime_dir(), "javdb_crawler_single.exe"), av_code]
+                        else:
+                            cmd = ["python", "javdb_crawler_single.py", av_code]
                         process = subprocess.run(cmd, capture_output=True, text=True, cwd=cwd_dir, timeout=60)
                         if process.returncode == 0 and process.stdout:
                             try:
@@ -8690,7 +8701,10 @@ class MediaLibrary:
                         # 尝试 JavBus
                         try:
                             self.root.after(0, lambda: status_label.config(text="尝试JavBus回退..."))
-                            cmd_bus = ["python", "javbus_crawler_single.py", av_code]
+                            if getattr(sys, 'frozen', False):
+                                cmd_bus = [os.path.join(runtime_dir(), "javbus_crawler_single.exe"), av_code]
+                            else:
+                                cmd_bus = ["python", "javbus_crawler_single.py", av_code]
                             p_bus = subprocess.run(cmd_bus, capture_output=True, text=True, cwd=cwd_dir, timeout=60)
                             if p_bus.returncode == 0 and p_bus.stdout:
                                 try:
@@ -11341,7 +11355,7 @@ class ActorDetailWindow:
         self.media_library = media_library
         # 默认头像图片路径（用于无头像时显示）
         # 使用相对路径以支持不同环境(OneDrive-Personal/OneDrive-个人)
-        current_dir = os.path.dirname(os.path.abspath(__file__))
+        current_dir = runtime_dir()
         self.default_avatar_path = os.path.join(current_dir, 'covers', 'default.JPEG')
         
         # 兼容性检查：如果相对路径不存在，尝试硬编码路径

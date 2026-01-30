@@ -1,5 +1,6 @@
 """JavSP爬虫配置文件"""
 import os
+import platform
 from typing import Dict, List, Optional
 from dataclasses import dataclass
 from enum import Enum
@@ -26,12 +27,17 @@ class CrawlerID(str, Enum):
 @dataclass
 class NetworkConfig:
     """网络配置"""
-    proxy_server: Optional[str] = "socks5://127.0.0.1:1080"  # 启用SOCKS5代理
+    proxy_server: Optional[str] = None
     retry: int = 3
     timeout: int = 30
     proxy_free: Dict[str, str] = None
     
     def __post_init__(self):
+        if self.proxy_server is None:
+            if platform.system().lower() == 'windows':
+                self.proxy_server = "socks5://127.0.0.1:8800"
+            else:
+                self.proxy_server = "socks5://127.0.0.1:1080"
         if self.proxy_free is None:
             # 为某些站点配置免代理URL
             self.proxy_free = {
@@ -68,9 +74,9 @@ class CrawlerConfig:
         if self.normal_crawlers is None:
             # 只使用现有的爬虫文件
             self.normal_crawlers = [
-                'javbus',  # 测试可用
-                # 'javlib',  # 无法访问，已禁用
-                # 'avsox',   # 无法访问，已禁用
+                'javbus',
+                'javlib',
+                'avsox',
             ]
         
         if self.fc2_crawlers is None:

@@ -27,6 +27,8 @@ except ImportError:
     SOCKS5_PROXY_PORT = 1080
     BASE_URL = 'https://javdb.com'
 
+from utils.runtime import runtime_path
+
 LOGIN_URL = f'{BASE_URL}/login'
 MIN_DELAY = 1
 MAX_DELAY = 3
@@ -44,18 +46,11 @@ def get_dedicated_edge_user_data_dir():
     该目录与系统 Edge 的用户数据隔离，可在 Edge 运行中使用而不冲突。
     """
     try:
-        base = os.path.dirname(os.path.abspath(__file__))
-        d = os.path.join(base, '.edge_driver_user_data')
+        d = runtime_path('.edge_driver_user_data')
         os.makedirs(d, exist_ok=True)
         return d
     except Exception:
-        # 回退到当前工作目录
-        try:
-            d = os.path.join(os.getcwd(), '.edge_driver_user_data')
-            os.makedirs(d, exist_ok=True)
-            return d
-        except Exception:
-            return None
+        return None
 
 
 def is_edge_running():
@@ -132,7 +127,8 @@ def setup_driver(user_data_dir=None, profile_directory=None):
         machine = platform.machine().lower()
         default_driver_path = "/usr/local/bin/edgedriver_mac64_m1/msedgedriver" if machine in ['arm64', 'aarch64'] else "/usr/local/bin/edgedriver_mac64/msedgedriver"
     elif system == "windows":
-        default_driver_path = r"C:\\bin\\edgedriver_win64\\msedgedriver.exe"
+        bundled_driver = runtime_path('tools', 'msedgedriver.exe')
+        default_driver_path = bundled_driver if os.path.exists(bundled_driver) else r"C:\\bin\\edgedriver_win64\\msedgedriver.exe"
     elif system == "linux":
         default_driver_path = "/usr/local/bin/edgedriver_linux64/msedgedriver"
     else:
