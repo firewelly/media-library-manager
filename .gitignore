@@ -79,6 +79,7 @@ settings.json
 config.py
 config.local.py
 .env
+config.local.json
 
 # Cookie文件（包含敏感信息）
 cookie_javdb.json
@@ -99,6 +100,8 @@ coverage.xml
 # 结果输出文件
 results/
 javdb_selenium_results_*.json
+reports/siliconflow_api_test_report_*.json
+**/*test_report*.md
 
 # 第三方库目录
 JavSP/
@@ -112,3 +115,7 @@ requirement/
 **/.*
 !/.gitignore
 !/.gitattributes
+!build/
+!build/windows/
+!build/windows/build_release.py
+release/

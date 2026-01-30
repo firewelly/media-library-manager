@@ -20,6 +20,13 @@ import threading
 
 def get_ffmpeg_command():
     """获取可用的FFmpeg命令路径，优先使用homebrew版本"""
+    try:
+        from utils.runtime import runtime_path
+        bundled = runtime_path('tools', 'ffmpeg.exe')
+        if os.path.exists(bundled):
+            return bundled
+    except Exception:
+        pass
     # macOS下优先使用homebrew版本的ffmpeg
     if platform.system() == 'Darwin':
         # 优先检查homebrew路径

@@ -46,6 +46,7 @@ from utils.database import DatabaseManager
 from utils.file_utils import FileUtils
 from utils import video_rotate
 from utils.advanced_tools import AdvancedToolsManager
+from utils.runtime import ensure_file_in_runtime, runtime_path
 
 # 导入非GUI类和函数
 class LogLevel:
@@ -159,7 +160,7 @@ class MediaLibraryCore:
 
     def __init__(self):
         # 配置文件路径
-        self.config_path = os.path.join(os.path.dirname(__file__), 'gui_config.json')
+        self.config_path = ensure_file_in_runtime('gui_config.json')
 
         # 默认列配置
         self.default_columns = {
@@ -235,7 +236,7 @@ class MediaLibraryCore:
 
     def init_database(self):
         """仅连接现有SQLite数据库，不创建或修改任何表结构"""
-        self.db_path = os.path.join(os.path.dirname(__file__), 'media_library.db')
+        self.db_path = runtime_path('media_library.db')
         db_exists = os.path.exists(self.db_path)
         self.conn = sqlite3.connect(self.db_path, check_same_thread=False)
         self.cursor = self.conn.cursor()

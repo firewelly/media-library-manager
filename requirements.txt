@@ -6,6 +6,7 @@
 # 图像处理库 / Image Processing Library
 # 用于缩略图生成、图像显示和处理 / For thumbnail generation, image display and processing
 Pillow>=10.0.0
+opencv-python>=4.10.0.0
 
 # 网络请求库 / HTTP Requests Library  
 # 用于网络相关功能和爬虫系统 / For network-related features and crawler system
@@ -16,6 +17,7 @@ PySocks>=1.7.1  # SOCKS代理依赖 / SOCKS proxy dependency
 # HTML解析库 / HTML Parsing Library
 # 用于网页内容解析 / For web content parsing
 lxml>=4.9.0
+Send2Trash>=1.8.2
 
 # CloudFlare绕过 / CloudFlare Bypass
 # 用于绕过CloudFlare保护 / For bypassing CloudFlare protection
