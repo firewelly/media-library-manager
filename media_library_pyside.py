@@ -315,10 +315,13 @@ class MediaLibraryCore:
             # 检查是否支持CUDA
             if cv2.cuda.getCudaEnabledDeviceCount() > 0:
                 self.gpu_acceleration = True
+                self.gpu_type = "NVIDIA (CUDA)"
             else:
                 self.gpu_acceleration = False
+                self.gpu_type = None
         except:
             self.gpu_acceleration = False
+            self.gpu_type = None
 
     def get_ffmpeg_command(self):
         """获取可用的FFmpeg命令路径，优先使用homebrew版本"""
@@ -357,27 +360,155 @@ class MediaLibraryCore:
         return None
 
     def detect_gpu_acceleration(self):
-        """检测可用的GPU加速选项"""
+        """检测可用的GPU加速选项，返回详细的GPU信息"""
         ffmpeg_cmd = self.get_ffmpeg_command()
         if not ffmpeg_cmd:
-            return None
+            return {"available": False, "hwaccel": None, "decoder": None, "encoder": None, "gpu_type": None}
+
+        result = {
+            "available": False,
+            "hwaccel": None,
+            "decoder": None,
+            "encoder": None,
+            "gpu_type": None
+        }
 
         try:
             # 检查FFmpeg支持的硬件加速器
-            result = subprocess.run([ffmpeg_cmd, "-hwaccels"], capture_output=True, text=True)
-            if result.returncode == 0:
-                hwaccels = result.stdout.lower()
+            hwaccels_result = subprocess.run([ffmpeg_cmd, "-hwaccels"], capture_output=True, text=True, timeout=5)
+            if hwaccels_result.returncode != 0:
+                return result
 
-                # macOS优先级：videotoolbox > opencl
-                if "videotoolbox" in hwaccels:
-                    return "videotoolbox"
-                elif "opencl" in hwaccels:
-                    return "opencl"
+            hwaccels = hwaccels_result.stdout.lower()
+            system = platform.system()
+
+            # 检测支持的硬件加速器并选择最佳选项
+            if system == 'Darwin':
+                # macOS: VideoToolbox是原生硬件加速
+                if 'videotoolbox' in hwaccels:
+                    result.update({
+                        "available": True,
+                        "hwaccel": "videotoolbox",
+                        "decoder": "h264_videotoolbox",
+                        "encoder": "h264_videotoolbox",
+                        "gpu_type": "Apple Silicon / Intel"
+                    })
+                elif 'opencl' in hwaccels:
+                    result.update({
+                        "available": True,
+                        "hwaccel": "opencl",
+                        "decoder": None,
+                        "encoder": None,
+                        "gpu_type": "OpenCL"
+                    })
+
+            elif system == 'Windows':
+                # Windows: 按优先级检测硬件加速器
+                # 对于AMD集成显卡，优先选择D3D11VA
+
+                # 1. D3D11VA (DirectX 11 - 包括AMD GPU，推荐用于集成显卡)
+                if 'd3d11va' in hwaccels:
+                    result.update({
+                        "available": True,
+                        "hwaccel": "d3d11va",
+                        "decoder": "h264_dxva2",
+                        "encoder": "h264_qsv",  # Intel编码器备用
+                        "gpu_type": "AMD / DirectX 11"
+                    })
+                # 2. Intel QSV (Intel集成显卡)
+                elif 'qsv' in hwaccels:
+                    result.update({
+                        "available": True,
+                        "hwaccel": "qsv",
+                        "decoder": "h264_qsv",
+                        "encoder": "h264_qsv",
+                        "gpu_type": "Intel"
+                    })
+                # 3. DXVA2 (DirectX 9 - 旧版Windows)
+                elif 'dxva2' in hwaccels:
+                    result.update({
+                        "available": True,
+                        "hwaccel": "dxva2",
+                        "decoder": "h264_dxva2",
+                        "encoder": None,
+                        "gpu_type": "DirectX 9"
+                    })
+                # 4. NVIDIA CUDA (仅当有实际NVIDIA GPU时验证)
+                elif 'cuda' in hwaccels:
+                    # 验证CUDA是否实际可用
+                    try:
+                        test_cmd = [ffmpeg_cmd, "-hwaccel", "cuda", "-f", "lavfi", "-i", "testsrc=duration=1:size=320x240:rate=1", "-f", "null", "-"]
+                        test_result = subprocess.run(test_cmd, capture_output=True, timeout=5)
+                        if test_result.returncode == 0:
+                            result.update({
+                                "available": True,
+                                "hwaccel": "cuda",
+                                "decoder": "h264_cuvid",
+                                "encoder": "h264_nvenc",
+                                "gpu_type": "NVIDIA"
+                            })
+                    except:
+                        pass
+
+            elif system == 'Linux':
+                # Linux: 按优先级检测硬件加速器
+
+                # 1. VA-API (Video Acceleration API - 适用于AMD/Intel GPU)
+                if 'vaapi' in hwaccels:
+                    result.update({
+                        "available": True,
+                        "hwaccel": "vaapi",
+                        "decoder": "h264_vaapi",
+                        "encoder": "h264_vaapi",
+                        "gpu_type": "AMD / Intel (VA-API)"
+                    })
+                # 2. Intel QSV
+                elif 'qsv' in hwaccels:
+                    result.update({
+                        "available": True,
+                        "hwaccel": "qsv",
+                        "decoder": "h264_qsv",
+                        "encoder": "h264_qsv",
+                        "gpu_type": "Intel"
+                    })
+                # 3. NVIDIA CUDA (验证实际可用性)
+                elif 'cuda' in hwaccels:
+                    try:
+                        test_cmd = [ffmpeg_cmd, "-hwaccel", "cuda", "-f", "lavfi", "-i", "testsrc=duration=1:size=320x240:rate=1", "-f", "null", "-"]
+                        test_result = subprocess.run(test_cmd, capture_output=True, timeout=5)
+                        if test_result.returncode == 0:
+                            result.update({
+                                "available": True,
+                                "hwaccel": "cuda",
+                                "decoder": "h264_cuvid",
+                                "encoder": "h264_nvenc",
+                                "gpu_type": "NVIDIA"
+                            })
+                    except:
+                        pass
+                # 4. VDPAU (NVIDIA旧驱动)
+                elif 'vdpau' in hwaccels:
+                    result.update({
+                        "available": True,
+                        "hwaccel": "vdpau",
+                        "decoder": "h264_vdpau",
+                        "encoder": None,
+                        "gpu_type": "NVIDIA (VDPAU)"
+                    })
+                # 5. OpenCL (通用跨平台)
+                elif 'opencl' in hwaccels:
+                    result.update({
+                        "available": True,
+                        "hwaccel": "opencl",
+                        "decoder": None,
+                        "encoder": None,
+                        "gpu_type": "OpenCL"
+                    })
 
         except Exception as e:
             print(f"检测GPU加速失败: {e}")
 
-        return None
+        return result
 
     def get_optimized_ffmpeg_cmd(self, input_path, output_path, seek_time="00:00:10"):
         """获取优化的FFmpeg命令（包含GPU加速）"""
@@ -386,30 +517,32 @@ class MediaLibraryCore:
             return None
 
         # 检测GPU加速
-        hwaccel = self.detect_gpu_acceleration()
+        gpu_info = self.detect_gpu_acceleration()
 
         cmd = [ffmpeg_cmd]
+
+        # 如果有GPU加速支持，添加硬件加速参数
+        if gpu_info["available"] and gpu_info["hwaccel"]:
+            cmd.extend(["-hwaccel", gpu_info["hwaccel"]])
+
+            # 对于某些GPU（如VAAPI），需要指定设备
+            if gpu_info["hwaccel"] == "vaapi":
+                import os
+                dri_path = "/dev/dri/renderD128"
+                if os.path.exists(dri_path):
+                    cmd.extend(["-hwaccel_device", dri_path])
+
+        # 添加时间定位（放在-i之前为输入寻求，速度快）
+        cmd.extend(["-ss", seek_time])
 
         # 添加输入参数
         cmd.extend(["-i", input_path])
 
-        # 添加时间定位
-        cmd.extend(["-ss", seek_time])
-
         # 添加帧数限制
         cmd.extend(["-vframes", "1"])
 
-        # 根据GPU加速添加参数
-        if hwaccel:
-            if hwaccel == "videotoolbox":
-                cmd.extend(["-hwaccel", "videotoolbox"])
-                cmd.extend(["-pix_fmt", "yuv420p"])
-            elif hwaccel == "opencl":
-                cmd.extend(["-hwaccel", "opencl"])
-                cmd.extend(["-pix_fmt", "yuv420p"])
-        else:
-            # 无GPU加速，使用CPU
-            cmd.extend(["-pix_fmt", "yuv420p"])
+        # 添加输出格式
+        cmd.extend(["-f", "image2"])
 
         # 添加输出参数
         cmd.extend(["-y", output_path])
@@ -496,15 +629,95 @@ class MediaLibraryCore:
             return False
 
     def get_video_info(self, file_path):
-        """获取视频信息（时长和分辨率）"""
+        """获取视频信息（时长和分辨率），优先使用ffprobe以获得更好性能"""
         try:
             if not os.path.exists(file_path):
                 return None, None
 
-            # 首先尝试使用opencv-python获取视频信息
+            # 优先使用ffprobe，因为它更快，不需要完全解码视频
+            ffprobe_cmd = self.get_ffprobe_command()
+            if ffprobe_cmd is not None:
+                try:
+                    # 使用硬件加速检测
+                    gpu_info = self.detect_gpu_acceleration()
+
+                    # 构建ffprobe命令，如果支持硬件加速则添加相关参数
+                    duration_cmd = [
+                        ffprobe_cmd, "-v", "quiet"
+                    ]
+
+                    # 如果支持硬件解码，添加硬件加速参数
+                    if gpu_info["available"] and gpu_info["hwaccel"]:
+                        duration_cmd.extend(["-hwaccel", gpu_info["hwaccel"]])
+                        if gpu_info["hwaccel"] == "vaapi":
+                            # VAAPI需要指定设备
+                            dri_path = "/dev/dri/renderD128"
+                            if os.path.exists(dri_path):
+                                duration_cmd.extend(["-hwaccel_device", dri_path])
+
+                    duration_cmd.extend([
+                        "-show_entries", "format=duration",
+                        "-of", "csv=p=0", file_path
+                    ])
+
+                    duration_result = subprocess.run(duration_cmd, capture_output=True, text=True, timeout=10)
+                    duration = None
+                    if duration_result.returncode == 0 and duration_result.stdout.strip():
+                        try:
+                            duration = int(float(duration_result.stdout.strip()))
+                        except ValueError:
+                            pass
+
+                    # 获取分辨率
+                    resolution_cmd = [
+                        ffprobe_cmd, "-v", "quiet"
+                    ]
+
+                    # 如果支持硬件解码，添加硬件加速参数
+                    if gpu_info["available"] and gpu_info["hwaccel"]:
+                        resolution_cmd.extend(["-hwaccel", gpu_info["hwaccel"]])
+                        if gpu_info["hwaccel"] == "vaapi":
+                            dri_path = "/dev/dri/renderD128"
+                            if os.path.exists(dri_path):
+                                resolution_cmd.extend(["-hwaccel_device", dri_path])
+
+                    resolution_cmd.extend([
+                        "-select_streams", "v:0",
+                        "-show_entries", "stream=width,height", "-of", "csv=p=0", file_path
+                    ])
+
+                    resolution_result = subprocess.run(resolution_cmd, capture_output=True, text=True, timeout=10)
+                    resolution = None
+                    if resolution_result.returncode == 0 and resolution_result.stdout.strip():
+                        try:
+                            width, height = resolution_result.stdout.strip().split(',')
+                            resolution = f"{width}x{height}"
+                        except ValueError:
+                            pass
+
+                    # 如果ffprobe成功获取信息，直接返回
+                    if duration is not None or resolution is not None:
+                        return duration, resolution
+
+                except subprocess.TimeoutExpired:
+                    print(f"ffprobe超时: {file_path}")
+                except Exception as e:
+                    print(f"使用ffprobe获取视频信息失败: {str(e)}")
+
+            # 如果ffprobe不可用或失败，尝试使用opencv-python
             try:
                 import cv2
+
+                # 尝试使用GPU加速的OpenCV（如果可用）
                 cap = cv2.VideoCapture(file_path)
+
+                # 检查OpenCV是否支持CUDA
+                try:
+                    if cv2.cuda.getCudaEnabledDeviceCount() > 0:
+                        # 尝试使用CUDA解码器
+                        cap.set(cv2.CAP_PROP_CUDA_DEVICE, 0)
+                except AttributeError:
+                    pass
 
                 if cap.isOpened():
                     # 获取帧率和总帧数来计算时长
@@ -528,44 +741,11 @@ class MediaLibraryCore:
                     cap.release()
 
             except ImportError:
-                print("opencv-python未安装，尝试使用ffprobe...")
+                print("opencv-python未安装")
             except Exception as e:
                 print(f"使用opencv获取视频信息失败: {str(e)}")
 
-            # 如果opencv不可用，尝试使用ffprobe
-            ffprobe_cmd = self.get_ffprobe_command()
-            if ffprobe_cmd is None:
-                print(f"ffprobe未找到，无法获取视频信息: {file_path}")
-                return None, None
-
-            # 获取时长
-            duration_cmd = [
-                ffprobe_cmd, "-v", "quiet", "-show_entries", "format=duration",
-                "-of", "csv=p=0", file_path
-            ]
-            duration_result = subprocess.run(duration_cmd, capture_output=True, text=True)
-            duration = None
-            if duration_result.returncode == 0 and duration_result.stdout.strip():
-                try:
-                    duration = int(float(duration_result.stdout.strip()))
-                except ValueError:
-                    pass
-
-            # 获取分辨率
-            resolution_cmd = [
-                ffprobe_cmd, "-v", "quiet", "-select_streams", "v:0",
-                "-show_entries", "stream=width,height", "-of", "csv=p=0", file_path
-            ]
-            resolution_result = subprocess.run(resolution_cmd, capture_output=True, text=True)
-            resolution = None
-            if resolution_result.returncode == 0 and resolution_result.stdout.strip():
-                try:
-                    width, height = resolution_result.stdout.strip().split(',')
-                    resolution = f"{width}x{height}"
-                except ValueError:
-                    pass
-
-            return duration, resolution
+            return None, None
 
         except Exception as e:
             print(f"获取视频信息失败 {file_path}: {str(e)}")

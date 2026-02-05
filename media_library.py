@@ -5405,10 +5405,23 @@ class MediaLibrary:
                                 SELECT id, file_path, file_name, is_nas_online, thumbnail_data 
                                 FROM videos 
                                 WHERE id IN ({video_ids_str})
-                                AND (thumbnail_data IS NULL OR thumbnail_data = '') 
+                                AND (thumbnail_data IS NULL OR thumbnail_data = '' OR length(thumbnail_data) = 0) 
                                 AND is_nas_online = 1
-                                AND (LOWER(file_name) LIKE '%.mp4' OR LOWER(file_name) LIKE '%.avi' 
-                                     OR LOWER(file_name) LIKE '%.mkv' OR LOWER(file_name) LIKE '%.rmvb')
+                                AND (
+                                    LOWER(COALESCE(file_path, '')) LIKE '%.mp4' OR LOWER(COALESCE(file_name, '')) LIKE '%.mp4' OR
+                                    LOWER(COALESCE(file_path, '')) LIKE '%.avi' OR LOWER(COALESCE(file_name, '')) LIKE '%.avi' OR
+                                    LOWER(COALESCE(file_path, '')) LIKE '%.mkv' OR LOWER(COALESCE(file_name, '')) LIKE '%.mkv' OR
+                                    LOWER(COALESCE(file_path, '')) LIKE '%.rmvb' OR LOWER(COALESCE(file_name, '')) LIKE '%.rmvb' OR
+                                    LOWER(COALESCE(file_path, '')) LIKE '%.mov' OR LOWER(COALESCE(file_name, '')) LIKE '%.mov' OR
+                                    LOWER(COALESCE(file_path, '')) LIKE '%.wmv' OR LOWER(COALESCE(file_name, '')) LIKE '%.wmv' OR
+                                    LOWER(COALESCE(file_path, '')) LIKE '%.flv' OR LOWER(COALESCE(file_name, '')) LIKE '%.flv' OR
+                                    LOWER(COALESCE(file_path, '')) LIKE '%.webm' OR LOWER(COALESCE(file_name, '')) LIKE '%.webm' OR
+                                    LOWER(COALESCE(file_path, '')) LIKE '%.m4v' OR LOWER(COALESCE(file_name, '')) LIKE '%.m4v' OR
+                                    LOWER(COALESCE(file_path, '')) LIKE '%.ts' OR LOWER(COALESCE(file_name, '')) LIKE '%.ts' OR
+                                    LOWER(COALESCE(file_path, '')) LIKE '%.m2ts' OR LOWER(COALESCE(file_name, '')) LIKE '%.m2ts' OR
+                                    LOWER(COALESCE(file_path, '')) LIKE '%.mpg' OR LOWER(COALESCE(file_name, '')) LIKE '%.mpg' OR
+                                    LOWER(COALESCE(file_path, '')) LIKE '%.mpeg' OR LOWER(COALESCE(file_name, '')) LIKE '%.mpeg'
+                                )
                                 ORDER BY file_name
                             """
                             log_message(f"模式：仅生成缺失封面（选中的 {len(self.selected_video_ids_for_thumbnail)} 个视频）")
@@ -5418,8 +5431,21 @@ class MediaLibrary:
                                 FROM videos 
                                 WHERE id IN ({video_ids_str})
                                 AND is_nas_online = 1
-                                AND (LOWER(file_name) LIKE '%.mp4' OR LOWER(file_name) LIKE '%.avi' 
-                                     OR LOWER(file_name) LIKE '%.mkv' OR LOWER(file_name) LIKE '%.rmvb')
+                                AND (
+                                    LOWER(COALESCE(file_path, '')) LIKE '%.mp4' OR LOWER(COALESCE(file_name, '')) LIKE '%.mp4' OR
+                                    LOWER(COALESCE(file_path, '')) LIKE '%.avi' OR LOWER(COALESCE(file_name, '')) LIKE '%.avi' OR
+                                    LOWER(COALESCE(file_path, '')) LIKE '%.mkv' OR LOWER(COALESCE(file_name, '')) LIKE '%.mkv' OR
+                                    LOWER(COALESCE(file_path, '')) LIKE '%.rmvb' OR LOWER(COALESCE(file_name, '')) LIKE '%.rmvb' OR
+                                    LOWER(COALESCE(file_path, '')) LIKE '%.mov' OR LOWER(COALESCE(file_name, '')) LIKE '%.mov' OR
+                                    LOWER(COALESCE(file_path, '')) LIKE '%.wmv' OR LOWER(COALESCE(file_name, '')) LIKE '%.wmv' OR
+                                    LOWER(COALESCE(file_path, '')) LIKE '%.flv' OR LOWER(COALESCE(file_name, '')) LIKE '%.flv' OR
+                                    LOWER(COALESCE(file_path, '')) LIKE '%.webm' OR LOWER(COALESCE(file_name, '')) LIKE '%.webm' OR
+                                    LOWER(COALESCE(file_path, '')) LIKE '%.m4v' OR LOWER(COALESCE(file_name, '')) LIKE '%.m4v' OR
+                                    LOWER(COALESCE(file_path, '')) LIKE '%.ts' OR LOWER(COALESCE(file_name, '')) LIKE '%.ts' OR
+                                    LOWER(COALESCE(file_path, '')) LIKE '%.m2ts' OR LOWER(COALESCE(file_name, '')) LIKE '%.m2ts' OR
+                                    LOWER(COALESCE(file_path, '')) LIKE '%.mpg' OR LOWER(COALESCE(file_name, '')) LIKE '%.mpg' OR
+                                    LOWER(COALESCE(file_path, '')) LIKE '%.mpeg' OR LOWER(COALESCE(file_name, '')) LIKE '%.mpeg'
+                                )
                                 ORDER BY file_name
                             """
                             log_message(f"模式：重新生成所有封面（选中的 {len(self.selected_video_ids_for_thumbnail)} 个视频）")
@@ -5487,8 +5513,12 @@ class MediaLibrary:
                                 if online_video_folders:
                                     folder_conditions = []
                                     for folder_path in online_video_folders:
-                                        folder_conditions.append("v.source_folder LIKE ?")
-                                        query_params.append(f"{folder_path}%")
+                                        if platform.system() == "Windows":
+                                            folder_conditions.append("REPLACE(v.source_folder, CHAR(92), '/') LIKE ?")
+                                            query_params.append(f"{folder_path.replace('\\\\', '/')}%")
+                                        else:
+                                            folder_conditions.append("v.source_folder LIKE ?")
+                                            query_params.append(f"{folder_path}%")
                                     conditions.append(f"({' OR '.join(folder_conditions)})")
                                 else:
                                     conditions.append("1 = 0")
@@ -5504,8 +5534,12 @@ class MediaLibrary:
                                 if offline_video_folders:
                                     folder_conditions = []
                                     for folder_path in offline_video_folders:
-                                        folder_conditions.append("v.source_folder LIKE ?")
-                                        query_params.append(f"{folder_path}%")
+                                        if platform.system() == "Windows":
+                                            folder_conditions.append("REPLACE(v.source_folder, CHAR(92), '/') LIKE ?")
+                                            query_params.append(f"{folder_path.replace('\\\\', '/')}%")
+                                        else:
+                                            folder_conditions.append("v.source_folder LIKE ?")
+                                            query_params.append(f"{folder_path}%")
                                     conditions.append(f"({' OR '.join(folder_conditions)})")
                                 else:
                                     conditions.append("1 = 0")
@@ -5517,12 +5551,35 @@ class MediaLibrary:
                                 if selected_folder != "全部" and selected_folder in self.folder_path_mapping:
                                     folder_path = self.folder_path_mapping[selected_folder]
                                     if folder_path:
-                                        conditions.append("v.source_folder LIKE ?")
-                                        query_params.append(f"{folder_path}%")
+                                        if platform.system() == "Windows":
+                                            conditions.append("(REPLACE(v.source_folder, CHAR(92), '/') LIKE ? OR REPLACE(v.file_path, CHAR(92), '/') LIKE ?)")
+                                            normalized_folder = folder_path.replace('\\\\', '/')
+                                            query_params.append(f"{normalized_folder}%")
+                                            query_params.append(f"{normalized_folder}%")
+                                        else:
+                                            conditions.append("(v.source_folder LIKE ? OR v.file_path LIKE ?)")
+                                            query_params.append(f"{folder_path}%")
+                                            query_params.append(f"{folder_path}%")
                         
                         # 添加基本条件：在线状态和文件格式
-                        conditions.append("v.is_nas_online = 1")
-                        conditions.append("(LOWER(v.file_name) LIKE '%.mp4' OR LOWER(v.file_name) LIKE '%.avi' OR LOWER(v.file_name) LIKE '%.mkv' OR LOWER(v.file_name) LIKE '%.rmvb')")
+                        conditions.append("(v.is_nas_online = 1 OR v.is_nas_online IS NULL)")
+                        conditions.append("""
+                            (
+                                LOWER(COALESCE(v.file_path, '')) LIKE '%.mp4' OR LOWER(COALESCE(v.file_name, '')) LIKE '%.mp4' OR
+                                LOWER(COALESCE(v.file_path, '')) LIKE '%.avi' OR LOWER(COALESCE(v.file_name, '')) LIKE '%.avi' OR
+                                LOWER(COALESCE(v.file_path, '')) LIKE '%.mkv' OR LOWER(COALESCE(v.file_name, '')) LIKE '%.mkv' OR
+                                LOWER(COALESCE(v.file_path, '')) LIKE '%.rmvb' OR LOWER(COALESCE(v.file_name, '')) LIKE '%.rmvb' OR
+                                LOWER(COALESCE(v.file_path, '')) LIKE '%.mov' OR LOWER(COALESCE(v.file_name, '')) LIKE '%.mov' OR
+                                LOWER(COALESCE(v.file_path, '')) LIKE '%.wmv' OR LOWER(COALESCE(v.file_name, '')) LIKE '%.wmv' OR
+                                LOWER(COALESCE(v.file_path, '')) LIKE '%.flv' OR LOWER(COALESCE(v.file_name, '')) LIKE '%.flv' OR
+                                LOWER(COALESCE(v.file_path, '')) LIKE '%.webm' OR LOWER(COALESCE(v.file_name, '')) LIKE '%.webm' OR
+                                LOWER(COALESCE(v.file_path, '')) LIKE '%.m4v' OR LOWER(COALESCE(v.file_name, '')) LIKE '%.m4v' OR
+                                LOWER(COALESCE(v.file_path, '')) LIKE '%.ts' OR LOWER(COALESCE(v.file_name, '')) LIKE '%.ts' OR
+                                LOWER(COALESCE(v.file_path, '')) LIKE '%.m2ts' OR LOWER(COALESCE(v.file_name, '')) LIKE '%.m2ts' OR
+                                LOWER(COALESCE(v.file_path, '')) LIKE '%.mpg' OR LOWER(COALESCE(v.file_name, '')) LIKE '%.mpg' OR
+                                LOWER(COALESCE(v.file_path, '')) LIKE '%.mpeg' OR LOWER(COALESCE(v.file_name, '')) LIKE '%.mpeg'
+                            )
+                        """)
                         
                         # 添加仅显示在线内容筛选
                         if hasattr(self, 'show_online_only') and self.show_online_only.get():
@@ -5537,17 +5594,27 @@ class MediaLibrary:
                             if online_folders:
                                 folder_conditions = []
                                 for folder_path in online_folders:
-                                    folder_conditions.append("v.source_folder LIKE ?")
-                                    query_params.append(f"{folder_path}%")
+                                    if platform.system() == "Windows":
+                                        folder_conditions.append("(REPLACE(v.source_folder, CHAR(92), '/') LIKE ? OR REPLACE(v.file_path, CHAR(92), '/') LIKE ?)")
+                                        normalized_folder = folder_path.replace('\\\\', '/')
+                                        query_params.append(f"{normalized_folder}%")
+                                        query_params.append(f"{normalized_folder}%")
+                                    else:
+                                        folder_conditions.append("(v.source_folder LIKE ? OR v.file_path LIKE ?)")
+                                        query_params.append(f"{folder_path}%")
+                                        query_params.append(f"{folder_path}%")
                                 conditions.append(f"({' OR '.join(folder_conditions)})")
                             else:
                                 conditions.append("1 = 0")
                         else:
-                            conditions.append("EXISTS (SELECT 1 FROM folders f WHERE f.is_active = 1 AND v.source_folder LIKE f.folder_path || '%')")
+                            if platform.system() == "Windows":
+                                conditions.append("EXISTS (SELECT 1 FROM folders f WHERE f.is_active = 1 AND (REPLACE(v.source_folder, CHAR(92), '/') LIKE REPLACE(f.folder_path, CHAR(92), '/') || '%' OR REPLACE(v.file_path, CHAR(92), '/') LIKE REPLACE(f.folder_path, CHAR(92), '/') || '%'))")
+                            else:
+                                conditions.append("EXISTS (SELECT 1 FROM folders f WHERE f.is_active = 1 AND (v.source_folder LIKE f.folder_path || '%' OR v.file_path LIKE f.folder_path || '%'))")
                         
                         # 根据生成模式添加额外条件
                         if result:  # 只生成缺失的封面
-                            conditions.append("(v.thumbnail_data IS NULL OR v.thumbnail_data = '')")
+                            conditions.append("(v.thumbnail_data IS NULL OR v.thumbnail_data = '' OR length(v.thumbnail_data) = 0)")
                             log_message("模式：仅生成缺失封面（当前筛选条件）")
                         else:  # 重新生成所有封面
                             log_message("模式：重新生成所有封面（当前筛选条件）")
@@ -5600,8 +5667,8 @@ class MediaLibrary:
                                 continue
                                 
                             # 检查是否为支持的视频格式
-                            file_ext = os.path.splitext(file_name)[1].lower()
-                            if file_ext not in ['.mp4', '.avi', '.mkv', '.rmvb']:
+                            file_ext = os.path.splitext(file_path)[1].lower()
+                            if file_ext not in ['.mp4', '.avi', '.mkv', '.rmvb', '.mov', '.wmv', '.flv', '.webm', '.m4v', '.ts', '.m2ts', '.mpg', '.mpeg']:
                                 log_message(f"跳过：不支持的格式 - {file_name}")
                                 skipped_count += 1
                                 processed += 1
