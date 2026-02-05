@@ -2657,8 +2657,13 @@ class MediaLibrary:
                     if online_video_folders:
                         folder_conditions = []
                         for folder_path in online_video_folders:
-                            folder_conditions.append("v.source_folder LIKE ?")
-                            params.append(f"{folder_path}%")
+                            if platform.system() == "Windows":
+                                folder_conditions.append("REPLACE(v.source_folder, CHAR(92), '/') LIKE ?")
+                                normalized_folder = folder_path.replace("\\", "/")
+                                params.append(f"{normalized_folder}%")
+                            else:
+                                folder_conditions.append("v.source_folder LIKE ?")
+                                params.append(f"{folder_path}%")
                         conditions.append(f"({' OR '.join(folder_conditions)})")
                     else:
                         # 如果没有在线文件夹，不显示任何视频
@@ -2676,8 +2681,13 @@ class MediaLibrary:
                     if offline_video_folders:
                         folder_conditions = []
                         for folder_path in offline_video_folders:
-                            folder_conditions.append("v.source_folder LIKE ?")
-                            params.append(f"{folder_path}%")
+                            if platform.system() == "Windows":
+                                folder_conditions.append("REPLACE(v.source_folder, CHAR(92), '/') LIKE ?")
+                                normalized_folder = folder_path.replace("\\", "/")
+                                params.append(f"{normalized_folder}%")
+                            else:
+                                folder_conditions.append("v.source_folder LIKE ?")
+                                params.append(f"{folder_path}%")
                         conditions.append(f"({' OR '.join(folder_conditions)})")
                     else:
                         # 如果没有离线文件夹，不显示任何视频
@@ -2690,8 +2700,15 @@ class MediaLibrary:
                     if selected_folder != "全部" and selected_folder in self.folder_path_mapping:
                         folder_path = self.folder_path_mapping[selected_folder]
                         if folder_path:  # 确保folder_path不为None
-                            conditions.append("v.source_folder LIKE ?")
-                            params.append(f"{folder_path}%")
+                            if platform.system() == "Windows":
+                                conditions.append("(REPLACE(v.source_folder, CHAR(92), '/') LIKE ? OR REPLACE(v.file_path, CHAR(92), '/') LIKE ?)")
+                                normalized_folder = folder_path.replace("\\", "/")
+                                params.append(f"{normalized_folder}%")
+                                params.append(f"{normalized_folder}%")
+                            else:
+                                conditions.append("(v.source_folder LIKE ? OR v.file_path LIKE ?)")
+                                params.append(f"{folder_path}%")
+                                params.append(f"{folder_path}%")
             
             # 设备和在线筛选逻辑
             current_device = self.get_current_device_name()
@@ -2715,8 +2732,13 @@ class MediaLibrary:
                     # 构建文件夹条件
                     folder_conditions = []
                     for folder_path in online_folders:
-                        folder_conditions.append("v.source_folder LIKE ?")
-                        params.append(f"{folder_path}%")
+                        if platform.system() == "Windows":
+                            folder_conditions.append("REPLACE(v.source_folder, CHAR(92), '/') LIKE ?")
+                            normalized_folder = folder_path.replace("\\", "/")
+                            params.append(f"{normalized_folder}%")
+                        else:
+                            folder_conditions.append("v.source_folder LIKE ?")
+                            params.append(f"{folder_path}%")
                     conditions.append(f"({' OR '.join(folder_conditions)})")
                 else:
                     with self.folder_cache_lock:
@@ -2725,13 +2747,22 @@ class MediaLibrary:
                         conditions.append("1 = 0")
             else:
                 # 不勾选时显示所有激活文件夹中的视频
-                conditions.append("""
-                    EXISTS (
-                        SELECT 1 FROM folders f
-                        WHERE f.is_active = 1 
-                        AND v.source_folder LIKE f.folder_path || '%'
-                    )
-                """)
+                if platform.system() == "Windows":
+                    conditions.append("""
+                        EXISTS (
+                            SELECT 1 FROM folders f
+                            WHERE f.is_active = 1 
+                            AND (REPLACE(v.source_folder, CHAR(92), '/') LIKE REPLACE(f.folder_path, CHAR(92), '/') || '%' OR REPLACE(v.file_path, CHAR(92), '/') LIKE REPLACE(f.folder_path, CHAR(92), '/') || '%')
+                        )
+                    """)
+                else:
+                    conditions.append("""
+                        EXISTS (
+                            SELECT 1 FROM folders f
+                            WHERE f.is_active = 1 
+                            AND (v.source_folder LIKE f.folder_path || '%' OR v.file_path LIKE f.folder_path || '%')
+                        )
+                    """)
             
             # 构建排序查询
             order_clause = "ORDER BY v.title"  # 默认排序
@@ -10385,8 +10416,13 @@ class MediaLibrary:
                     if online_video_folders:
                         folder_conditions = []
                         for folder_path in online_video_folders:
-                            folder_conditions.append("v.source_folder LIKE ?")
-                            params.append(f"{folder_path}%")
+                            if platform.system() == "Windows":
+                                folder_conditions.append("REPLACE(v.source_folder, CHAR(92), '/') LIKE ?")
+                                normalized_folder = folder_path.replace("\\", "/")
+                                params.append(f"{normalized_folder}%")
+                            else:
+                                folder_conditions.append("v.source_folder LIKE ?")
+                                params.append(f"{folder_path}%")
                         conditions.append(f"({' OR '.join(folder_conditions)})")
                     else:
                         # 如果没有在线文件夹，返回空列表
@@ -10402,8 +10438,15 @@ class MediaLibrary:
                     if selected_folder != "全部" and selected_folder in self.folder_path_mapping:
                         folder_path = self.folder_path_mapping[selected_folder]
                         if folder_path:
-                            conditions.append("v.source_folder LIKE ?")
-                            params.append(f"{folder_path}%")
+                            if platform.system() == "Windows":
+                                conditions.append("(REPLACE(v.source_folder, CHAR(92), '/') LIKE ? OR REPLACE(v.file_path, CHAR(92), '/') LIKE ?)")
+                                normalized_folder = folder_path.replace("\\", "/")
+                                params.append(f"{normalized_folder}%")
+                                params.append(f"{normalized_folder}%")
+                            else:
+                                conditions.append("(v.source_folder LIKE ? OR v.file_path LIKE ?)")
+                                params.append(f"{folder_path}%")
+                                params.append(f"{folder_path}%")
             
             # 仅显示在线内容筛选
             if hasattr(self, 'show_online_only') and self.show_online_only.get():
@@ -10431,21 +10474,35 @@ class MediaLibrary:
                 if online_folders:
                     folder_conditions = []
                     for folder_path in online_folders:
-                        folder_conditions.append("v.source_folder LIKE ?")
-                        params.append(f"{folder_path}%")
+                        if platform.system() == "Windows":
+                            folder_conditions.append("REPLACE(v.source_folder, CHAR(92), '/') LIKE ?")
+                            normalized_folder = folder_path.replace("\\", "/")
+                            params.append(f"{normalized_folder}%")
+                        else:
+                            folder_conditions.append("v.source_folder LIKE ?")
+                            params.append(f"{folder_path}%")
                     conditions.append(f"({' OR '.join(folder_conditions)})")
                 else:
                     if platform.system() != "Windows":
                         return []
             else:
                 # 不勾选时显示所有激活文件夹中的视频
-                conditions.append("""
-                    EXISTS (
-                        SELECT 1 FROM folders f
-                        WHERE f.is_active = 1 
-                        AND v.source_folder LIKE f.folder_path || '%'
-                    )
-                """)
+                if platform.system() == "Windows":
+                    conditions.append("""
+                        EXISTS (
+                            SELECT 1 FROM folders f
+                            WHERE f.is_active = 1 
+                            AND (REPLACE(v.source_folder, CHAR(92), '/') LIKE REPLACE(f.folder_path, CHAR(92), '/') || '%' OR REPLACE(v.file_path, CHAR(92), '/') LIKE REPLACE(f.folder_path, CHAR(92), '/') || '%')
+                        )
+                    """)
+                else:
+                    conditions.append("""
+                        EXISTS (
+                            SELECT 1 FROM folders f
+                            WHERE f.is_active = 1 
+                            AND (v.source_folder LIKE f.folder_path || '%' OR v.file_path LIKE f.folder_path || '%')
+                        )
+                    """)
             
             # 额外添加在线文件检查条件
             conditions.append("v.file_path IS NOT NULL")
@@ -10863,12 +10920,20 @@ class MediaLibrary:
             folder_path = self.folder_path_mapping[selected_folder]
             
             # 查询该文件夹下没有演员信息的视频
-            self.cursor.execute("""
-                SELECT v.id, v.file_path, v.file_name 
-                FROM videos v
-                LEFT JOIN video_actors va ON v.id = va.video_id
-                WHERE v.source_folder LIKE ? AND va.video_id IS NULL
-            """, (f"{folder_path}%",))
+            if platform.system() == "Windows":
+                self.cursor.execute("""
+                    SELECT v.id, v.file_path, v.file_name 
+                    FROM videos v
+                    LEFT JOIN video_actors va ON v.id = va.video_id
+                    WHERE REPLACE(v.source_folder, CHAR(92), '/') LIKE REPLACE(?, CHAR(92), '/') || '%' AND va.video_id IS NULL
+                """, (folder_path,))
+            else:
+                self.cursor.execute("""
+                    SELECT v.id, v.file_path, v.file_name 
+                    FROM videos v
+                    LEFT JOIN video_actors va ON v.id = va.video_id
+                    WHERE v.source_folder LIKE ? AND va.video_id IS NULL
+                """, (f"{folder_path}%",))
             
             videos_without_actors = self.cursor.fetchall()
             
@@ -11140,12 +11205,20 @@ class MediaLibrary:
             folder_path = self.folder_path_mapping[selected_folder]
             
             # 查询该文件夹下没有JAVDB标题的视频
-            self.cursor.execute("""
-                SELECT v.id, v.file_path, v.file_name 
-                FROM videos v
-                LEFT JOIN javdb_info j ON v.id = j.video_id
-                WHERE v.source_folder LIKE ? AND (j.javdb_title IS NULL OR j.javdb_title = '')
-            """, (f"{folder_path}%",))
+            if platform.system() == "Windows":
+                self.cursor.execute("""
+                    SELECT v.id, v.file_path, v.file_name 
+                    FROM videos v
+                    LEFT JOIN javdb_info j ON v.id = j.video_id
+                    WHERE REPLACE(v.source_folder, CHAR(92), '/') LIKE REPLACE(?, CHAR(92), '/') || '%' AND (j.javdb_title IS NULL OR j.javdb_title = '')
+                """, (folder_path,))
+            else:
+                self.cursor.execute("""
+                    SELECT v.id, v.file_path, v.file_name 
+                    FROM videos v
+                    LEFT JOIN javdb_info j ON v.id = j.video_id
+                    WHERE v.source_folder LIKE ? AND (j.javdb_title IS NULL OR j.javdb_title = '')
+                """, (f"{folder_path}%",))
             
             videos_without_javdb = self.cursor.fetchall()
             

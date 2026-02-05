@@ -11,6 +11,7 @@ import time
 import sqlite3
 import threading
 import json
+import platform
 from datetime import datetime
 from pathlib import Path
 
@@ -1204,8 +1205,12 @@ class MediaLibraryCore:
             params.append(stars)
 
         if folder_path:
-            conditions.append("v.source_folder LIKE ?")
-            params.append(f"{folder_path}%")
+            if platform.system() == "Windows":
+                conditions.append("REPLACE(v.source_folder, CHAR(92), '/') LIKE REPLACE(?, CHAR(92), '/') || '%'")
+                params.append(folder_path)
+            else:
+                conditions.append("v.source_folder LIKE ?")
+                params.append(f"{folder_path}%")
 
         where_clause = f"WHERE {' AND '.join(conditions)}" if conditions else ""
 
@@ -2895,8 +2900,12 @@ class MainWindow(QMainWindow):
                     if selected_radio:
                         folder_path = selected_radio.property("folder_path")
                         if folder_path:
-                            conditions.append("v.source_folder LIKE ?")
-                            params.append(f"{folder_path}%")
+                            if platform.system() == "Windows":
+                                conditions.append("REPLACE(v.source_folder, CHAR(92), '/') LIKE REPLACE(?, CHAR(92), '/') || '%'")
+                                params.append(folder_path)
+                            else:
+                                conditions.append("v.source_folder LIKE ?")
+                                params.append(f"{folder_path}%")
 
             # 仅显示在线内容筛选
             show_online_only = getattr(self, 'show_online_only', False)

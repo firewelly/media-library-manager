@@ -474,8 +474,12 @@ def get_videos_to_update(folder_path=None, refresh_all=False, filter_by_code=Non
         # 文件夹过滤（兼容尾部斜杠，并包含子目录）；同时兼容基于 file_path 的前缀匹配
         if folder_path:
             norm_path = folder_path.rstrip('/\\')
-            base_conditions.append("((v.source_folder = ? OR v.source_folder = ? OR v.source_folder LIKE ?) OR v.file_path LIKE ?)")
-            params.extend([norm_path, norm_path + '/', norm_path + '/%', norm_path + '/%'])
+            if platform.system() == "Windows":
+                base_conditions.append("((REPLACE(v.source_folder, CHAR(92), '/') = REPLACE(?, CHAR(92), '/') OR REPLACE(v.source_folder, CHAR(92), '/') = REPLACE(?, CHAR(92), '/') || '/' OR REPLACE(v.source_folder, CHAR(92), '/') LIKE REPLACE(?, CHAR(92), '/') || '%') OR REPLACE(v.file_path, CHAR(92), '/') LIKE REPLACE(?, CHAR(92), '/') || '%')")
+                params.extend([norm_path, norm_path, norm_path, norm_path])
+            else:
+                base_conditions.append("((v.source_folder = ? OR v.source_folder = ? OR v.source_folder LIKE ?) OR v.file_path LIKE ?)")
+                params.extend([norm_path, norm_path + '/', norm_path + '/%', norm_path + '/%'])
         
         # 番号过滤
         if filter_by_code:

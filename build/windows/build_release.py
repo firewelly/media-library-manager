@@ -24,17 +24,22 @@ def run(cmd, cwd=None):
     return p.stdout
 
 
-def pyinstaller_cmd(script: Path, name: str):
+def pyinstaller_cmd(script: Path, name: str, is_main=False):
     data = []
     def add_data(src: Path, dest: str):
         if src.exists():
             data.append(f"{src}{os.pathsep}{dest}")
 
-    add_data(ROOT / "gui_config.json", ".")
-    add_data(ROOT / "config.json", ".")
-    add_data(ROOT / "covers" / "default.JPEG", "covers")
-    add_data(ROOT / "vocabulary_tags.txt", ".")
-    add_data(ROOT / "javsp_config.yaml", ".")
+    if name == "user_manual":
+        html_file = script.parent / "用户手册.html"
+        if html_file.exists():
+            data.append(f"{html_file}{os.pathsep}.")
+    else:
+        add_data(ROOT / "gui_config.json", ".")
+        add_data(ROOT / "config.json", ".")
+        add_data(ROOT / "covers" / "default.JPEG", "covers")
+        add_data(ROOT / "vocabulary_tags.txt", ".")
+        add_data(ROOT / "javsp_config.yaml", ".")
 
     cmd = [
         sys.executable, "-m", "PyInstaller",
@@ -211,6 +216,10 @@ def main():
         scripts = collect_scripts()
 
         targets = main_targets + [(p.stem, p) for p in scripts]
+        
+        user_manual_script = ASSETS_DIR / "user_manual.py"
+        if user_manual_script.exists():
+            targets.append(("user_manual", user_manual_script))
 
         for name, script in targets:
             try:
