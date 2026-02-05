@@ -321,6 +321,13 @@ class MediaLibrary:
             'javdb_tags': {'width': 200, 'position': 17, 'text': 'JAVDB标签'}
         }
         
+        # 文件夹在线状态缓存，避免重复检查
+        self.folder_online_cache = {}
+        self.last_cache_update = 0
+        self.cache_update_interval = 5  # 缓存更新间隔（秒）
+        self.cache_refresh_in_progress = False
+        self.folder_cache_lock = threading.Lock()
+
         # 加载列配置
         self.load_column_config()
         
@@ -341,11 +348,6 @@ class MediaLibrary:
         self.gpu_acceleration = None
         self.check_gpu_acceleration_status()
         
-        # 文件夹在线状态缓存，避免重复检查
-        self.folder_online_cache = {}
-        self.last_cache_update = 0
-        self.cache_update_interval = 5  # 缓存更新间隔（秒）
-        
         # 输入法状态跟踪，避免输入法输入时触发搜索
         self.is_ime_active = False
         self.ime_last_key_time = 0
@@ -353,6 +355,8 @@ class MediaLibrary:
         
         # 绑定窗口关闭事件保存配置
         self.root.protocol("WM_DELETE_WINDOW", self.on_closing)
+
+        self.refresh_folder_online_cache_async(force=True)
         
     def load_column_config(self):
         """加载列配置"""
@@ -1649,7 +1653,13 @@ class MediaLibrary:
         # 查询活跃文件夹
         self.cursor.execute("SELECT folder_path FROM folders WHERE is_active = 1")
         active_rows = self.cursor.fetchall()
-        active_folders = [r[0] for r in active_rows if r and r[0] and os.path.exists(r[0])]
+        self.refresh_folder_online_cache_async()
+        with self.folder_cache_lock:
+            online_folders = {folder for folder, is_online in self.folder_online_cache.items() if is_online}
+        if online_folders:
+            active_folders = [r[0] for r in active_rows if r and r[0] and r[0] in online_folders]
+        else:
+            active_folders = [r[0] for r in active_rows if r and r[0]]
 
         if not active_folders:
             messagebox.showinfo("信息", "没有找到在线的活跃文件夹，请先添加文件夹")
@@ -2040,6 +2050,29 @@ class MediaLibrary:
         except Exception as e:
             print(f"检查视频在线状态时出错: {e}")
             return False
+
+    def get_cached_video_online_status(self, video_id, file_path=None):
+        try:
+            if file_path:
+                folder_path = os.path.dirname(file_path)
+                if folder_path:
+                    folder_status = self.get_folder_online_status(folder_path)
+                    if folder_status is not None:
+                        return folder_status
+            self.cursor.execute("SELECT is_nas_online, source_folder, file_path FROM videos WHERE id = ?", (video_id,))
+            result = self.cursor.fetchone()
+            if result:
+                is_nas_online, source_folder, db_file_path = result
+                if is_nas_online is not None:
+                    return bool(is_nas_online)
+                folder_path = source_folder or (os.path.dirname(db_file_path) if db_file_path else None)
+                if folder_path:
+                    folder_status = self.get_folder_online_status(folder_path)
+                    if folder_status is not None:
+                        return folder_status
+        except Exception as e:
+            print(f"获取缓存在线状态失败: {e}")
+        return True
     
     def check_nas_status(self, file_path):
         """检查NAS状态"""
@@ -2049,15 +2082,95 @@ class MediaLibrary:
             return False
             
     def get_video_info(self, file_path):
-        """获取视频信息（时长和分辨率）"""
+        """获取视频信息（时长和分辨率），优先使用ffprobe以获得更好性能"""
         try:
             if not os.path.exists(file_path):
                 return None, None
             
-            # 首先尝试使用opencv-python获取视频信息
+            # 优先使用ffprobe，因为它更快，不需要完全解码视频
+            ffprobe_cmd = self.get_ffprobe_command()
+            if ffprobe_cmd is not None:
+                try:
+                    # 使用硬件加速检测
+                    gpu_info = self.detect_gpu_acceleration()
+                    
+                    # 构建ffprobe命令，如果支持硬件加速则添加相关参数
+                    duration_cmd = [
+                        ffprobe_cmd, "-v", "quiet"
+                    ]
+                    
+                    # 如果支持硬件解码，添加硬件加速参数
+                    if gpu_info["available"] and gpu_info["hwaccel"]:
+                        duration_cmd.extend(["-hwaccel", gpu_info["hwaccel"]])
+                        if gpu_info["hwaccel"] == "vaapi":
+                            # VAAPI需要指定设备
+                            dri_path = "/dev/dri/renderD128"
+                            if os.path.exists(dri_path):
+                                duration_cmd.extend(["-hwaccel_device", dri_path])
+                    
+                    duration_cmd.extend([
+                        "-show_entries", "format=duration",
+                        "-of", "csv=p=0", file_path
+                    ])
+                    
+                    duration_result = subprocess.run(duration_cmd, capture_output=True, text=True, timeout=10)
+                    duration = None
+                    if duration_result.returncode == 0 and duration_result.stdout.strip():
+                        try:
+                            duration = int(float(duration_result.stdout.strip()))
+                        except ValueError:
+                            pass
+                        
+                    # 获取分辨率
+                    resolution_cmd = [
+                        ffprobe_cmd, "-v", "quiet"
+                    ]
+                    
+                    # 如果支持硬件解码，添加硬件加速参数
+                    if gpu_info["available"] and gpu_info["hwaccel"]:
+                        resolution_cmd.extend(["-hwaccel", gpu_info["hwaccel"]])
+                        if gpu_info["hwaccel"] == "vaapi":
+                            dri_path = "/dev/dri/renderD128"
+                            if os.path.exists(dri_path):
+                                resolution_cmd.extend(["-hwaccel_device", dri_path])
+                    
+                    resolution_cmd.extend([
+                        "-select_streams", "v:0",
+                        "-show_entries", "stream=width,height", "-of", "csv=p=0", file_path
+                    ])
+                    
+                    resolution_result = subprocess.run(resolution_cmd, capture_output=True, text=True, timeout=10)
+                    resolution = None
+                    if resolution_result.returncode == 0 and resolution_result.stdout.strip():
+                        try:
+                            width, height = resolution_result.stdout.strip().split(',')
+                            resolution = f"{width}x{height}"
+                        except ValueError:
+                            pass
+                    
+                    # 如果ffprobe成功获取信息，直接返回
+                    if duration is not None or resolution is not None:
+                        return duration, resolution
+                        
+                except subprocess.TimeoutExpired:
+                    print(f"ffprobe超时: {file_path}")
+                except Exception as e:
+                    print(f"使用ffprobe获取视频信息失败: {str(e)}")
+            
+            # 如果ffprobe不可用或失败，尝试使用opencv-python
             try:
                 import cv2
+                
+                # 尝试使用GPU加速的OpenCV（如果可用）
                 cap = cv2.VideoCapture(file_path)
+                
+                # 检查OpenCV是否支持CUDA
+                try:
+                    if cv2.cuda.getCudaEnabledDeviceCount() > 0:
+                        # 尝试使用CUDA解码器
+                        cap.set(cv2.CAP_PROP_CUDA_DEVICE, 0)
+                except AttributeError:
+                    pass
                 
                 if cap.isOpened():
                     # 获取帧率和总帧数来计算时长
@@ -2081,44 +2194,11 @@ class MediaLibrary:
                     cap.release()
                     
             except ImportError:
-                print("opencv-python未安装，尝试使用ffprobe...")
+                print("opencv-python未安装")
             except Exception as e:
                 print(f"使用opencv获取视频信息失败: {str(e)}")
                 
-            # 如果opencv不可用，尝试使用ffprobe
-            ffprobe_cmd = self.get_ffprobe_command()
-            if ffprobe_cmd is None:
-                print(f"ffprobe未找到，无法获取视频信息: {file_path}")
-                return None, None
-                
-            # 获取时长
-            duration_cmd = [
-                ffprobe_cmd, "-v", "quiet", "-show_entries", "format=duration",
-                "-of", "csv=p=0", file_path
-            ]
-            duration_result = subprocess.run(duration_cmd, capture_output=True, text=True)
-            duration = None
-            if duration_result.returncode == 0 and duration_result.stdout.strip():
-                try:
-                    duration = int(float(duration_result.stdout.strip()))
-                except ValueError:
-                    pass
-                    
-            # 获取分辨率
-            resolution_cmd = [
-                ffprobe_cmd, "-v", "quiet", "-select_streams", "v:0",
-                "-show_entries", "stream=width,height", "-of", "csv=p=0", file_path
-            ]
-            resolution_result = subprocess.run(resolution_cmd, capture_output=True, text=True)
-            resolution = None
-            if resolution_result.returncode == 0 and resolution_result.stdout.strip():
-                try:
-                    width, height = resolution_result.stdout.strip().split(',')
-                    resolution = f"{width}x{height}"
-                except ValueError:
-                    pass
-                    
-            return duration, resolution
+            return None, None
             
         except Exception as e:
             print(f"获取视频信息失败 {file_path}: {str(e)}")
@@ -2160,27 +2240,155 @@ class MediaLibrary:
         return None
     
     def detect_gpu_acceleration(self):
-        """检测可用的GPU加速选项"""
+        """检测可用的GPU加速选项，返回详细的GPU信息"""
         ffmpeg_cmd = self.get_ffmpeg_command()
         if not ffmpeg_cmd:
-            return None
+            return {"available": False, "hwaccel": None, "decoder": None, "encoder": None, "gpu_type": None}
             
+        result = {
+            "available": False,
+            "hwaccel": None,
+            "decoder": None,
+            "encoder": None,
+            "gpu_type": None
+        }
+        
         try:
             # 检查FFmpeg支持的硬件加速器
-            result = subprocess.run([ffmpeg_cmd, "-hwaccels"], capture_output=True, text=True)
-            if result.returncode == 0:
-                hwaccels = result.stdout.lower()
+            hwaccels_result = subprocess.run([ffmpeg_cmd, "-hwaccels"], capture_output=True, text=True, timeout=5)
+            if hwaccels_result.returncode != 0:
+                return result
+            
+            hwaccels = hwaccels_result.stdout.lower()
+            system = platform.system()
+            
+            # 检测支持的硬件加速器并选择最佳选项
+            if system == 'Darwin':
+                # macOS: VideoToolbox是原生硬件加速
+                if 'videotoolbox' in hwaccels:
+                    result.update({
+                        "available": True,
+                        "hwaccel": "videotoolbox",
+                        "decoder": "h264_videotoolbox",
+                        "encoder": "h264_videotoolbox",
+                        "gpu_type": "Apple Silicon / Intel"
+                    })
+                elif 'opencl' in hwaccels:
+                    result.update({
+                        "available": True,
+                        "hwaccel": "opencl",
+                        "decoder": None,
+                        "encoder": None,
+                        "gpu_type": "OpenCL"
+                    })
+            
+            elif system == 'Windows':
+                # Windows: 按优先级检测硬件加速器
+                # 注意：需要验证实际可用性，而不仅仅是编译时支持
                 
-                # macOS优先级：videotoolbox > opencl
-                if "videotoolbox" in hwaccels:
-                    return "videotoolbox"
-                elif "opencl" in hwaccels:
-                    return "opencl"
-                    
+                # 对于AMD集成显卡，优先选择D3D11VA
+                if 'd3d11va' in hwaccels:
+                    result.update({
+                        "available": True,
+                        "hwaccel": "d3d11va",
+                        "decoder": "h264_dxva2",  # D3D11VA通常使用dxva2解码器
+                        "encoder": "h264_qsv",  # 如果有Intel核显，可以用QSV编码
+                        "gpu_type": "AMD / DirectX 11"
+                    })
+                # Intel QSV (Intel集成显卡)
+                elif 'qsv' in hwaccels:
+                    result.update({
+                        "available": True,
+                        "hwaccel": "qsv",
+                        "decoder": "h264_qsv",
+                        "encoder": "h264_qsv",
+                        "gpu_type": "Intel"
+                    })
+                # DXVA2 (旧版DirectX 9，适用于旧硬件)
+                elif 'dxva2' in hwaccels:
+                    result.update({
+                        "available": True,
+                        "hwaccel": "dxva2",
+                        "decoder": "h264_dxva2",
+                        "encoder": None,
+                        "gpu_type": "DirectX 9"
+                    })
+                # NVIDIA CUDA (仅当有实际NVIDIA GPU时)
+                elif 'cuda' in hwaccels:
+                    # 尝试验证CUDA是否实际可用
+                    try:
+                        test_cmd = [ffmpeg_cmd, "-hwaccel", "cuda", "-f", "lavfi", "-i", "testsrc=duration=1:size=320x240:rate=1", "-f", "null", "-"]
+                        test_result = subprocess.run(test_cmd, capture_output=True, timeout=5)
+                        if test_result.returncode == 0:
+                            result.update({
+                                "available": True,
+                                "hwaccel": "cuda",
+                                "decoder": "h264_cuvid",
+                                "encoder": "h264_nvenc",
+                                "gpu_type": "NVIDIA"
+                            })
+                    except:
+                        pass
+            
+            elif system == 'Linux':
+                # Linux: 按优先级检测硬件加速器
+                
+                # VA-API (Video Acceleration API - 适用于AMD/Intel GPU)
+                if 'vaapi' in hwaccels:
+                    result.update({
+                        "available": True,
+                        "hwaccel": "vaapi",
+                        "decoder": "h264_vaapi",
+                        "encoder": "h264_vaapi",
+                        "gpu_type": "AMD / Intel (VA-API)"
+                    })
+                # Intel QSV
+                elif 'qsv' in hwaccels:
+                    result.update({
+                        "available": True,
+                        "hwaccel": "qsv",
+                        "decoder": "h264_qsv",
+                        "encoder": "h264_qsv",
+                        "gpu_type": "Intel"
+                    })
+                # NVIDIA CUDA (验证实际可用性)
+                elif 'cuda' in hwaccels:
+                    try:
+                        test_cmd = [ffmpeg_cmd, "-hwaccel", "cuda", "-f", "lavfi", "-i", "testsrc=duration=1:size=320x240:rate=1", "-f", "null", "-"]
+                        test_result = subprocess.run(test_cmd, capture_output=True, timeout=5)
+                        if test_result.returncode == 0:
+                            result.update({
+                                "available": True,
+                                "hwaccel": "cuda",
+                                "decoder": "h264_cuvid",
+                                "encoder": "h264_nvenc",
+                                "gpu_type": "NVIDIA"
+                            })
+                    except:
+                        pass
+                # VDPAU (NVIDIA旧驱动)
+                elif 'vdpau' in hwaccels:
+                    result.update({
+                        "available": True,
+                        "hwaccel": "vdpau",
+                        "decoder": "h264_vdpau",
+                        "encoder": None,
+                        "gpu_type": "NVIDIA (VDPAU)"
+                    })
+                # OpenCL (通用跨平台)
+                elif 'opencl' in hwaccels:
+                    result.update({
+                        "available": True,
+                        "hwaccel": "opencl",
+                        "decoder": None,
+                        "encoder": None,
+                        "gpu_type": "OpenCL"
+                    })
+            
         except Exception as e:
             print(f"检测GPU加速失败: {e}")
             
-        return None
+        return result
     
     def check_gpu_acceleration_status(self):
         """检查GPU加速状态并显示信息"""
@@ -2496,9 +2704,11 @@ class MediaLibrary:
                 all_folders = [row[0] for row in self.cursor.fetchall()]
                 
                 # 检查哪些文件夹路径实际存在
+                self.refresh_folder_online_cache_async()
                 online_folders = []
                 for folder_path in all_folders:
-                    if os.path.exists(folder_path) and os.path.isdir(folder_path):
+                    folder_status = self.get_folder_online_status(folder_path)
+                    if folder_status:
                         online_folders.append(folder_path)
                 
                 if online_folders:
@@ -2509,8 +2719,10 @@ class MediaLibrary:
                         params.append(f"{folder_path}%")
                     conditions.append(f"({' OR '.join(folder_conditions)})")
                 else:
-                    # 如果没有在线文件夹，不显示任何视频
-                    conditions.append("1 = 0")
+                    with self.folder_cache_lock:
+                        has_cache = bool(self.folder_online_cache)
+                    if has_cache:
+                        conditions.append("1 = 0")
             else:
                 # 不勾选时显示所有激活文件夹中的视频
                 conditions.append("""
@@ -2628,12 +2840,13 @@ class MediaLibrary:
                     )
                     result = self.cursor.fetchone()
                     if result:
+                        cached_status = self.get_folder_online_status(result[0]) if result[0] else None
                         folder_cache[folder] = {
                             'folder_path': result[0],
                             'is_active': result[1],
                             'device_name': result[2],
                             'folder_type': result[3],
-                            'is_online': bool(result[1]) and os.path.exists(result[0]) if result[0] else False
+                            'is_online': cached_status if result[0] else None
                         }
                 
                 # 批量查询演员信息
@@ -2682,14 +2895,14 @@ class MediaLibrary:
                 size_display = self.format_file_size(file_size) if file_size else ""
                 
                 # 使用缓存的文件夹信息来确定在线状态
-                is_online = False
+                is_online = None
                 if source_folder and source_folder in folder_cache:
                     folder_info = folder_cache[source_folder]
                     is_online = folder_info['is_online']
-                elif is_nas_online is not None:
+                if is_online is None and is_nas_online is not None:
                     is_online = bool(is_nas_online)
-                else:
-                    is_online = self.is_video_online(int(video_id))
+                if is_online is None:
+                    is_online = False
                 status_display = "在线" if is_online else "离线"
                 
                 # 初始化标签显示
@@ -2748,11 +2961,15 @@ class MediaLibrary:
                 # 格式化来源文件夹显示
                 top_folder_display = ""
                 full_path_display = ""
+                if source_folder is not None and not isinstance(source_folder, str):
+                    source_folder = str(source_folder)
                 if source_folder:
                     # 找到对应的顶层文件夹
                     if hasattr(self, 'folder_path_mapping'):
                         # 先尝试精确匹配
                         for folder_name, folder_path in self.folder_path_mapping.items():
+                            if folder_path is not None and not isinstance(folder_path, str):
+                                folder_path = str(folder_path)
                             if folder_path and source_folder.startswith(folder_path):
                                 top_folder_display = folder_name
                                 break
@@ -2916,10 +3133,29 @@ class MediaLibrary:
             self.folder_path_mapping = {"全部": None}
             
             for folder_path, folder_type, device_name in folders:
-                folder_name = os.path.basename(folder_path)
+                if folder_path is not None and not isinstance(folder_path, str):
+                    folder_path = str(folder_path)
+                is_windows = platform.system() == "Windows"
+                if is_windows:
+                    folder_name = os.path.basename(folder_path.rstrip("\\/")) if folder_path else ""
+                else:
+                    folder_name = os.path.basename(folder_path) if folder_path else ""
                 
                 # 根据文件夹类型生成显示名称（统一为 设备@文件夹）
-                if folder_type == "nas":
+                is_unc = is_windows and bool(folder_path) and (folder_path.startswith("\\\\") or folder_path.startswith("//"))
+                is_nas_path = bool(folder_path) and (
+                    folder_path.startswith("smb://")
+                    or folder_path.startswith("/Volumes/")
+                    or is_unc
+                )
+                if not is_windows:
+                    is_nas_path = bool(folder_path) and (
+                        folder_path.startswith("smb://")
+                        or folder_path.startswith("/Volumes/")
+                    )
+                is_nas = folder_type == "nas" or is_nas_path
+
+                if is_nas:
                     # 优先解析设备标识（IP/主机名/卷名）
                     device_display = None
                     if folder_path.startswith("smb://"):
@@ -2928,6 +3164,11 @@ class MediaLibrary:
                         domain_match = re.search(r'smb://(?:[^@]+@)?([^/]+)/', folder_path)
                         if domain_match:
                             device_display = domain_match.group(1)
+                    elif is_unc:
+                        import re
+                        host_match = re.search(r'^[\\/]{2}([^\\/]+)', folder_path)
+                        if host_match:
+                            device_display = host_match.group(1)
                     elif folder_path.startswith("/Volumes/"):
                         # macOS 挂载的网络驱动器：取卷名作为设备名
                         parts = folder_path.split('/')
@@ -2940,6 +3181,9 @@ class MediaLibrary:
                     # 本地文件夹：显示设备名称或“本地”
                     device_display = device_name if device_name and device_name.strip() else "本地"
                     display_name = f"{device_display}@{folder_name}"
+
+                if is_windows and folder_path:
+                    display_name = folder_path
                 
                 self.folder_listbox.insert(tk.END, display_name)
                 self.folder_path_mapping[display_name] = folder_path
@@ -3410,7 +3654,7 @@ class MediaLibrary:
                         messagebox.showerror("错误", "找不到视频信息")
                         return
                     file_path = result[0]
-                    is_nas_online = self.is_video_online(video_id)
+                    is_nas_online = self.get_cached_video_online_status(video_id, file_path)
                 except Exception as e:
                     messagebox.showerror("错误", f"获取视频信息失败: {str(e)}")
                     return
@@ -3423,29 +3667,30 @@ class MediaLibrary:
                 messagebox.showwarning("警告", "请先选择一个视频")
                 return
             file_path = self.current_video[1]
-            is_nas_online = self.current_video[13]
+            is_nas_online = self.get_cached_video_online_status(self.current_video[0], file_path)
         
         if not is_nas_online:
             messagebox.showwarning("警告", "NAS离线，无法播放视频")
             return
-            
-        if not os.path.exists(file_path):
-            messagebox.showerror("错误", "视频文件不存在")
-            return
-            
-        try:
-            # 跨平台播放
-            system = platform.system()
-            if system == "Darwin":  # macOS
-                subprocess.run(["open", file_path])
-            elif system == "Windows":
-                os.startfile(file_path)
-            elif system == "Linux":
-                subprocess.run(["xdg-open", file_path])
-            else:
-                messagebox.showerror("错误", f"不支持的操作系统: {system}")
-        except Exception as e:
-            messagebox.showerror("错误", f"播放视频失败: {str(e)}")
+
+        def _play(path):
+            try:
+                if not os.path.exists(path):
+                    self.root.after(0, lambda: messagebox.showerror("错误", "视频文件不存在"))
+                    return
+                system = platform.system()
+                if system == "Darwin":
+                    subprocess.run(["open", path])
+                elif system == "Windows":
+                    os.startfile(path)
+                elif system == "Linux":
+                    subprocess.run(["xdg-open", path])
+                else:
+                    self.root.after(0, lambda: messagebox.showerror("错误", f"不支持的操作系统: {system}"))
+            except Exception as e:
+                self.root.after(0, lambda: messagebox.showerror("错误", f"播放视频失败: {str(e)}"))
+
+        threading.Thread(target=_play, args=(file_path,), daemon=True).start()
             
     def save_video_info(self):
         """保存视频信息"""
@@ -5224,9 +5469,20 @@ class MediaLibrary:
                                 all_video_folders = [row[0] for row in self.cursor.fetchall()]
                                 
                                 online_video_folders = []
-                                for folder_path in all_video_folders:
-                                    if os.path.exists(folder_path) and os.path.isdir(folder_path):
-                                        online_video_folders.append(folder_path)
+                                if platform.system() == "Windows":
+                                    self.refresh_folder_online_cache_async()
+                                    with self.folder_cache_lock:
+                                        cached_status = dict(self.folder_online_cache)
+                                    if cached_status:
+                                        for folder_path in all_video_folders:
+                                            if folder_path and cached_status.get(folder_path):
+                                                online_video_folders.append(folder_path)
+                                    else:
+                                        online_video_folders = [p for p in all_video_folders if p]
+                                else:
+                                    for folder_path in all_video_folders:
+                                        if os.path.exists(folder_path) and os.path.isdir(folder_path):
+                                            online_video_folders.append(folder_path)
                                 
                                 if online_video_folders:
                                     folder_conditions = []
@@ -5920,6 +6176,12 @@ class MediaLibrary:
             self.cursor.execute("SELECT * FROM folders ORDER BY folder_path")
             folders = self.cursor.fetchall()
             current_device = self.get_current_device_name()
+            is_windows = platform.system() == "Windows"
+            cached_status = None
+            if is_windows:
+                self.refresh_folder_online_cache_async()
+                with self.folder_cache_lock:
+                    cached_status = dict(self.folder_online_cache)
             
             for folder in folders:
                 if len(folder) == 5:  # 旧格式，没有device_name字段
@@ -5959,10 +6221,16 @@ class MediaLibrary:
                     status = "禁用"
                 else:
                     # 检查路径是否存在来判断在线状态
-                    if os.path.exists(folder_path):
-                        status = "在线"
+                    if is_windows:
+                        if cached_status:
+                            status = "在线" if cached_status.get(folder_path) else "离线"
+                        else:
+                            status = "未知"
                     else:
-                        status = "离线"
+                        if os.path.exists(folder_path):
+                            status = "在线"
+                        else:
+                            status = "离线"
                 
                 folder_tree.insert('', 'end', values=(folder_path, folder_type, device_display, status), tags=(folder_id,))
                 
@@ -6075,28 +6343,9 @@ class MediaLibrary:
     def get_online_folders(self):
         """获取所有活跃且在线的文件夹路径"""
         try:
-            import time
-            current_time = time.time()
-            
-            # 检查是否需要更新缓存
-            if current_time - self.last_cache_update > self.cache_update_interval:
-                self.folder_online_cache = {}
-                self.cursor.execute("SELECT folder_path FROM folders WHERE is_active = 1")
-                all_folders = [row[0] for row in self.cursor.fetchall()]
-                
-                # 更新缓存
-                for folder in all_folders:
-                    is_online = os.path.exists(folder) and os.path.isdir(folder)
-                    self.folder_online_cache[folder] = is_online
-                    if is_online:
-                        print(f"✓ 在线文件夹: {folder}")
-                    else:
-                        print(f"✗ 离线文件夹: {folder}")
-                
-                self.last_cache_update = current_time
-            
-            # 从缓存返回在线文件夹
-            online_folders = [folder for folder, is_online in self.folder_online_cache.items() if is_online]
+            self.refresh_folder_online_cache_async()
+            with self.folder_cache_lock:
+                online_folders = [folder for folder, is_online in self.folder_online_cache.items() if is_online]
             return online_folders
         except Exception as e:
             print(f"获取活跃文件夹失败: {e}")
@@ -6104,30 +6353,55 @@ class MediaLibrary:
     
     def get_folder_online_status(self, folder_path):
         """获取文件夹在线状态（使用缓存）"""
-        import time
-        current_time = time.time()
-        
-        # 检查是否需要更新缓存
-        if current_time - self.last_cache_update > self.cache_update_interval:
-            self.folder_online_cache = {}
+        try:
+            self.refresh_folder_online_cache_async()
+            with self.folder_cache_lock:
+                if folder_path in self.folder_online_cache:
+                    return self.folder_online_cache[folder_path]
+            return None
+        except Exception as e:
+            print(f"更新文件夹缓存失败: {e}")
+            return None
+
+    def refresh_folder_online_cache_async(self, force=False):
+        try:
+            import time
+            current_time = time.time()
+            if not force and current_time - self.last_cache_update <= self.cache_update_interval:
+                return
+            if self.cache_refresh_in_progress:
+                return
+            self.cache_refresh_in_progress = True
             try:
                 self.cursor.execute("SELECT folder_path FROM folders WHERE is_active = 1")
                 all_folders = [row[0] for row in self.cursor.fetchall()]
-                
-                # 更新缓存
-                for folder in all_folders:
-                    is_online = os.path.exists(folder) and os.path.isdir(folder)
-                    self.folder_online_cache[folder] = is_online
-                
-                self.last_cache_update = current_time
-            except Exception as e:
-                print(f"更新文件夹缓存失败: {e}")
-        
-        # 从缓存返回状态，如果缓存中没有则直接检查
-        if folder_path in self.folder_online_cache:
-            return self.folder_online_cache[folder_path]
-        else:
-            return os.path.exists(folder_path) and os.path.isdir(folder_path)
+            except Exception:
+                self.cache_refresh_in_progress = False
+                return
+
+            def _worker(folders):
+                new_cache = {}
+                for folder in folders:
+                    try:
+                        is_online = os.path.exists(folder) and os.path.isdir(folder)
+                    except Exception:
+                        is_online = False
+                    new_cache[folder] = is_online
+
+                def _apply():
+                    with self.folder_cache_lock:
+                        self.folder_online_cache = new_cache
+                        self.last_cache_update = time.time()
+                    self.cache_refresh_in_progress = False
+
+                try:
+                    self.root.after(0, _apply)
+                except Exception:
+                    self.cache_refresh_in_progress = False
+
+            threading.Thread(target=_worker, args=(all_folders,), daemon=True).start()
+        except Exception:
+            self.cache_refresh_in_progress = False
     
     def format_folder_display_name(self, folder_path):
         """格式化文件夹显示名称 - 显示足够信息以区分重名文件夹"""
@@ -6205,8 +6479,7 @@ class MediaLibrary:
                 
                 if result:
                     file_path = result[0]
-                    is_nas_online = self.is_video_online(video_id)
-                    # print(f"Debug: Video ID {video_id}, Online status: {is_nas_online}")
+                    is_nas_online = self.get_cached_video_online_status(video_id, file_path)
                     selected_videos.append({
                         'id': video_id,
                         'path': file_path,
@@ -8273,7 +8546,17 @@ class MediaLibrary:
                 try:
                     # 查询所有在线文件夹
                     self.cursor.execute("SELECT DISTINCT folder_path FROM folders WHERE is_active = 1")
-                    folders = [r[0] for r in self.cursor.fetchall() if os.path.exists(r[0])]
+                    all_folders = [r[0] for r in self.cursor.fetchall()]
+                    if platform.system() == "Windows":
+                        self.refresh_folder_online_cache_async()
+                        with self.folder_cache_lock:
+                            cached_status = dict(self.folder_online_cache)
+                        if cached_status:
+                            folders = [p for p in all_folders if p and cached_status.get(p)]
+                        else:
+                            folders = [p for p in all_folders if p]
+                    else:
+                        folders = [r for r in all_folders if r and os.path.exists(r)]
                     
                     if folders:
                         # 创建选择对话框
@@ -10017,9 +10300,20 @@ class MediaLibrary:
                     all_video_folders = [row[0] for row in self.cursor.fetchall()]
                     
                     online_video_folders = []
-                    for folder_path in all_video_folders:
-                        if os.path.exists(folder_path) and os.path.isdir(folder_path):
-                            online_video_folders.append(folder_path)
+                    if platform.system() == "Windows":
+                        self.refresh_folder_online_cache_async()
+                        with self.folder_cache_lock:
+                            cached_status = dict(self.folder_online_cache)
+                        if cached_status:
+                            for folder_path in all_video_folders:
+                                if folder_path and cached_status.get(folder_path):
+                                    online_video_folders.append(folder_path)
+                        else:
+                            online_video_folders = [p for p in all_video_folders if p]
+                    else:
+                        for folder_path in all_video_folders:
+                            if os.path.exists(folder_path) and os.path.isdir(folder_path):
+                                online_video_folders.append(folder_path)
                     
                     if online_video_folders:
                         folder_conditions = []
@@ -10052,9 +10346,20 @@ class MediaLibrary:
                 
                 # 检查哪些文件夹路径实际存在
                 online_folders = []
-                for folder_path in all_folders:
-                    if os.path.exists(folder_path) and os.path.isdir(folder_path):
-                        online_folders.append(folder_path)
+                if platform.system() == "Windows":
+                    self.refresh_folder_online_cache_async()
+                    with self.folder_cache_lock:
+                        cached_status = dict(self.folder_online_cache)
+                    if cached_status:
+                        for folder_path in all_folders:
+                            if folder_path and cached_status.get(folder_path):
+                                online_folders.append(folder_path)
+                    else:
+                        online_folders = [p for p in all_folders if p]
+                else:
+                    for folder_path in all_folders:
+                        if os.path.exists(folder_path) and os.path.isdir(folder_path):
+                            online_folders.append(folder_path)
                 
                 if online_folders:
                     folder_conditions = []
@@ -10063,7 +10368,8 @@ class MediaLibrary:
                         params.append(f"{folder_path}%")
                     conditions.append(f"({' OR '.join(folder_conditions)})")
                 else:
-                    return []
+                    if platform.system() != "Windows":
+                        return []
             else:
                 # 不勾选时显示所有激活文件夹中的视频
                 conditions.append("""
