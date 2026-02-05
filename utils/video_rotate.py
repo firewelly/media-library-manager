@@ -50,6 +50,109 @@ def get_ffmpeg_command():
     
     return None
 
+def detect_gpu_acceleration():
+    """检测GPU硬件编码支持"""
+    ffmpeg_cmd = get_ffmpeg_command()
+    if not ffmpeg_cmd:
+        return {"available": False, "decoder": None, "encoder": None, "gpu_type": None}
+
+    result = {
+        "available": False,
+        "decoder": None,
+        "encoder": None,
+        "gpu_type": None
+    }
+
+    try:
+        # 获取FFmpeg支持的编码器
+        cmd_result = subprocess.run([ffmpeg_cmd, "-encoders"], capture_output=True, text=True, timeout=5)
+        if cmd_result.returncode != 0:
+            return result
+
+        encoders = cmd_result.stdout.lower()
+        system = platform.system()
+
+        # 检测支持的硬件编码器并选择最佳选项
+        if system == 'Darwin':
+            # macOS: VideoToolbox是原生硬件编码器
+            if 'h264_videotoolbox' in encoders:
+                result.update({
+                    "available": True,
+                    "encoder": "h264_videotoolbox",
+                    "gpu_type": "Apple Silicon / Intel"
+                })
+
+        elif system == 'Windows':
+            # Windows: 按优先级检测硬件编码器
+            # 对于AMD集成显卡，优先考虑AMF编码器
+
+            # 1. AMD AMF (AMD GPU)
+            if 'h264_amf' in encoders:
+                result.update({
+                    "available": True,
+                    "encoder": "h264_amf",
+                    "gpu_type": "AMD"
+                })
+            # 2. Intel QSV (Intel GPU)
+            elif 'h264_qsv' in encoders:
+                result.update({
+                    "available": True,
+                    "encoder": "h264_qsv",
+                    "gpu_type": "Intel"
+                })
+            # 3. NVIDIA NVENC (NVIDIA GPU) - 仅当实际可用时
+            elif 'h264_nvenc' in encoders:
+                # 验证NVENC是否实际可用
+                try:
+                    test_cmd = [ffmpeg_cmd, "-f", "lavfi", "-i", "testsrc=duration=1:size=320x240:rate=1",
+                                "-c:v", "h264_nvenc", "-f", "null", "-"]
+                    test_result = subprocess.run(test_cmd, capture_output=True, timeout=5)
+                    if test_result.returncode == 0:
+                        result.update({
+                            "available": True,
+                            "encoder": "h264_nvenc",
+                            "gpu_type": "NVIDIA"
+                        })
+                except:
+                    pass
+
+        elif system == 'Linux':
+            # Linux: 按优先级检测硬件编码器
+
+            # 1. VAAPI (Video Acceleration API - AMD/Intel GPU)
+            if 'h264_vaapi' in encoders:
+                result.update({
+                    "available": True,
+                    "encoder": "h264_vaapi",
+                    "gpu_type": "AMD / Intel (VAAPI)"
+                })
+            # 2. Intel QSV
+            elif 'h264_qsv' in encoders:
+                result.update({
+                    "available": True,
+                    "encoder": "h264_qsv",
+                    "gpu_type": "Intel"
+                })
+            # 3. NVIDIA NVENC - 仅当实际可用时
+            elif 'h264_nvenc' in encoders:
+                try:
+                    test_cmd = [ffmpeg_cmd, "-f", "lavfi", "-i", "testsrc=duration=1:size=320x240:rate=1",
+                                "-c:v", "h264_nvenc", "-f", "null", "-"]
+                    test_result = subprocess.run(test_cmd, capture_output=True, timeout=5)
+                    if test_result.returncode == 0:
+                        result.update({
+                            "available": True,
+                            "encoder": "h264_nvenc",
+                            "gpu_type": "NVIDIA"
+                        })
+                except:
+                    pass
+
+    except Exception as e:
+        logger.error(f"检测GPU编码器失败: {e}")
+
+    return result
+
 def get_video_duration_seconds(file_path):
     """获取视频时长（秒）"""
     try:
@@ -132,19 +235,57 @@ def rotate_video(file_path, degrees, progress_callback=None):
         
         # 构建ffmpeg命令
         # 根据系统环境选择编码器
-        # 用户环境可能是 anaconda 的 ffmpeg，不带 libx264，所以不能用 -preset 和 -crf
-        is_macos = platform.system() == 'Darwin'
+        system = platform.system()
+        
+        # 检测GPU硬件编码支持
+        gpu_info = detect_gpu_acceleration()
         
         cmd = [ffmpeg_cmd, '-y', '-i', file_path, '-vf', transpose_filter]
         
-        if is_macos:
-            # macOS 优先尝试硬件加速
-            # h264_videotoolbox 质量控制: -q:v (1-100)
-            cmd.extend(['-c:v', 'h264_videotoolbox', '-q:v', '60'])
+        # 根据GPU类型选择合适的硬件编码器
+        if gpu_info["available"] and gpu_info["encoder"]:
+            encoder = gpu_info["encoder"]
+            gpu_type = gpu_info["gpu_type"]
+            
+            if encoder == 'h264_videotoolbox':
+                # macOS VideoToolbox: 质量控制 -q:v (1-100)
+                cmd.extend(['-c:v', 'h264_videotoolbox', '-q:v', '60'])
+                logger.info(f"使用硬件编码: {gpu_type} ({encoder})")
+            
+            elif encoder == 'h264_nvenc':
+                # NVIDIA NVENC: 质量控制 -cq (0-51, 值越小质量越高)
+                cmd.extend(['-c:v', 'h264_nvenc', '-cq', '23', '-preset', 'p4'])
+                logger.info(f"使用硬件编码: {gpu_type} ({encoder})")
+            
+            elif encoder == 'h264_qsv':
+                # Intel QSV: 质量控制 -global_quality (1-51, 值越小质量越高)
+                cmd.extend(['-c:v', 'h264_qsv', '-global_quality', '23', '-preset', 'medium'])
+                logger.info(f"使用硬件编码: {gpu_type} ({encoder})")
+            
+            elif encoder == 'h264_amf':
+                # AMD AMF: 质量控制 -quality (speed, balanced, quality)
+                cmd.extend(['-c:v', 'h264_amf', '-quality', 'quality', '-rc', 'cqp', '-qp_i', '23', '-qp_p', '23'])
+                logger.info(f"使用硬件编码: {gpu_type} ({encoder})")
+            
+            elif encoder == 'h264_vaapi':
+                # Linux VAAPI: 质量控制 -qp_v (1-51)
+                # VAAPI需要指定设备
+                dri_path = '/dev/dri/renderD128'
+                if os.path.exists(dri_path):
+                    cmd.extend(['-vaapi_device', dri_path])
+                # 添加像素格式转换（VAAPI需要）
+                cmd.extend(['-vf', f'{transpose_filter},format=nv12,hwupload'])
+                cmd.extend(['-c:v', 'h264_vaapi', '-qp_v', '23'])
+                logger.info(f"使用硬件编码: {gpu_type} ({encoder})")
         else:
-            # 其他系统，尝试通用配置
-            # 移除 libx264 特有参数，使用默认 h264 编码器
-            cmd.extend(['-c:v', 'h264'])
+            # 没有硬件编码器，使用软件编码
+            if system == 'Darwin':
+                # macOS默认不使用硬件编码
+                cmd.extend(['-c:v', 'libx264', '-preset', 'medium', '-crf', '23'])
+            else:
+                # Windows/Linux使用通用h264编码器
+                cmd.extend(['-c:v', 'h264'])
+            logger.info("使用软件编码 (libx264/h264)")
             
         # 通用参数
         cmd.extend([
