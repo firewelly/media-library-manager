@@ -227,6 +227,49 @@ python media_library_pyside.py
 
 ## 📖 使用指南
 
+### Windows版本
+
+#### 📦 Windows可执行版本
+
+为了方便Windows用户使用，项目提供了预编译的可执行文件版本，无需安装Python环境即可运行。
+
+##### 获取方式
+从GitHub Releases页面下载最新版本的 `MediaLibrary-Windows-Complete.zip` 文件。
+
+##### 安装步骤
+1. 下载并解压ZIP文件到您选择的目录，建议路径：
+   ```
+   C:\MediaLibrary\
+   D:\MediaLibrary\
+   E:\MediaLibrary\
+   ```
+
+2. 启动程序：
+   - 双击 `MediaLibrary.exe` 文件启动主程序
+   - 或双击 `启动媒体库.bat` 快捷启动
+   - 双击 `用户手册.exe` 查看详细使用说明
+
+3. 查看可用工具：
+   - 双击 `查看可用工具.bat` 查看所有辅助工具列表
+   - 所有工具位于 `bin/tools/scripts/` 目录下
+
+##### 包含内容
+- **主程序**: `MediaLibrary.exe` - 媒体库管理主程序
+- **用户手册**: `用户手册.exe` - HTML格式的详细使用手册
+- **辅助工具**: 20+ 个专用工具脚本（位于 `bin/tools/scripts/` 目录）
+- **配置文件**: GUI配置、JAVDB配置、标签词汇表等
+- **运行依赖**: FFmpeg、Edge WebDriver等必要工具
+
+##### 工具分类
+- 🕷️ **数据爬虫工具**: javdb_crawler_single.exe、javdb_actor_all.exe 等
+- 📦 **媒体库维护工具**: smart_video_updater.exe、fast_smart_media_updater.exe 等
+- 🔧 **系统工具**: video_integrity_checker.exe、update_msedge_driver.exe 等
+- 🤖 **AI分析工具**: video_multimodal_analyzer.exe、video_tagging.exe 等
+
+##### 快捷启动脚本
+- **启动媒体库.bat**: 快速启动主程序
+- **查看可用工具.bat**: 列出所有可用的辅助工具
+
 ### 首次使用
 1. 启动应用后，点击菜单栏 "文件" → "添加文件夹"
 2. 选择包含视频文件的目录（支持本地文件夹和NAS挂载点）
