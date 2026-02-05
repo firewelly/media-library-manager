@@ -15,7 +15,7 @@ from selenium.common.exceptions import TimeoutException, WebDriverException
 import socks
 import socket
 import subprocess
-from config import SOCKS5_PROXY_HOST, SOCKS5_PROXY_PORT, BASE_URL, LOGIN_EMAIL, LOGIN_PASSWORD, MIN_DELAY, MAX_DELAY
+from config import SOCKS5_PROXY_HOST, SOCKS5_PROXY_PORT, LOGIN_EMAIL, LOGIN_PASSWORD, MIN_DELAY, MAX_DELAY, get_javdb_base_url, USE_SOCKS5_PROXY, JAVDB_DIRECT_DOMAIN, JAVDB_ALTERNATE_DIRECT_DOMAINS
 from utils.runtime import runtime_dir, runtime_path
 
 RESULTS_DIR = runtime_path('results')
@@ -42,6 +42,69 @@ def is_login_page(driver):
     except Exception:
         return False
 
+def is_cloudflare_challenge_html(page_source: str, title: str = "") -> bool:
+    if not page_source:
+        return False
+    t = (title or "").lower()
+    s = page_source.lower()
+    if "cloudflare" in t or "just a moment" in t or "checking your browser" in t:
+        return True
+    if "just a moment" in s or "checking your browser" in s:
+        return True
+    if "/cdn-cgi/" in s or "cf-browser-verification" in s or "cf-challenge" in s:
+        return True
+    return False
+
+def is_cloudflare_challenge(driver) -> bool:
+    try:
+        return is_cloudflare_challenge_html(driver.page_source or "", driver.title or "")
+    except Exception:
+        return False
+
+def wait_for_cloudflare_clear(driver, timeout_seconds=90) -> bool:
+    start = time.time()
+    while time.time() - start < timeout_seconds:
+        if not is_cloudflare_challenge(driver):
+            return True
+        time.sleep(2)
+    return False
+
+def get_base_url_candidates(use_proxy: bool) -> list[str]:
+    if use_proxy:
+        return [get_javdb_base_url(True)]
+    domains = []
+    if isinstance(JAVDB_DIRECT_DOMAIN, str) and JAVDB_DIRECT_DOMAIN.strip():
+        domains.append(JAVDB_DIRECT_DOMAIN.strip())
+    if isinstance(JAVDB_ALTERNATE_DIRECT_DOMAINS, list):
+        for d in JAVDB_ALTERNATE_DIRECT_DOMAINS:
+            if isinstance(d, str) and d.strip():
+                domains.append(d.strip())
+    seen = set()
+    uniq = []
+    for d in domains:
+        low = d.lower()
+        if low in seen:
+            continue
+        seen.add(low)
+        uniq.append(d)
+    return [f"https://{d}" for d in uniq]
+
+def normalize_javdb_url_to_base(url: str, base_url: str) -> str:
+    try:
+        if not url:
+            return url
+        target_host = urlparse(base_url).netloc
+        if not target_host:
+            return url
+        p = urlparse(url)
+        host = (p.netloc or '').lower()
+        if 'javdb' in host:
+            p = p._replace(netloc=target_host)
+            return p.geturl()
+        return url
+    except Exception:
+        return url
+
 def setup_socks5_proxy():
     """Setup SOCKS5 proxy for requests"""
     # Save original socket
@@ -57,7 +120,7 @@ def restore_socket(original_socket):
     """Restore original socket"""
     socket.socket = original_socket
 
-def setup_driver():
+def setup_driver(use_proxy=True, headless=True):
     """Setup MS Edge browser driver with SOCKS5 proxy and persistent user data"""
     import platform
 
@@ -72,8 +135,8 @@ def setup_driver():
     edge_options.add_experimental_option('useAutomationExtension', False)
     edge_options.add_argument('--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36')
 
-    # SOCKS5 proxy
-    edge_options.add_argument(f'--proxy-server=socks5://{SOCKS5_PROXY_HOST}:{SOCKS5_PROXY_PORT}')
+    if use_proxy:
+        edge_options.add_argument(f'--proxy-server=socks5://{SOCKS5_PROXY_HOST}:{SOCKS5_PROXY_PORT}')
 
     # Persistent user data dir
     user_data_dir = get_dedicated_edge_user_data_dir()
@@ -81,8 +144,8 @@ def setup_driver():
         edge_options.add_argument(f'--user-data-dir={user_data_dir}')
         edge_options.add_argument('--profile-directory=Default')
 
-    # Headless mode
-    edge_options.add_argument('--headless')
+    if headless:
+        edge_options.add_argument('--headless')
 
     last_error = None
     try:
@@ -152,22 +215,28 @@ def safe_filename(filename):
         filename = filename[:200]
     return filename
 
-def download_image(img_url, filename):
+def download_image(img_url, filename, use_proxy=True, base_url=None):
     """Download image to local and return absolute path with inferred extension"""
     try:
-        proxies = {
-            'http': f'socks5://{SOCKS5_PROXY_HOST}:{SOCKS5_PROXY_PORT}',
-            'https': f'socks5://{SOCKS5_PROXY_HOST}:{SOCKS5_PROXY_PORT}'
-        }
+        proxies = None
+        if use_proxy:
+            proxies = {
+                'http': f'socks5://{SOCKS5_PROXY_HOST}:{SOCKS5_PROXY_PORT}',
+                'https': f'socks5://{SOCKS5_PROXY_HOST}:{SOCKS5_PROXY_PORT}'
+            }
 
         headers = {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
-            'Referer': BASE_URL
+            'Referer': base_url or get_javdb_base_url(use_proxy)
         }
 
         try:
-            response = requests.get(img_url, headers=headers, proxies=proxies, timeout=30)
-            response.raise_for_status()
+            if proxies:
+                response = requests.get(img_url, headers=headers, proxies=proxies, timeout=30)
+                response.raise_for_status()
+            else:
+                response = requests.get(img_url, headers=headers, timeout=30)
+                response.raise_for_status()
         except Exception:
             # Fallback without proxy
             response = requests.get(img_url, headers=headers, timeout=30)
@@ -194,11 +263,11 @@ def download_image(img_url, filename):
         print(f"Image download failed {img_url}: {e}", file=sys.stderr)
         return None
 
-def search_video_by_code(driver, video_code):
+def search_video_by_code(driver, video_code, base_url):
     """Search video by code and return detail page URL"""
     try:
         # Navigate to search page
-        search_url = f"{BASE_URL}/search?q={video_code}&f=all"
+        search_url = f"{base_url}/search?q={video_code}&f=all"
         # print(f"Searching: {search_url}")
         driver.get(search_url)
         random_delay(2, 4)
@@ -227,7 +296,7 @@ def search_video_by_code(driver, video_code):
         # print(f"Search error for {video_code}: {e}")
         return None
 
-def parse_detail(driver, detail_url, max_retries=2):
+def parse_detail(driver, detail_url, base_url, use_proxy, max_retries=2):
     """Parse detail page"""
     for attempt in range(max_retries):
         try:
@@ -438,7 +507,7 @@ def parse_detail(driver, detail_url, max_retries=2):
                         else:
                             img_url = src or data_src or ''
                         if img_url and not img_url.startswith('http'):
-                            img_url = urljoin(BASE_URL, img_url)
+                            img_url = urljoin(base_url, img_url)
                         img_element_for_screenshot = img_element
                         break
                 except:
@@ -461,7 +530,7 @@ def parse_detail(driver, detail_url, max_retries=2):
             if img_url and title != 'N/A':
                 filename = f"{video_id}_{title}" if video_id != 'N/A' else title
                 try:
-                    local_img_path = download_image(img_url, filename)
+                    local_img_path = download_image(img_url, filename, use_proxy=use_proxy, base_url=base_url)
                 except Exception as e:
                     print(f"Image download failed: {e}", file=sys.stderr)
             
@@ -506,34 +575,6 @@ def parse_detail(driver, detail_url, max_retries=2):
                 }
 
 
-def search_video_by_code(driver, video_code):
-    """Search for a video by its code"""
-    try:
-        search_url = f"{BASE_URL}/search?q={video_code}&f=all"
-        # print(f"Searching for video: {video_code}")
-        driver.get(search_url)
-        
-        # Wait for search results to load
-        WebDriverWait(driver, 10).until(
-            EC.presence_of_element_located((By.CSS_SELECTOR, 'div.item, .movie-list .item'))
-        )
-        
-        # Find the first result link
-        try:
-            first_result = driver.find_element(By.CSS_SELECTOR, 'div.item a')
-            detail_url = first_result.get_attribute('href')
-            if detail_url and '/v/' in detail_url:
-                return detail_url
-        except Exception as e:
-            # print(f"No search results found for {video_code}: {e}")
-            return None
-            
-    except Exception as e:
-        # print(f"Error searching for video {video_code}: {e}")
-        return None
-    
-    return None
-
 def handle_login(driver):
     """Handle login process"""
     try:
@@ -560,76 +601,97 @@ def handle_login(driver):
         print(f"Login error: {e}", file=sys.stderr)
         return False
 
+def get_attempt_configs(use_proxy_default: bool):
+    attempts = [
+        {"use_proxy": False, "headless": True},
+        {"use_proxy": False, "headless": False},
+    ]
+    if use_proxy_default:
+        attempts.extend(
+            [
+                {"use_proxy": True, "headless": True},
+                {"use_proxy": True, "headless": False},
+            ]
+        )
+    return attempts
+
 def crawl_single_video(video_code):
     """Crawl single video by code"""
-    driver = setup_driver()
-    if not driver:
-        return None
-        
-    try:
-        # Handle login
-        driver.get(BASE_URL)
-        random_delay(2, 4)
-        
-        # If login page detected, invoke login helper to let user login persistently
+    for attempt in get_attempt_configs(USE_SOCKS5_PROXY):
+        driver = setup_driver(use_proxy=attempt["use_proxy"], headless=attempt["headless"])
+        if not driver:
+            continue
         try:
-            if is_login_page(driver):
-                print("登录状态缺失，调用登录助手以持久化登录态...", file=sys.stderr)
-                cwd_dir = runtime_dir()
+            for base_url in get_base_url_candidates(attempt["use_proxy"]):
+                driver.get(base_url)
+                random_delay(2, 4)
+                if is_cloudflare_challenge(driver):
+                    print("检测到 Cloudflare 验证页，等待通过...", file=sys.stderr)
+                    if not wait_for_cloudflare_clear(driver, timeout_seconds=120):
+                        continue
+                
                 try:
-                    if getattr(sys, 'frozen', False):
-                        subprocess.run([runtime_path('javdb_login_helper.exe')], cwd=cwd_dir, check=True)
-                    else:
-                        subprocess.run([sys.executable, 'javdb_login_helper.py'], cwd=cwd_dir, check=True)
-                except Exception as e:
-                    print(f"登录助手运行失败: {e}", file=sys.stderr)
-                    return None
-                # After helper, refresh base
-                driver.get(BASE_URL)
+                    if is_login_page(driver):
+                        print("登录状态缺失，调用登录助手以持久化登录态...", file=sys.stderr)
+                        cwd_dir = runtime_dir()
+                        try:
+                            if getattr(sys, 'frozen', False):
+                                subprocess.run([runtime_path('javdb_login_helper.exe')], cwd=cwd_dir, check=True)
+                            else:
+                                subprocess.run([sys.executable, 'javdb_login_helper.py'], cwd=cwd_dir, check=True)
+                        except Exception as e:
+                            print(f"登录助手运行失败: {e}", file=sys.stderr)
+                            continue
+                        driver.get(base_url)
+                        random_delay(1, 2)
+                        if is_cloudflare_challenge(driver):
+                            print("检测到 Cloudflare 验证页，等待通过...", file=sys.stderr)
+                            if not wait_for_cloudflare_clear(driver, timeout_seconds=120):
+                                continue
+                except Exception:
+                    pass
+                
+                detail_url = search_video_by_code(driver, video_code, base_url)
+                if not detail_url:
+                    continue
+                
+                detail_url = normalize_javdb_url_to_base(detail_url, base_url)
+                
+                driver.get(detail_url)
                 random_delay(1, 2)
+                if is_cloudflare_challenge(driver):
+                    print("检测到 Cloudflare 验证页，等待通过...", file=sys.stderr)
+                    if not wait_for_cloudflare_clear(driver, timeout_seconds=120):
+                        continue
+                if is_login_page(driver):
+                    print("访问详情页需要登录，启动登录助手后重试...", file=sys.stderr)
+                    cwd_dir = runtime_dir()
+                    try:
+                        if getattr(sys, 'frozen', False):
+                            subprocess.run([runtime_path('javdb_login_helper.exe')], cwd=cwd_dir, check=True)
+                        else:
+                            subprocess.run([sys.executable, 'javdb_login_helper.py'], cwd=cwd_dir, check=True)
+                    except Exception as e:
+                        print(f"登录助手运行失败: {e}", file=sys.stderr)
+                        continue
+                    driver.get(detail_url)
+                    random_delay(1, 2)
+                    if is_cloudflare_challenge(driver):
+                        print("检测到 Cloudflare 验证页，等待通过...", file=sys.stderr)
+                        if not wait_for_cloudflare_clear(driver, timeout_seconds=120):
+                            continue
+                    if is_login_page(driver):
+                        print("登录仍未成功，请手动登录后重试。", file=sys.stderr)
+                        continue
+                
+                result = parse_detail(driver, detail_url, base_url, attempt["use_proxy"])
+                if result:
+                    return result
         except Exception:
             pass
-        
-        # Search video
-        detail_url = search_video_by_code(driver, video_code)
-        if not detail_url:
-            # print(f"Detail page not found for video code {video_code}")
-            return None
-        
-        # Visit detail and check for login gate
-        driver.get(detail_url)
-        random_delay(1, 2)
-        if is_login_page(driver):
-            print("访问详情页需要登录，启动登录助手后重试...", file=sys.stderr)
-            cwd_dir = runtime_dir()
-            try:
-                if getattr(sys, 'frozen', False):
-                    subprocess.run([runtime_path('javdb_login_helper.exe')], cwd=cwd_dir, check=True)
-                else:
-                    subprocess.run([sys.executable, 'javdb_login_helper.py'], cwd=cwd_dir, check=True)
-            except Exception as e:
-                print(f"登录助手运行失败: {e}", file=sys.stderr)
-                return None
-            driver.get(detail_url)
-            random_delay(1, 2)
-            if is_login_page(driver):
-                print("登录仍未成功，请手动登录后重试。", file=sys.stderr)
-                return None
-            
-        # Parse detail page
-        result = parse_detail(driver, detail_url)
-        if result:
-            # print(f"Successfully obtained information for video code {video_code}")
-            return result
-        else:
-            # print(f"Failed to parse detail page for video code {video_code}")
-            return None
-            
-    except Exception as e:
-        # print(f"Error occurred while crawling video code {video_code}: {e}")
-        return None
-    finally:
-        driver.quit()
+        finally:
+            driver.quit()
+    return None
 
 if __name__ == "__main__":
     if len(sys.argv) != 2:

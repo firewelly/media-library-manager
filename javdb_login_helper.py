@@ -21,15 +21,16 @@ from selenium.common.exceptions import TimeoutException
 
 # 配置信息
 try:
-    from config import SOCKS5_PROXY_HOST, SOCKS5_PROXY_PORT, BASE_URL
+    from config import SOCKS5_PROXY_HOST, SOCKS5_PROXY_PORT, get_javdb_base_url, USE_SOCKS5_PROXY
 except ImportError:
     SOCKS5_PROXY_HOST = '127.0.0.1'
     SOCKS5_PROXY_PORT = 1080
-    BASE_URL = 'https://javdb.com'
+    def get_javdb_base_url(use_proxy: bool) -> str:
+        return 'https://javdb.com'
+    USE_SOCKS5_PROXY = True
 
 from utils.runtime import runtime_path
 
-LOGIN_URL = f'{BASE_URL}/login'
 MIN_DELAY = 1
 MAX_DELAY = 3
 
@@ -93,8 +94,41 @@ def is_edge_running():
     return False
 
 
-def setup_driver(user_data_dir=None, profile_directory=None):
+def find_edge_binary():
+    try:
+        candidates = []
+        program_files = os.environ.get("ProgramFiles")
+        program_files_x86 = os.environ.get("ProgramFiles(x86)")
+        local_app_data = os.environ.get("LOCALAPPDATA")
+        if program_files:
+            candidates.append(os.path.join(program_files, "Microsoft", "Edge", "Application", "msedge.exe"))
+        if program_files_x86:
+            candidates.append(os.path.join(program_files_x86, "Microsoft", "Edge", "Application", "msedge.exe"))
+        if local_app_data:
+            candidates.append(os.path.join(local_app_data, "Microsoft", "Edge", "Application", "msedge.exe"))
+        for p in candidates:
+            if p and os.path.exists(p):
+                return p
+    except Exception:
+        pass
+    return None
+
+
+def get_login_attempts(use_proxy: bool):
+    attempts = []
+    if use_proxy:
+        attempts.append({"proxy": True, "use_service": True, "label": "ui+proxy+service"})
+    attempts.extend(
+        [
+            {"proxy": False, "use_service": True, "label": "ui+no-proxy+service"},
+            {"proxy": False, "use_service": False, "label": "ui+no-proxy+PATH"},
+        ]
+    )
+    return attempts
+
+def setup_driver(user_data_dir=None, profile_directory=None, use_proxy: bool = True):
     """设置MS Edge浏览器驱动，支持附加到现有Edge用户配置文件以帮助通过安全检查"""
+    edge_binary = find_edge_binary()
     def build_options(use_proxy=True):
         opts = Options()
         opts.page_load_strategy = 'eager'
@@ -105,8 +139,15 @@ def setup_driver(user_data_dir=None, profile_directory=None):
         opts.add_experimental_option('useAutomationExtension', False)
         opts.add_argument('--remote-allow-origins=*')
         opts.add_argument('--disable-gpu')
+        opts.add_argument('--no-first-run')
+        opts.add_argument('--no-default-browser-check')
         opts.add_argument('--start-maximized')
         opts.add_argument('--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36')
+        if edge_binary:
+            try:
+                opts.binary_location = edge_binary
+            except Exception:
+                pass
         
         # 附加到Edge用户配置文件以重用cookie和人类信号
         if user_data_dir:
@@ -138,11 +179,7 @@ def setup_driver(user_data_dir=None, profile_directory=None):
     driver_path = user_driver_path if os.path.exists(user_driver_path) else default_driver_path
 
     last_error = None
-    attempts = [
-        {"proxy": True,  "use_service": True,  "label": "ui+proxy+service"},
-        {"proxy": False, "use_service": True,  "label": "ui+no-proxy+service"},
-        {"proxy": False, "use_service": False, "label": "ui+no-proxy+PATH"},
-    ]
+    attempts = get_login_attempts(use_proxy)
     
     for att in attempts:
         try:
@@ -255,10 +292,18 @@ def main():
     print("===== JAVDB登录助手 =====")
     print("本工具使用专用的Edge用户数据目录来持久化登录状态")
     print(f"用户数据目录: {get_dedicated_edge_user_data_dir()}")
+    import argparse
+    parser = argparse.ArgumentParser(description="JAVDB登录助手")
+    parser.add_argument("--no-proxy", dest="no_proxy", action="store_true", help="禁用SOCKS5代理直连")
+    args = parser.parse_args()
+    use_proxy = False if args.no_proxy else bool(USE_SOCKS5_PROXY)
+    base_url = get_javdb_base_url(use_proxy)
+    login_url = f"{base_url}/login"
+    print(f"网络模式: {'代理' if use_proxy else '直连'}")
     
     # 启动Edge浏览器
     user_data_dir = get_dedicated_edge_user_data_dir()
-    driver = setup_driver(user_data_dir=user_data_dir)
+    driver = setup_driver(user_data_dir=user_data_dir, use_proxy=use_proxy)
     
     if not driver:
         print("无法启动浏览器，程序退出")
@@ -266,22 +311,22 @@ def main():
     
     try:
         # 访问登录页面
-        print(f"正在访问登录页面: {LOGIN_URL}")
-        driver.get(LOGIN_URL)
+        print(f"正在访问登录页面: {login_url}")
+        driver.get(login_url)
         random_delay(3, 5)  # 等待页面加载
         
         # 检查是否需要登录或安全验证
         if is_security_verification_page(driver):
             print("检测到安全验证页面，请完成验证")
-            wait_for_manual_login(driver, seconds=300, reopen_url=LOGIN_URL)
+            wait_for_manual_login(driver, seconds=300, reopen_url=login_url)
         
         if is_login_page(driver):
             print("检测到登录页面，请手动登录您的JAVDB账号")
-            wait_for_manual_login(driver, seconds=300, reopen_url=BASE_URL)
+            wait_for_manual_login(driver, seconds=300, reopen_url=base_url)
         
         # 验证是否登录成功
         print("正在验证登录状态...")
-        driver.get(BASE_URL)
+        driver.get(base_url)
         random_delay(3, 5)
         
         # 简单的登录验证：检查是否存在用户相关元素或不再跳转登录页
