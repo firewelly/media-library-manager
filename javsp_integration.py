@@ -138,11 +138,8 @@ class JavSPIntegration:
             self.logger.info(f"开始搜索影片信息: {code}")
             
             if use_parallel:
-                # 使用并行搜索
-                results = self.crawler_manager.search_parallel([code])
-                movie_info = results.get(code)
+                movie_info = self.crawler_manager.search_movie(code, use_parallel=True)
             else:
-                # 使用单线程搜索
                 movie_info = self.crawler_manager.search_movie(code)
             
             if movie_info:
@@ -256,10 +253,8 @@ class JavSPIntegration:
             self.logger.info(f"开始批量搜索 {len(codes)} 个影片")
             
             if use_parallel:
-                # 使用并行搜索
-                movie_infos = self.crawler_manager.search_parallel(codes)
+                movie_infos = self.crawler_manager.batch_search(codes, use_parallel=True)
             else:
-                # 使用单线程搜索
                 movie_infos = {}
                 for code in codes:
                     movie_info = self.crawler_manager.search_movie(code)
