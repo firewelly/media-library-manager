@@ -1,23 +1,9 @@
 #!/bin/bash
 
 # MacOS 视频媒体库管理软件启动脚本
-# 支持OneDrive两种文件夹命名方式：OneDrive-Personal 和 OneDrive-个人
 
-# 自动检测OneDrive路径
-if [ -d "$HOME/Library/CloudStorage/OneDrive-Personal" ]; then
-    ONEDRIVE_PATH="$HOME/Library/CloudStorage/OneDrive-Personal"
-elif [ -d "$HOME/Library/CloudStorage/OneDrive-个人" ]; then
-    ONEDRIVE_PATH="$HOME/Library/CloudStorage/OneDrive-个人"
-else
-    echo "错误: OneDrive目录未找到"
-    echo "请检查以下路径是否存在："
-    echo "  - $HOME/Library/CloudStorage/OneDrive-Personal"
-    echo "  - $HOME/Library/CloudStorage/OneDrive-个人"
-    exit 1
-fi
-
-# 程序目录
-APP_DIR="$ONEDRIVE_PATH/bioinfo/media"
+# 获取脚本所在目录作为程序目录
+APP_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 
 # 检查程序目录是否存在
 if [ ! -d "$APP_DIR" ]; then
