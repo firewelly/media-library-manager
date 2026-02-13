@@ -3300,8 +3300,8 @@ class MediaLibrary:
                 )
                 self.conn.commit()
                 
-                # 刷新显示
-                self.load_videos()
+                # 只更新当前行的星级显示，避免全量刷新
+                self.video_tree.set(item, 'stars', '★' * clicked_star)
                 
                 # 如果当前选中的是这个视频，更新详情面板
                 if self.current_video and self.current_video[0] == video_id:
@@ -3326,8 +3326,12 @@ class MediaLibrary:
             # 更新当前视频数据
             self.load_video_details(video_id)
             
-            # 刷新视频列表
-            self.load_videos()
+            # 查找并更新树形列表中的对应项
+            for item in self.video_tree.get_children():
+                item_tags = self.video_tree.item(item, 'tags')
+                if item_tags and len(item_tags) > 0 and item_tags[0] == str(video_id):
+                    self.video_tree.set(item, 'stars', '★' * rating)
+                    break
             
         except Exception as e:
             messagebox.showerror("错误", f"设置星级失败: {str(e)}")
