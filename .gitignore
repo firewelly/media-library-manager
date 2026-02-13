@@ -115,6 +115,10 @@ requirement/
 **/.*
 !/.gitignore
 !/.gitattributes
+!/.github/
+!/.github/workflows/
+!/.github/workflows/*.yml
+!/.github/workflows/*.yaml
 !build/
 !build/windows/
 !build/windows/build_release.py
