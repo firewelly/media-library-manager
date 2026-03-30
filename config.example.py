@@ -13,9 +13,11 @@ JAVDB_DIRECT_DOMAIN = "javdb565.com"       # 不使用代理时的镜像域名�
 JAVDB_ALTERNATE_DIRECT_DOMAINS = [
     "javdb561.com",
     "javdb562.com",
+    "javdb570.com",
     "www.javdb561.com",
     "www.javdb562.com",
     "www.javdb565.com",
+    "www.javdb570.com",
 ]
 
 def get_javdb_base_url(use_proxy: bool) -> str:
