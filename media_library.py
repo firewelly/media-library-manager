@@ -834,6 +834,15 @@ class MediaLibrary:
                 current_device = self.get_current_device_name()
                 self.cursor.execute('UPDATE folders SET device_name = ? WHERE device_name IS NULL', (current_device,))
                 print(f"为现有文件夹设置设备名称: {current_device}")
+
+            self.cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='actors'")
+            if self.cursor.fetchone():
+                self.cursor.execute("PRAGMA table_info(actors)")
+                actor_columns = [column[1] for column in self.cursor.fetchall()]
+
+                if 'is_favorite' not in actor_columns:
+                    self.cursor.execute('ALTER TABLE actors ADD COLUMN is_favorite INTEGER DEFAULT 0')
+                    print("添加字段: is_favorite")
             
             # 创建数据库索引以优化查询性能
             self.create_database_indexes()
@@ -881,6 +890,12 @@ class MediaLibrary:
                 indexes_to_create.extend([
                     ('idx_video_actors_video_id', 'CREATE INDEX IF NOT EXISTS idx_video_actors_video_id ON video_actors(video_id)'),
                     ('idx_video_actors_actor_id', 'CREATE INDEX IF NOT EXISTS idx_video_actors_actor_id ON video_actors(actor_id)'),
+                ])
+
+            self.cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='actors'")
+            if self.cursor.fetchone():
+                indexes_to_create.extend([
+                    ('idx_actors_is_favorite', 'CREATE INDEX IF NOT EXISTS idx_actors_is_favorite ON actors(is_favorite)'),
                 ])
             
             # 创建索引
@@ -11396,7 +11411,8 @@ class MediaLibrary:
             self.cursor.execute("""
                 SELECT id, name, name_traditional, name_common, aliases, 
                        avatar_url, avatar_data, profile_url, movie_count,
-                       birth_date, debut_date, height, measurements, description
+                       birth_date, debut_date, height, measurements, description,
+                       COALESCE(is_favorite, 0)
                 FROM actors 
                 WHERE name = ? OR name_common = ? OR name_traditional = ?
                 LIMIT 1
@@ -11405,6 +11421,20 @@ class MediaLibrary:
         except Exception as e:
             print(f"获取演员信息失败: {e}")
             return None
+
+    def set_actor_favorite(self, actor_id, is_favorite):
+        """设置演员收藏状态"""
+        try:
+            self.cursor.execute("""
+                UPDATE actors
+                SET is_favorite = ?, updated_at = CURRENT_TIMESTAMP
+                WHERE id = ?
+            """, (1 if is_favorite else 0, actor_id))
+            self.conn.commit()
+            return True
+        except Exception as e:
+            print(f"设置演员收藏状态失败: {e}")
+            return False
     
     def get_actor_movies_in_library(self, actor_name):
         """获取演员在媒体库中的影片"""
@@ -11822,6 +11852,7 @@ class ActorDetailWindow:
         # 获取演员信息
         self.actor_info = media_library.get_actor_info_by_name(actor_name)
         self.actor_movies = media_library.get_actor_movies_in_library(actor_name)
+        self.favorite_button = None
         
         self.create_window()
         
@@ -11876,6 +11907,9 @@ class ActorDetailWindow:
             name_frame.pack(fill=tk.X, pady=2)
             ttk.Label(name_frame, text="姓名:", font=('Arial', 10, 'bold')).pack(side=tk.LEFT)
             ttk.Label(name_frame, text=self.actor_info[1] or "未知").pack(side=tk.LEFT, padx=(5, 0))
+            self.favorite_button = ttk.Button(name_frame, command=self.toggle_favorite)
+            self.favorite_button.pack(side=tk.LEFT, padx=(12, 0))
+            self.update_favorite_button()
             
             # 繁体中文名
             if self.actor_info[2]:
@@ -11931,6 +11965,31 @@ class ActorDetailWindow:
         else:
             ttk.Label(details_frame, text=f"未找到演员 '{self.actor_name}' 的详细信息", 
                      font=('Arial', 12)).pack(pady=20)
+
+    def update_favorite_button(self):
+        """更新收藏按钮文本"""
+        if not self.favorite_button or not self.actor_info:
+            return
+        is_favorite = bool(self.actor_info[14]) if len(self.actor_info) > 14 else False
+        self.favorite_button.config(text="★ 已收藏" if is_favorite else "☆ 收藏")
+
+    def toggle_favorite(self):
+        """切换演员收藏状态"""
+        if not self.actor_info:
+            return
+        actor_id = self.actor_info[0]
+        current_favorite = bool(self.actor_info[14]) if len(self.actor_info) > 14 else False
+        new_favorite = not current_favorite
+        if not self.media_library.set_actor_favorite(actor_id, new_favorite):
+            messagebox.showerror("错误", "更新演员收藏状态失败")
+            return
+        actor_info_list = list(self.actor_info)
+        if len(actor_info_list) > 14:
+            actor_info_list[14] = 1 if new_favorite else 0
+        else:
+            actor_info_list.append(1 if new_favorite else 0)
+        self.actor_info = tuple(actor_info_list)
+        self.update_favorite_button()
     
     def load_avatar(self):
         """加载演员头像"""
