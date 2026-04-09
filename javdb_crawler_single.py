@@ -47,11 +47,23 @@ def is_cloudflare_challenge_html(page_source: str, title: str = "") -> bool:
         return False
     t = (title or "").lower()
     s = page_source.lower()
-    if "cloudflare" in t or "just a moment" in t or "checking your browser" in t:
+    strong_markers = [
+        "checking your browser before accessing",
+        "attention required!",
+        "cf-challenge",
+        "cf-browser-verification",
+        "challenge-platform",
+        "turnstile",
+        "cf_chl_",
+        "cf-chl-",
+        "/cdn-cgi/challenge-platform/",
+    ]
+    if any(marker in s for marker in strong_markers):
         return True
-    if "just a moment" in s or "checking your browser" in s:
-        return True
-    if "/cdn-cgi/" in s or "cf-browser-verification" in s or "cf-challenge" in s:
+
+    title_markers = ["cloudflare", "just a moment", "checking your browser", "attention required!"]
+    body_markers = ["just a moment", "checking your browser", "please stand by, while we are checking your browser"]
+    if any(marker in t for marker in title_markers) and any(marker in s for marker in body_markers):
         return True
     return False
 
@@ -151,11 +163,13 @@ def setup_driver(use_proxy=True, headless=True):
     try:
         # Determine EdgeDriver path based on system
         system = platform.system().lower()
+        machine = platform.machine().lower()
+        print(f"[DEBUG] System: {system}, Architecture: {machine}", file=sys.stderr)
+        
         if system == "windows":
             bundled_driver = runtime_path('tools', 'msedgedriver.exe')
             driver_path = bundled_driver if os.path.exists(bundled_driver) else r"C:\bin\edgedriver_win64\msedgedriver.exe"
         elif system == "darwin":  # macOS
-            machine = platform.machine().lower()
             if machine in ['arm64', 'aarch64']:
                 driver_path = "/usr/local/bin/edgedriver_mac64_m1/msedgedriver"
             else:
@@ -170,8 +184,28 @@ def setup_driver(use_proxy=True, headless=True):
         if os.path.exists(user_driver_path):
             driver_path = user_driver_path
 
+        print(f"[DEBUG] Attempting to use EdgeDriver at: {driver_path}", file=sys.stderr)
+        print(f"[DEBUG] Driver exists: {os.path.exists(driver_path) if driver_path else 'No path'}", file=sys.stderr)
+        
         if driver_path and os.path.exists(driver_path):
             try:
+                # Check EdgeDriver version
+                try:
+                    result = subprocess.run([driver_path, '--version'], capture_output=True, text=True, timeout=5)
+                    driver_version = result.stdout.strip()
+                    print(f"[DEBUG] EdgeDriver version: {driver_version}", file=sys.stderr)
+                except Exception as e:
+                    print(f"[DEBUG] Failed to check EdgeDriver version: {e}", file=sys.stderr)
+                
+                # Check Edge browser version
+                try:
+                    if system == "darwin":
+                        result = subprocess.run(['/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge', '--version'], capture_output=True, text=True, timeout=5)
+                        edge_version = result.stdout.strip()
+                        print(f"[DEBUG] Edge browser version: {edge_version}", file=sys.stderr)
+                except Exception as e:
+                    print(f"[DEBUG] Failed to check Edge browser version: {e}", file=sys.stderr)
+                
                 driver = webdriver.Edge(service=webdriver.edge.service.Service(driver_path), options=edge_options)
                 driver.set_page_load_timeout(60)
                 driver.set_script_timeout(30)
@@ -179,10 +213,14 @@ def setup_driver(use_proxy=True, headless=True):
                     driver.execute_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
                 except Exception:
                     pass
+                print(f"[DEBUG] EdgeDriver started successfully with explicit path", file=sys.stderr)
                 return driver
             except Exception as e:
                 last_error = e
+                print(f"[DEBUG] Failed to start EdgeDriver with explicit path: {e}", file=sys.stderr)
 
+        # Fallback to automatic driver
+        print(f"[DEBUG] Attempting to start EdgeDriver with automatic detection", file=sys.stderr)
         driver = webdriver.Edge(options=edge_options)
         driver.set_page_load_timeout(60)
         driver.set_script_timeout(30)
@@ -190,13 +228,14 @@ def setup_driver(use_proxy=True, headless=True):
             driver.execute_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
         except Exception:
             pass
+        print(f"[DEBUG] EdgeDriver started successfully with automatic detection", file=sys.stderr)
         return driver
     except Exception as e:
-        print(f"MS Edge driver startup failed: {e}", file=sys.stderr)
+        print(f"[ERROR] MS Edge driver startup failed: {e}", file=sys.stderr)
         if last_error and last_error is not e:
-            print(f"MS Edge driver startup failed (with explicit driver_path): {last_error}", file=sys.stderr)
-        print("Please make sure MS Edge browser and EdgeDriver are installed", file=sys.stderr)
-        print("You can run update_msedge_driver.py to install the driver", file=sys.stderr)
+            print(f"[ERROR] MS Edge driver startup failed (with explicit driver_path): {last_error}", file=sys.stderr)
+        print(f"[SOLUTION] Please make sure MS Edge browser and EdgeDriver are installed", file=sys.stderr)
+        print(f"[SOLUTION] Run this command to update EdgeDriver: python update_msedge_driver.py", file=sys.stderr)
         return None
 
 def random_delay(min_seconds=MIN_DELAY, max_seconds=MAX_DELAY):
@@ -603,30 +642,38 @@ def handle_login(driver):
 
 def get_attempt_configs(use_proxy_default: bool):
     attempts = [
-        {"use_proxy": False, "headless": True},
         {"use_proxy": False, "headless": False},
+        {"use_proxy": False, "headless": True},
     ]
     if use_proxy_default:
         attempts.extend(
             [
-                {"use_proxy": True, "headless": True},
                 {"use_proxy": True, "headless": False},
+                {"use_proxy": True, "headless": True},
             ]
         )
     return attempts
 
 def crawl_single_video(video_code):
     """Crawl single video by code"""
+    print(f"[INFO] Starting crawl for video code: {video_code}", file=sys.stderr)
+    
     for attempt in get_attempt_configs(USE_SOCKS5_PROXY):
+        print(f"[INFO] Attempt config - use_proxy: {attempt['use_proxy']}, headless: {attempt['headless']}", file=sys.stderr)
         driver = setup_driver(use_proxy=attempt["use_proxy"], headless=attempt["headless"])
         if not driver:
+            print(f"[ERROR] Failed to setup driver for config: {attempt}", file=sys.stderr)
             continue
+        print(f"[INFO] Driver setup successful", file=sys.stderr)
         try:
             for base_url in get_base_url_candidates(attempt["use_proxy"]):
                 driver.get(base_url)
                 random_delay(2, 4)
                 if is_cloudflare_challenge(driver):
                     print("检测到 Cloudflare 验证页，等待通过...", file=sys.stderr)
+                    if attempt["headless"]:
+                        print("当前为无头模式，无法人工验证，切换到有界面模式重试。", file=sys.stderr)
+                        break
                     if not wait_for_cloudflare_clear(driver, timeout_seconds=120):
                         continue
                 
@@ -646,6 +693,9 @@ def crawl_single_video(video_code):
                         random_delay(1, 2)
                         if is_cloudflare_challenge(driver):
                             print("检测到 Cloudflare 验证页，等待通过...", file=sys.stderr)
+                            if attempt["headless"]:
+                                print("当前为无头模式，无法人工验证，切换到有界面模式重试。", file=sys.stderr)
+                                break
                             if not wait_for_cloudflare_clear(driver, timeout_seconds=120):
                                 continue
                 except Exception:
@@ -661,6 +711,9 @@ def crawl_single_video(video_code):
                 random_delay(1, 2)
                 if is_cloudflare_challenge(driver):
                     print("检测到 Cloudflare 验证页，等待通过...", file=sys.stderr)
+                    if attempt["headless"]:
+                        print("当前为无头模式，无法人工验证，切换到有界面模式重试。", file=sys.stderr)
+                        break
                     if not wait_for_cloudflare_clear(driver, timeout_seconds=120):
                         continue
                 if is_login_page(driver):
@@ -678,6 +731,9 @@ def crawl_single_video(video_code):
                     random_delay(1, 2)
                     if is_cloudflare_challenge(driver):
                         print("检测到 Cloudflare 验证页，等待通过...", file=sys.stderr)
+                        if attempt["headless"]:
+                            print("当前为无头模式，无法人工验证，切换到有界面模式重试。", file=sys.stderr)
+                            break
                         if not wait_for_cloudflare_clear(driver, timeout_seconds=120):
                             continue
                     if is_login_page(driver):
