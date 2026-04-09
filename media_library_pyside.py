@@ -236,7 +236,7 @@ class MediaLibraryCore:
             print(f"保存配置失败: {e}")
 
     def init_database(self):
-        """仅连接现有SQLite数据库，不创建或修改任何表结构"""
+        """连接现有SQLite数据库，并执行兼容性迁移"""
         self.db_path = runtime_path('media_library.db')
         db_exists = os.path.exists(self.db_path)
         self.conn = sqlite3.connect(self.db_path, check_same_thread=False)
@@ -248,7 +248,9 @@ class MediaLibraryCore:
         self.maintenance_manager = MaintenanceManager(self.db_manager)
 
         if db_exists:
-            print("已连接到现有数据库（不进行建表或迁移）")
+            self.migrate_database()
+            self.conn.commit()
+            print("已连接到现有数据库并完成兼容性迁移检查")
         else:
             print("数据库不存在：请先使用原始 media_library.py 初始化数据库或导入备份")
 
@@ -301,8 +303,33 @@ class MediaLibraryCore:
                 self.cursor.execute('UPDATE folders SET device_name = ? WHERE device_name IS NULL', (current_device,))
                 print(f"为现有文件夹设置设备名称: {current_device}")
 
+            self.cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='actors'")
+            if self.cursor.fetchone():
+                self.cursor.execute("PRAGMA table_info(actors)")
+                actor_columns = [column[1] for column in self.cursor.fetchall()]
+
+                if 'is_favorite' not in actor_columns:
+                    self.cursor.execute('ALTER TABLE actors ADD COLUMN is_favorite INTEGER DEFAULT 0')
+                    print("添加字段: is_favorite")
+
+                self.cursor.execute('CREATE INDEX IF NOT EXISTS idx_actors_is_favorite ON actors(is_favorite)')
+
         except Exception as e:
             print(f"数据库迁移失败: {str(e)}")
+
+    def set_actor_favorite(self, actor_id, is_favorite):
+        """设置演员收藏状态"""
+        try:
+            self.cursor.execute("""
+                UPDATE actors
+                SET is_favorite = ?, updated_at = CURRENT_TIMESTAMP
+                WHERE id = ?
+            """, (1 if is_favorite else 0, actor_id))
+            self.conn.commit()
+            return True
+        except Exception as e:
+            print(f"设置演员收藏状态失败: {e}")
+            return False
 
     def get_current_device_name(self):
         """获取当前设备名称"""
@@ -5664,6 +5691,7 @@ class ActorDetailWindow(QDialog):
         self.parent_window = parent
         self.actor_name = actor_name
         self.core = parent.core
+        self.favorite_button = None
 
         # 默认头像图片路径
         # 使用相对路径以支持不同环境(OneDrive-Personal/OneDrive-个人)
@@ -5756,9 +5784,28 @@ class ActorDetailWindow(QDialog):
         self.info_labels = {}
         current_row = 0
 
+        if self.actor_info:
+            name_row = QHBoxLayout()
+            name_value = QLabel(self.actor_info[1] or "未知")
+            name_value.setWordWrap(True)
+            self.favorite_button = QPushButton()
+            self.favorite_button.clicked.connect(self.toggle_favorite)
+            self.update_favorite_button()
+            name_row.addWidget(name_value)
+            name_row.addWidget(self.favorite_button)
+            name_row.addStretch()
+        else:
+            name_row = QHBoxLayout()
+            name_row.addWidget(QLabel(""))
+
+        name_label = QLabel("姓名:")
+        name_label.setStyleSheet("font-weight: bold;")
+        details_layout.addWidget(name_label, current_row, 0)
+        details_layout.addLayout(name_row, current_row, 1, 1, 2)
+        current_row += 1
+
         # 基本信息字段
         fields = [
-            ("name", "姓名"),
             ("name_en", "英文名"),
             ("name_traditional", "繁体名"),
             ("name_common", "常用名"),
@@ -5871,7 +5918,6 @@ class ActorDetailWindow(QDialog):
             # 16: avatar_data, 17: movie_count, 18: last_crawled_at
             
             field_mapping = {
-                'name': self.actor_info[1] or "未知",
                 'name_en': self.actor_info[2] or "",
                 'name_traditional': self.actor_info[13] if len(self.actor_info) > 13 else "",
                 'name_common': self.actor_info[14] if len(self.actor_info) > 14 else "",
@@ -5887,8 +5933,10 @@ class ActorDetailWindow(QDialog):
             for field_key, value in field_mapping.items():
                 if field_key in self.info_labels:
                     self.info_labels[field_key].setText(str(value))
+            self.update_favorite_button()
         else:
-            self.info_labels['name'].setText(f"未找到演员 '{self.actor_name}' 的详细信息")
+            if self.favorite_button:
+                self.favorite_button.setEnabled(False)
 
         # 加载头像
         self.load_avatar()
@@ -6020,6 +6068,31 @@ class ActorDetailWindow(QDialog):
             self.parent_window.select_video_by_id(video_id)
             # 自动播放
             self.parent_window.play_video()
+
+    def update_favorite_button(self):
+        """更新收藏按钮显示"""
+        if not self.favorite_button:
+            return
+        is_favorite = bool(self.actor_info[19]) if self.actor_info and len(self.actor_info) > 19 else False
+        self.favorite_button.setText("★ 已收藏" if is_favorite else "☆ 收藏")
+
+    def toggle_favorite(self):
+        """切换演员收藏状态"""
+        if not self.actor_info:
+            return
+        actor_id = self.actor_info[0]
+        current_favorite = bool(self.actor_info[19]) if len(self.actor_info) > 19 else False
+        new_favorite = not current_favorite
+        if not self.core.set_actor_favorite(actor_id, new_favorite):
+            self.show_info("错误", "更新演员收藏状态失败")
+            return
+        actor_info_list = list(self.actor_info)
+        if len(actor_info_list) > 19:
+            actor_info_list[19] = 1 if new_favorite else 0
+        else:
+            actor_info_list.append(1 if new_favorite else 0)
+        self.actor_info = tuple(actor_info_list)
+        self.update_favorite_button()
 
     def refresh_actor_info(self):
         """刷新演员信息"""

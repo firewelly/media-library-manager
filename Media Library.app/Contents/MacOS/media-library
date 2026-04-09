@@ -1,0 +1,69 @@
+#!/bin/bash
+
+# MacOS 视频媒体库管理软件启动脚本
+
+# 日志文件，用于排查启动问题
+LOG_FILE="/tmp/media_library_launch.log"
+echo "=== Starting Media Library ===" > "$LOG_FILE"
+echo "Time: $(date)" >> "$LOG_FILE"
+
+# 程序目录
+PROJECT_DIR="/Users/firewell/bin/media"
+echo "程序目录: $PROJECT_DIR" >> "$LOG_FILE"
+
+# 检查程序目录是否存在
+if [ ! -d "$PROJECT_DIR" ]; then
+    echo "错误: 未找到程序目录 $PROJECT_DIR" >> "$LOG_FILE"
+    osascript -e 'display alert "启动错误" message "未找到程序目录：'"$PROJECT_DIR"'"' 2>/dev/null
+    exit 1
+fi
+
+# 切换到程序目录
+cd "$PROJECT_DIR" || exit 1
+echo "当前工作目录: $(pwd)" >> "$LOG_FILE"
+
+# 检查Python是否安装 - 尝试多个路径
+PYTHON_CMD=""
+PYTHON_PATHS=(
+    "$HOME/anaconda3/bin/python3"
+    "/opt/homebrew/bin/python3"
+    "/usr/local/bin/python3"
+    "/usr/bin/python3"
+    "python3"
+    "python"
+)
+
+for py_path in "${PYTHON_PATHS[@]}"; do
+    if [ -x "$py_path" ]; then
+        PYTHON_CMD="$py_path"
+        echo "找到Python: $PYTHON_CMD" >> "$LOG_FILE"
+        break
+    fi
+done
+
+if [ -z "$PYTHON_CMD" ]; then
+    echo "错误: 未找到 Python" >> "$LOG_FILE"
+    echo "搜索的路径: ${PYTHON_PATHS[*]}" >> "$LOG_FILE"
+    osascript -e 'display alert "启动错误" message "未找到Python，请先安装Python。"' 2>/dev/null
+    exit 1
+fi
+
+# 检查主程序文件是否存在
+if [ ! -f "media_library.py" ]; then
+    echo "错误: 未找到 media_library.py 文件" >> "$LOG_FILE"
+    ls -la >> "$LOG_FILE" 2>&1
+    osascript -e 'display alert "启动错误" message "未找到 media_library.py 文件。"' 2>/dev/null
+    exit 1
+fi
+
+# 启动程序
+echo "正在启动视频媒体库管理软件(Debug模式)..." >> "$LOG_FILE"
+echo "Python版本: $($PYTHON_CMD --version)" >> "$LOG_FILE"
+
+# 使用 Terminal 启动以便 Debug
+osascript -e "tell application \"Terminal\"
+    do script \"cd '$PROJECT_DIR' && '$PYTHON_CMD' media_library.py\"
+    activate
+end tell" >> "$LOG_FILE" 2>&1
+
+echo "程序已在 Terminal 中启动" >> "$LOG_FILE"
