@@ -13,6 +13,7 @@ opencv-python>=4.10.0.0
 requests>=2.31.0
 requests[socks]>=2.31.0  # SOCKS代理支持 / SOCKS proxy support
 PySocks>=1.7.1  # SOCKS代理依赖 / SOCKS proxy dependency
+playwright>=1.48.0
 
 # HTML解析库 / HTML Parsing Library
 # 用于网页内容解析 / For web content parsing

@@ -7161,6 +7161,7 @@ class MediaLibrary:
                 try:
                     print("fetch_javdb_info线程开始执行")
                     failed_files = []
+                    manual_action_prompted = False
                     
                     for i, video_id in enumerate(video_ids):
                         # 检查是否取消
@@ -7217,8 +7218,8 @@ class MediaLibrary:
                                 if getattr(sys, 'frozen', False):
                                     cmd = [os.path.join(runtime_dir(), "javdb_crawler_single.exe"), av_code]
                                 else:
-                                    cmd = ["python", "javdb_crawler_single.py", av_code]
-                                process = subprocess.run(cmd, capture_output=True, text=True, cwd=cwd_dir, timeout=60)
+                                    cmd = [sys.executable, "javdb_crawler_single.py", av_code]
+                                process = subprocess.run(cmd, capture_output=True, text=True, cwd=cwd_dir, timeout=180)
                                 if process.returncode == 0 and process.stdout:
                                     try:
                                         parsed = json.loads(process.stdout)
@@ -7231,6 +7232,12 @@ class MediaLibrary:
                                     except json.JSONDecodeError:
                                         progress_window.update_status("JavDB解析失败，尝试回退")
                                 else:
+                                    if (not manual_action_prompted) and self._crawler_needs_manual_action(process.stderr):
+                                        manual_action_prompted = True
+                                        self.root.after(0, lambda: messagebox.showwarning(
+                                            "需要人工验证",
+                                            "检测到JAVDB登录或Cloudflare验证需求。\n\n请先完成一次人工验证，再重新执行批量更新。"
+                                        ))
                                     progress_window.update_status("JavDB爬虫失败，尝试回退")
                             except Exception as e:
                                 progress_window.update_status(f"JavDB异常: {e}，尝试回退")
@@ -7245,7 +7252,7 @@ class MediaLibrary:
                                     if getattr(sys, 'frozen', False):
                                         cmd_bus = [os.path.join(runtime_dir(), "javbus_crawler_single.exe"), av_code]
                                     else:
-                                        cmd_bus = ["python", "javbus_crawler_single.py", av_code]
+                                        cmd_bus = [sys.executable, "javbus_crawler_single.py", av_code]
                                     p_bus = subprocess.run(cmd_bus, capture_output=True, text=True, cwd=cwd_dir, timeout=60)
                                     if p_bus.returncode == 0 and p_bus.stdout:
                                         try:
@@ -7308,6 +7315,12 @@ class MediaLibrary:
                             progress_window.update_status(f"成功保存: {av_code}", "green")
                             
                         except subprocess.TimeoutExpired:
+                            if not manual_action_prompted:
+                                manual_action_prompted = True
+                                self.root.after(0, lambda: messagebox.showwarning(
+                                    "需要人工验证",
+                                    "JAVDB抓取超时，通常是登录或Cloudflare验证未完成导致。\n\n请先完成一次人工验证，再重新执行批量更新。"
+                                ))
                             failed_files.append(f"{file_name}: 获取超时")
                             progress_window.update_progress(i + 1, file_name, success=False)
                             progress_window.update_status("失败: 获取超时", "red")
@@ -8996,6 +9009,22 @@ class MediaLibrary:
         
         # 获取完成后刷新详情显示
         self.root.after(2000, lambda: self.load_javdb_details(video_id))
+
+    def _crawler_needs_manual_action(self, stderr_text):
+        if not stderr_text:
+            return False
+        text = str(stderr_text).lower()
+        markers = [
+            "cloudflare",
+            "验证页",
+            "just a moment",
+            "checking your browser",
+            "登录状态缺失",
+            "访问详情页需要登录",
+            "登录仍未成功",
+            "login"
+        ]
+        return any(marker in text for marker in markers)
         
     def fetch_javdb_info(self, video_id):
         """获取JAVDB信息"""
@@ -9055,8 +9084,8 @@ class MediaLibrary:
                         if getattr(sys, 'frozen', False):
                             cmd = [os.path.join(runtime_dir(), "javdb_crawler_single.exe"), av_code]
                         else:
-                            cmd = ["python", "javdb_crawler_single.py", av_code]
-                        process = subprocess.run(cmd, capture_output=True, text=True, cwd=cwd_dir, timeout=60)
+                            cmd = [sys.executable, "javdb_crawler_single.py", av_code]
+                        process = subprocess.run(cmd, capture_output=True, text=True, cwd=cwd_dir, timeout=180)
                         if process.returncode == 0 and process.stdout:
                             try:
                                 parsed = json.loads(process.stdout)
@@ -9104,7 +9133,7 @@ class MediaLibrary:
                             if getattr(sys, 'frozen', False):
                                 cmd_bus = [os.path.join(runtime_dir(), "javbus_crawler_single.exe"), av_code]
                             else:
-                                cmd_bus = ["python", "javbus_crawler_single.py", av_code]
+                                cmd_bus = [sys.executable, "javbus_crawler_single.py", av_code]
                             p_bus = subprocess.run(cmd_bus, capture_output=True, text=True, cwd=cwd_dir, timeout=60)
                             if p_bus.returncode == 0 and p_bus.stdout:
                                 try:
@@ -11351,9 +11380,9 @@ class MediaLibrary:
                                     log_message(f"✗ 未找到信息: {av_code}")
                             else:
                                 # 回退到原有的JAVDB爬虫逻辑
-                                cmd = ["python", "javdb_crawler_single.py", av_code]
+                                cmd = [sys.executable, "javdb_crawler_single.py", av_code]
                                 process = subprocess.run(cmd, capture_output=True, text=True, 
-                                                       cwd=os.path.dirname(os.path.abspath(__file__)), timeout=60)
+                                                       cwd=os.path.dirname(os.path.abspath(__file__)), timeout=180)
                                 
                                 if process.returncode == 0 and process.stdout:
                                     try:
@@ -11706,8 +11735,8 @@ class MediaLibrary:
                             import json
                             
                             result = subprocess.run([
-                                'python3', 'javdb_crawler_single.py', code
-                            ], capture_output=True, text=True, timeout=30)
+                                sys.executable, 'javdb_crawler_single.py', code
+                            ], capture_output=True, text=True, timeout=180)
                             
                             if result.returncode == 0:
                                 javdb_info = json.loads(result.stdout)
@@ -11730,7 +11759,7 @@ class MediaLibrary:
                             try:
                                 log_message("使用javbus_crawler_single.py作为备用爬虫")
                                 result = subprocess.run([
-                                    'python3', 'javbus_crawler_single.py', code
+                                    sys.executable, 'javbus_crawler_single.py', code
                                 ], capture_output=True, text=True, timeout=60)
                                 
                                 if result.returncode == 0:
