@@ -24,7 +24,7 @@ except Exception:
     sync_playwright = None
     PlaywrightTimeoutError = Exception
 
-from config import SOCKS5_PROXY_HOST, SOCKS5_PROXY_PORT, get_javdb_base_url, USE_SOCKS5_PROXY, JAVDB_ALTERNATE_DIRECT_DOMAINS, JAVDB_DIRECT_DOMAIN
+from config import SOCKS5_PROXY_HOST, SOCKS5_PROXY_PORT, get_javdb_base_url, USE_SOCKS5_PROXY, JAVDB_ALTERNATE_DIRECT_DOMAINS, JAVDB_DIRECT_DOMAIN, MIN_DELAY, MAX_DELAY
 
 DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'media_library.db')
 RESULTS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'results')
@@ -144,6 +144,50 @@ def is_cloudflare_challenge_pw(page):
         return is_cloudflare_challenge_html(html, title)
     except Exception:
         return False
+
+
+def is_cloudflare_verification_failed(page):
+    try:
+        title = page.title() or ""
+        html = page.content() or ""
+        s = html.lower()
+        t = title.lower()
+        failed_markers = [
+            "verification failed",
+            "please refresh the page",
+            "verify you are human",
+            "error 1020",
+            "access denied",
+            "sorry, you have been blocked",
+        ]
+        if any(marker in s for marker in failed_markers):
+            return True
+        if any(marker in t for marker in failed_markers):
+            return True
+        return False
+    except Exception:
+        return False
+
+
+def wait_for_cloudflare_pass(page, max_retries=3, retry_delay=5):
+    for attempt in range(max_retries):
+        if is_cloudflare_verification_failed(page):
+            print(f"检测到Cloudflare验证失败，尝试刷新页面 (第{attempt+1}次)...", file=sys.stderr)
+            page.reload(wait_until="domcontentloaded", timeout=30000)
+            random_delay(retry_delay, retry_delay + 5)
+            if not is_cloudflare_challenge_pw(page):
+                print("刷新后验证通过", file=sys.stderr)
+                return True
+        elif not is_cloudflare_challenge_pw(page):
+            return True
+        else:
+            for _ in range(20):
+                if not is_cloudflare_challenge_pw(page):
+                    return True
+                time.sleep(3)
+            if is_cloudflare_verification_failed(page):
+                continue
+    return False
 
 
 def is_age_confirmation_pw(page):
@@ -330,11 +374,8 @@ def get_video_magnet_link(page, video_url, base_url):
         simulate_human_behavior(page)
         if is_cloudflare_challenge_pw(page):
             print("详情页检测到 Cloudflare 验证页，等待通过...", file=sys.stderr)
-            for _ in range(60):
-                if not is_cloudflare_challenge_pw(page):
-                    break
-                time.sleep(3)
-            if is_cloudflare_challenge_pw(page):
+            if not wait_for_cloudflare_pass(page, max_retries=2):
+                print("详情页Cloudflare验证未通过", file=sys.stderr)
                 return ""
         if is_age_confirmation_pw(page):
             dismiss_age_confirmation_pw(page)
@@ -376,11 +417,8 @@ def parse_actor_works_page(page, actor_url, base_url):
         simulate_human_behavior(page)
         if is_cloudflare_challenge_pw(page):
             print("检测到 Cloudflare 验证页，等待通过...", file=sys.stderr)
-            for _ in range(60):
-                if not is_cloudflare_challenge_pw(page):
-                    break
-                time.sleep(3)
-            if is_cloudflare_challenge_pw(page):
+            if not wait_for_cloudflare_pass(page, max_retries=3):
+                print("Cloudflare验证未通过，跳过此页面", file=sys.stderr)
                 return works
         if is_age_confirmation_pw(page):
             print("检测到年龄确认页，尝试自动点击...", file=sys.stderr)
@@ -457,7 +495,7 @@ def crawl_actor_all_pages(page, actor_url, base_url, max_pages=10, skip_codes=No
                 print(f"找到磁力链接: {w['code']}", file=sys.stderr)
             else:
                 print(f"详情页无磁力链接，跳过: {w['code']}", file=sys.stderr)
-            random_delay(1, 2)
+            random_delay(MIN_DELAY, MAX_DELAY)
         skip_codes.update(w["code"] for w in works)
         has_next = False
         try:
@@ -472,7 +510,7 @@ def crawl_actor_all_pages(page, actor_url, base_url, max_pages=10, skip_codes=No
             print("无下一页，停止翻页", file=sys.stderr)
             break
         current_page += 1
-        random_delay(2, 4)
+        random_delay(3, 6)
     return all_works
 
 
@@ -610,11 +648,7 @@ def main():
         random_delay(2, 3)
         if is_cloudflare_challenge_pw(page):
             print("检测到 Cloudflare 验证页，等待通过...", file=sys.stderr)
-            for _ in range(60):
-                if not is_cloudflare_challenge_pw(page):
-                    break
-                time.sleep(3)
-            if is_cloudflare_challenge_pw(page):
+            if not wait_for_cloudflare_pass(page, max_retries=3):
                 print("Cloudflare验证未通过", file=sys.stderr)
                 save_csv(csv_path, all_results)
                 return
@@ -656,7 +690,7 @@ def main():
                     "magnet_link": w.get("magnet_link", ""),
                     "added_date": added_date
                 })
-            random_delay(3, 5)
+            random_delay(5, 10)
 
     except Exception as e:
         print(f"爬取失败: {e}", file=sys.stderr)
