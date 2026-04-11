@@ -134,6 +134,17 @@ def is_cloudflare_challenge_html(page_source: str, title: str = "") -> bool:
     body_markers = ["just a moment", "checking your browser", "please stand by, while we are checking your browser"]
     if any(marker in t for marker in title_markers) and any(marker in s for marker in body_markers):
         return True
+    
+    # 检测Turnstile验证框
+    turnstile_markers = [
+        "turnstile",
+        "cf-turnstile",
+        "data-sitekey",
+        "challenges.cloudflare.com",
+    ]
+    if any(marker in s for marker in turnstile_markers):
+        return True
+    
     return False
 
 
@@ -169,24 +180,88 @@ def is_cloudflare_verification_failed(page):
         return False
 
 
-def wait_for_cloudflare_pass(page, max_retries=3, retry_delay=5):
+def wait_for_cloudflare_pass(page, base_url=None, max_retries=5, retry_delay=8):
+    """等待Cloudflare验证通过，支持刷新和重新导航"""
     for attempt in range(max_retries):
         if is_cloudflare_verification_failed(page):
-            print(f"检测到Cloudflare验证失败，尝试刷新页面 (第{attempt+1}次)...", file=sys.stderr)
+            print(f"检测到Cloudflare验证失败，尝试刷新页面 (第{attempt+1}/{max_retries}次)...", file=sys.stderr)
             page.reload(wait_until="domcontentloaded", timeout=30000)
-            random_delay(retry_delay, retry_delay + 5)
+            random_delay(retry_delay, retry_delay + 10)
             if not is_cloudflare_challenge_pw(page):
                 print("刷新后验证通过", file=sys.stderr)
                 return True
         elif not is_cloudflare_challenge_pw(page):
             return True
         else:
-            for _ in range(20):
+            # 等待Cloudflare自动验证通过
+            print(f"等待Cloudflare自动验证 (第{attempt+1}/{max_retries}次)...", file=sys.stderr)
+            for _ in range(30):  # 最多等待90秒
                 if not is_cloudflare_challenge_pw(page):
+                    print("自动验证通过", file=sys.stderr)
                     return True
                 time.sleep(3)
-            if is_cloudflare_verification_failed(page):
-                continue
+            
+            # 如果验证仍未通过，尝试刷新
+            if is_cloudflare_challenge_pw(page):
+                print(f"自动验证超时，尝试刷新页面...", file=sys.stderr)
+                page.reload(wait_until="domcontentloaded", timeout=30000)
+                random_delay(retry_delay, retry_delay + 10)
+    
+    # 所有重试都失败，尝试导航到首页重新获取cookie
+    if base_url:
+        print("尝试导航到首页重新获取cookie...", file=sys.stderr)
+        try:
+            page.goto(base_url, wait_until="domcontentloaded", timeout=30000)
+            random_delay(10, 15)
+            if not is_cloudflare_challenge_pw(page):
+                print("首页导航成功，验证通过", file=sys.stderr)
+                return True
+        except Exception as e:
+            print(f"首页导航失败: {e}", file=sys.stderr)
+    
+    return False
+
+
+def recover_from_cloudflare_block(page, base_url, context=None):
+    """从Cloudflare阻断中恢复，清理cookie并重新获取"""
+    print("\n=== Cloudflare阻断恢复 ===", file=sys.stderr)
+    print("尝试清理Cloudflare相关cookie并重新获取...", file=sys.stderr)
+    
+    # 尝试清理cf_clearance cookie
+    try:
+        cookies = context.cookies() if context else []
+        cf_cookies = [c for c in cookies if 'cf_' in c.get('name', '').lower() or 'cloudflare' in c.get('domain', '').lower()]
+        if cf_cookies:
+            print(f"发现 {len(cf_cookies)} 个Cloudflare相关cookie，尝试清理...", file=sys.stderr)
+            for cookie in cf_cookies:
+                try:
+                    context.clear_cookies()
+                    print(f"已清理cookie: {cookie.get('name')}", file=sys.stderr)
+                except Exception:
+                    pass
+    except Exception as e:
+        print(f"清理cookie时出错: {e}", file=sys.stderr)
+    
+    # 导航到首页重新获取cookie
+    print("导航到首页重新获取验证...", file=sys.stderr)
+    try:
+        page.goto(base_url, wait_until="domcontentloaded", timeout=60000)
+        random_delay(15, 25)
+        
+        # 等待Cloudflare验证通过
+        if is_cloudflare_challenge_pw(page):
+            print("首页仍有Cloudflare验证，等待通过...", file=sys.stderr)
+            for _ in range(40):  # 最多等待2分钟
+                if not is_cloudflare_challenge_pw(page):
+                    print("首页验证通过", file=sys.stderr)
+                    return True
+                time.sleep(3)
+        else:
+            print("首页验证通过", file=sys.stderr)
+            return True
+    except Exception as e:
+        print(f"首页导航失败: {e}", file=sys.stderr)
+    
     return False
 
 
@@ -345,7 +420,7 @@ def load_existing_csv(csv_path):
 
 
 def save_csv(csv_path, results):
-    fieldnames = ["actor_javdb_code", "actor_name", "code", "title", "url", "release_date", "in_database", "magnet_link", "added_date"]
+    fieldnames = ["actor_javdb_code", "actor_name", "code", "title", "url", "release_date", "in_database", "magnet_link", "categories", "added_date"]
     with open(csv_path, 'w', newline='', encoding='utf-8-sig') as f:
         writer = csv.DictWriter(f, fieldnames=fieldnames, extrasaction='ignore')
         writer.writeheader()
@@ -364,8 +439,10 @@ def extract_javdb_code_from_url(url):
     return ""
 
 
-def get_video_magnet_link(page, video_url, base_url):
+def get_video_detail_info(page, video_url, base_url):
+    """获取视频详情页的磁力链接和类别信息"""
     magnet_link = ""
+    categories = ""
     try:
         if not video_url.startswith("http"):
             video_url = urljoin(base_url, video_url)
@@ -374,12 +451,14 @@ def get_video_magnet_link(page, video_url, base_url):
         simulate_human_behavior(page)
         if is_cloudflare_challenge_pw(page):
             print("详情页检测到 Cloudflare 验证页，等待通过...", file=sys.stderr)
-            if not wait_for_cloudflare_pass(page, max_retries=2):
+            if not wait_for_cloudflare_pass(page, base_url=base_url, max_retries=2):
                 print("详情页Cloudflare验证未通过", file=sys.stderr)
-                return ""
+                return "", ""
         if is_age_confirmation_pw(page):
             dismiss_age_confirmation_pw(page)
             random_delay(1, 2)
+        
+        # 提取磁力链接
         magnet_selectors = [
             "a[href^='magnet:?']",
             ".magnet-link a",
@@ -404,9 +483,48 @@ def get_video_magnet_link(page, video_url, base_url):
                     magnet_link = all_magnets[0].get_attribute("href") or ""
             except Exception:
                 pass
+        
+        # 提取类别信息
+        try:
+            # 方法1: 使用XPath查找"類別:"标签（与javdb_crawler_single.py一致）
+            try:
+                category_elements = page.locator("xpath=//strong[text()='類別:']/following-sibling::span[1]/a").all()
+                if category_elements:
+                    categories = ", ".join([elem.text_content().strip() for elem in category_elements])
+            except Exception:
+                pass
+            
+            # 方法2: 尝试"Tags:"标签
+            if not categories:
+                try:
+                    category_elements = page.locator("xpath=//strong[text()='Tags:']/following-sibling::span[1]/a").all()
+                    if category_elements:
+                        categories = ", ".join([elem.text_content().strip() for elem in category_elements])
+                except Exception:
+                    pass
+            
+            # 方法3: 备用选择器
+            if not categories:
+                try:
+                    category_elements = page.locator('.panel-info a[href*="/tags/"], .genres a, .tags a').all()
+                    if category_elements:
+                        cats = [elem.text_content().strip() for elem in category_elements if elem.text_content().strip()]
+                        # 去重但保持顺序
+                        seen = set()
+                        unique_cats = []
+                        for c in cats:
+                            if c not in seen:
+                                seen.add(c)
+                                unique_cats.append(c)
+                        categories = ", ".join(unique_cats)
+                except Exception:
+                    pass
+        except Exception as e:
+            print(f"提取类别信息失败: {e}", file=sys.stderr)
+            
     except Exception as e:
-        print(f"获取磁力链接失败: {e}", file=sys.stderr)
-    return magnet_link
+        print(f"获取详情页信息失败: {e}", file=sys.stderr)
+    return magnet_link, categories
 
 
 def parse_actor_works_page(page, actor_url, base_url):
@@ -417,7 +535,7 @@ def parse_actor_works_page(page, actor_url, base_url):
         simulate_human_behavior(page)
         if is_cloudflare_challenge_pw(page):
             print("检测到 Cloudflare 验证页，等待通过...", file=sys.stderr)
-            if not wait_for_cloudflare_pass(page, max_retries=3):
+            if not wait_for_cloudflare_pass(page, base_url=base_url, max_retries=3):
                 print("Cloudflare验证未通过，跳过此页面", file=sys.stderr)
                 return works
         if is_age_confirmation_pw(page):
@@ -487,12 +605,13 @@ def crawl_actor_all_pages(page, actor_url, base_url, max_pages=10, skip_codes=No
         for w in works:
             if w["code"] in skip_codes:
                 continue
-            print(f"获取磁力链接: {w['code']}...", file=sys.stderr)
-            magnet_link = get_video_magnet_link(page, w["url"], base_url)
+            print(f"获取详情页信息: {w['code']}...", file=sys.stderr)
+            magnet_link, categories = get_video_detail_info(page, w["url"], base_url)
             if magnet_link:
                 w["magnet_link"] = magnet_link
+                w["categories"] = categories
                 all_works.append(w)
-                print(f"找到磁力链接: {w['code']}", file=sys.stderr)
+                print(f"找到磁力链接: {w['code']}, 类别: {categories}", file=sys.stderr)
             else:
                 print(f"详情页无磁力链接，跳过: {w['code']}", file=sys.stderr)
             random_delay(MIN_DELAY, MAX_DELAY)
@@ -648,7 +767,7 @@ def main():
         random_delay(2, 3)
         if is_cloudflare_challenge_pw(page):
             print("检测到 Cloudflare 验证页，等待通过...", file=sys.stderr)
-            if not wait_for_cloudflare_pass(page, max_retries=3):
+            if not wait_for_cloudflare_pass(page, base_url=base_url, max_retries=3):
                 print("Cloudflare验证未通过", file=sys.stderr)
                 save_csv(csv_path, all_results)
                 return
@@ -674,6 +793,19 @@ def main():
             for r in all_results:
                 if r.get("actor_javdb_code") == actor_javdb_code or r.get("actor_name") == actor_name:
                     actor_processed_codes.add(r.get("code", ""))
+            
+            # 检查Cloudflare状态
+            if is_cloudflare_challenge_pw(page):
+                print("检测到Cloudflare验证，尝试恢复...", file=sys.stderr)
+                if not wait_for_cloudflare_pass(page, base_url=base_url, max_retries=3):
+                    print("Cloudflare验证未通过，尝试恢复...", file=sys.stderr)
+                    if recover_from_cloudflare_block(page, base_url, session.get("context")):
+                        print("恢复成功，继续爬取", file=sys.stderr)
+                    else:
+                        print("恢复失败，保存当前结果并跳过此演员", file=sys.stderr)
+                        save_csv(csv_path, all_results)
+                        continue
+            
             javdb_works = crawl_actor_all_pages(page, actor_url, base_url, max_pages=args.max_pages, skip_codes=actor_processed_codes)
             print(f"JAVDB新获取 {len(javdb_works)} 个作品", file=sys.stderr)
             for w in javdb_works:
@@ -688,6 +820,7 @@ def main():
                     "release_date": w.get("release_date", ""),
                     "in_database": in_database,
                     "magnet_link": w.get("magnet_link", ""),
+                    "categories": w.get("categories", ""),
                     "added_date": added_date
                 })
             random_delay(5, 10)
