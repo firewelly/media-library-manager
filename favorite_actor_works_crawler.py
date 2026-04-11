@@ -24,7 +24,7 @@ except Exception:
     sync_playwright = None
     PlaywrightTimeoutError = Exception
 
-from config import SOCKS5_PROXY_HOST, SOCKS5_PROXY_PORT, get_javdb_base_url, USE_SOCKS5_PROXY, JAVDB_ALTERNATE_DIRECT_DOMAINS, JAVDB_DIRECT_DOMAIN, MIN_DELAY, MAX_DELAY
+from config import SOCKS5_PROXY_HOST, SOCKS5_PROXY_PORT, get_javdb_base_url, USE_SOCKS5_PROXY, JAVDB_ALTERNATE_DIRECT_DOMAINS, JAVDB_DIRECT_DOMAIN, JAVDB_PROXY_DOMAIN, MIN_DELAY, MAX_DELAY
 
 DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'media_library.db')
 RESULTS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'results')
@@ -65,16 +65,21 @@ def get_profile_modes():
     return ["persisted", "fresh"]
 
 
-def normalize_actor_url(url_str: str, use_proxy: bool) -> str:
+def normalize_actor_url(url_str: str, use_proxy: bool, direct_domain=None) -> str:
     if not url_str:
         return url_str
+    target_direct = direct_domain or JAVDB_DIRECT_DOMAIN
     if use_proxy:
-        return url_str.replace("javdb571.com", "javdb.com").replace("www.javdb571.com", "javdb.com")
-    else:
-        url_str = url_str.replace("javdb.com", JAVDB_DIRECT_DOMAIN).replace("www.javdb.com", JAVDB_DIRECT_DOMAIN)
+        # 使用代理时，将所有alternative域名替换为代理域名
+        url_str = url_str.replace(target_direct, JAVDB_PROXY_DOMAIN).replace(f"www.{target_direct}", JAVDB_PROXY_DOMAIN)
         for alt in JAVDB_ALTERNATE_DIRECT_DOMAINS:
-            url_str = url_str.replace(alt, JAVDB_DIRECT_DOMAIN)
-        return url_str
+            url_str = url_str.replace(alt, JAVDB_PROXY_DOMAIN).replace(f"www.{alt}", JAVDB_PROXY_DOMAIN)
+    else:
+        # 不使用代理时，将所有javdb.com和alternative域名替换为目标direct域名
+        url_str = url_str.replace("javdb.com", target_direct).replace("www.javdb.com", target_direct)
+        for alt in JAVDB_ALTERNATE_DIRECT_DOMAINS:
+            url_str = url_str.replace(alt, target_direct).replace(f"www.{alt}", target_direct)
+    return url_str
 
 
 def get_attempt_configs(use_socks5):
@@ -309,7 +314,7 @@ def dismiss_age_confirmation_pw(page, timeout_seconds=10):
         return False
 
 
-def setup_playwright_session(use_proxy=True, headless=False, browser_name="msedge", profile_mode="fresh"):
+def setup_playwright_session(use_proxy=True, headless=False, browser_name="msedge", profile_mode="fresh", proxy_host=None, proxy_port=None):
     if sync_playwright is None:
         return None
     try:
@@ -336,7 +341,9 @@ def setup_playwright_session(use_proxy=True, headless=False, browser_name="msedg
             ],
         }
         if use_proxy:
-            launch_args["proxy"] = {"server": f"socks5://{SOCKS5_PROXY_HOST}:{SOCKS5_PROXY_PORT}"}
+            ph = proxy_host or SOCKS5_PROXY_HOST
+            pp = proxy_port or SOCKS5_PROXY_PORT
+            launch_args["proxy"] = {"server": f"socks5://{ph}:{pp}"}
         user_data_dir = os.path.join(os.path.dirname(__file__), '.playwright_user_data')
         os.makedirs(user_data_dir, exist_ok=True)
         context_args = {
@@ -678,14 +685,31 @@ def main():
     parser = argparse.ArgumentParser(description="收藏演员作品爬虫 - 爬取JAVDB收藏演员的作品列表")
     parser.add_argument("--max-pages", type=int, default=10, help="每个演员最多爬取页数")
     parser.add_argument("--actor-code", type=str, default=None, help="指定演员JAVDB唯一码（如Julia的1KBW）")
+    parser.add_argument("--proxy", type=str, default=None, help="指定SOCKS5代理地址（如127.0.0.1:1080），默认使用config.py中的配置")
     parser.add_argument("--no-proxy", action="store_true", help="不使用代理")
     parser.add_argument("--import-csv", type=str, nargs="+", default=None, help="导入已有CSV文件（支持多个文件）")
     parser.add_argument("--wait-login", type=int, default=60, help="等待登录时间（秒），0表示不等待")
+    parser.add_argument("--direct-domain", type=str, default=None, help="指定直连域名（默认使用config.py中的JAVDB_DIRECT_DOMAIN）")
     args = parser.parse_args()
 
-    use_proxy = USE_SOCKS5_PROXY and not args.no_proxy
-    base_url = get_javdb_base_url(use_proxy)
-    print(f"使用域名: {base_url} (代理: {use_proxy})", file=sys.stderr)
+    use_proxy = not args.no_proxy
+    proxy_host = SOCKS5_PROXY_HOST
+    proxy_port = SOCKS5_PROXY_PORT
+    if args.proxy:
+        parts = args.proxy.split(":")
+        if len(parts) == 2:
+            proxy_host = parts[0]
+            proxy_port = int(parts[1])
+        else:
+            print(f"代理地址格式错误: {args.proxy}，应为 host:port", file=sys.stderr)
+            return
+
+    direct_domain = args.direct_domain or JAVDB_DIRECT_DOMAIN
+    if use_proxy:
+        base_url = f"https://{JAVDB_PROXY_DOMAIN}"
+    else:
+        base_url = f"https://{direct_domain}"
+    print(f"使用域名: {base_url} (代理: {use_proxy}, 代理地址: {proxy_host}:{proxy_port})", file=sys.stderr)
 
     existing_codes = get_existing_codes()
     print(f"本地数据库已有 {len(existing_codes)} 个番号", file=sys.stderr)
@@ -786,7 +810,9 @@ def main():
                     use_proxy=attempt["use_proxy"],
                     headless=attempt["headless"],
                     browser_name=browser_name,
-                    profile_mode=profile_mode
+                    profile_mode=profile_mode,
+                    proxy_host=proxy_host if attempt["use_proxy"] else None,
+                    proxy_port=proxy_port if attempt["use_proxy"] else None
                 )
                 if session:
                     break
@@ -828,7 +854,7 @@ def main():
                 continue
             if not actor_url.startswith("http"):
                 actor_url = urljoin(base_url, actor_url)
-            actor_url = normalize_actor_url(actor_url, use_proxy)
+            actor_url = normalize_actor_url(actor_url, use_proxy, direct_domain=direct_domain)
             actor_javdb_code = extract_javdb_code_from_url(actor_url)
             actor_processed_codes = set()
             for r in all_results:
