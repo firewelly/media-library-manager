@@ -629,7 +629,7 @@ def parse_actor_works_page(page, actor_url, base_url):
     return works
 
 
-def crawl_actor_all_pages(page, actor_url, base_url, max_pages=10, skip_codes=None):
+def crawl_actor_all_pages(page, actor_url, base_url, max_pages=10, skip_codes=None, on_work_found=None):
     all_works = []
     skip_codes = skip_codes or set()
     current_page = 1
@@ -650,6 +650,9 @@ def crawl_actor_all_pages(page, actor_url, base_url, max_pages=10, skip_codes=No
                 w["categories"] = categories
                 all_works.append(w)
                 print(f"找到磁力链接: {w['code']}, 类别: {categories}", file=sys.stderr)
+                # 每找到一个作品，立即调用回调保存
+                if on_work_found:
+                    on_work_found(w)
             else:
                 print(f"详情页无磁力链接，跳过: {w['code']}", file=sys.stderr)
             random_delay(MIN_DELAY, MAX_DELAY)
@@ -832,21 +835,8 @@ def main():
                 if r.get("actor_javdb_code") == actor_javdb_code or r.get("actor_name") == actor_name:
                     actor_processed_codes.add(r.get("code", ""))
             
-            # 检查Cloudflare状态
-            if is_cloudflare_challenge_pw(page):
-                print("检测到Cloudflare验证，尝试恢复...", file=sys.stderr)
-                if not wait_for_cloudflare_pass(page, base_url=base_url, max_retries=3):
-                    print("Cloudflare验证未通过，尝试恢复...", file=sys.stderr)
-                    if recover_from_cloudflare_block(page, base_url, session.get("context")):
-                        print("恢复成功，继续爬取", file=sys.stderr)
-                    else:
-                        print("恢复失败，保存当前结果并跳过此演员", file=sys.stderr)
-                        save_csv(csv_path, all_results)
-                        continue
-            
-            javdb_works = crawl_actor_all_pages(page, actor_url, base_url, max_pages=args.max_pages, skip_codes=actor_processed_codes)
-            print(f"JAVDB新获取 {len(javdb_works)} 个作品", file=sys.stderr)
-            for w in javdb_works:
+            # 定义回调函数：每找到一个作品就立即保存
+            def on_work_found(w):
                 code = w["code"]
                 in_database = code in existing_codes
                 all_results.append({
@@ -861,6 +851,25 @@ def main():
                     "categories": w.get("categories", ""),
                     "added_date": added_date
                 })
+                # 每找到一个作品就立即保存CSV
+                save_csv(csv_path, all_results)
+                print(f"已保存CSV，当前总记录数: {len(all_results)}", file=sys.stderr)
+            
+            # 检查Cloudflare状态
+            if is_cloudflare_challenge_pw(page):
+                print("检测到Cloudflare验证，尝试恢复...", file=sys.stderr)
+                if not wait_for_cloudflare_pass(page, base_url=base_url, max_retries=3):
+                    print("Cloudflare验证未通过，尝试恢复...", file=sys.stderr)
+                    if recover_from_cloudflare_block(page, base_url, session.get("context")):
+                        print("恢复成功，继续爬取", file=sys.stderr)
+                    else:
+                        print("恢复失败，保存当前结果并跳过此演员", file=sys.stderr)
+                        save_csv(csv_path, all_results)
+                        continue
+            
+            javdb_works = crawl_actor_all_pages(page, actor_url, base_url, max_pages=args.max_pages, skip_codes=actor_processed_codes, on_work_found=on_work_found)
+            print(f"JAVDB新获取 {len(javdb_works)} 个作品", file=sys.stderr)
+            
             random_delay(5, 10)
 
     except Exception as e:
