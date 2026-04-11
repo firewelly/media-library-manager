@@ -321,6 +321,18 @@ def setup_playwright_session(use_proxy=True, headless=False, browser_name="msedg
                 "--disable-infobars",
                 "--no-sandbox",
                 "--disable-dev-shm-usage",
+                # Cloudflare Turnstile验证需要的特性
+                "--enable-features=NetworkService,NetworkServiceInProcess",
+                "--disable-features=AutomationControlled",
+                "--disable-web-security",
+                "--disable-features=IsolateOrigins,site-per-process",
+                # GPU和硬件加速（让浏览器更真实）
+                "--disable-gpu",  # headless模式下通常需要禁用GPU
+                "--disable-software-rasterizer",
+                # 其他反检测参数
+                "--window-size=1280,800",
+                "--lang=zh-CN",
+                "--accept-lang=zh-CN,zh,ja,en",
             ],
         }
         if use_proxy:
@@ -331,6 +343,10 @@ def setup_playwright_session(use_proxy=True, headless=False, browser_name="msedg
             "user_agent": DEFAULT_USER_AGENT,
             "locale": "zh-CN",
             "viewport": {"width": 1280, "height": 800},
+            # 启用JavaScript（默认启用，但显式声明）
+            "java_script_enabled": True,
+            # 其他反检测设置
+            "bypass_csp": True,
         }
         if profile_mode == "persisted":
             context_args["user_data_dir"] = user_data_dir
@@ -344,6 +360,18 @@ def setup_playwright_session(use_proxy=True, headless=False, browser_name="msedg
             else:
                 context = p.chromium.launch_persistent_context(**context_args, **launch_args)
             page = context.pages[0] if context.pages else context.new_page()
+            # 注入反检测脚本
+            page.add_init_script("""
+                Object.defineProperty(navigator, 'webdriver', {get: () => undefined});
+                Object.defineProperty(navigator, 'plugins', {get: () => [1, 2, 3, 4, 5]});
+                Object.defineProperty(navigator, 'languages', {get: () => ['zh-CN', 'zh', 'ja', 'en']});
+                window.chrome = {
+                    runtime: {},
+                    loadTimes: function() {},
+                    csi: function() {},
+                    app: {}
+                };
+            """)
             return {"playwright": p, "browser": None, "context": context, "page": page}
         else:
             if browser_name == "msedge":
@@ -356,7 +384,17 @@ def setup_playwright_session(use_proxy=True, headless=False, browser_name="msedg
             else:
                 browser = p.chromium.launch(**launch_args)
             context = browser.new_context(**context_args)
-            context.add_init_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
+            context.add_init_script("""
+                Object.defineProperty(navigator, 'webdriver', {get: () => undefined});
+                Object.defineProperty(navigator, 'plugins', {get: () => [1, 2, 3, 4, 5]});
+                Object.defineProperty(navigator, 'languages', {get: () => ['zh-CN', 'zh', 'ja', 'en']});
+                window.chrome = {
+                    runtime: {},
+                    loadTimes: function() {},
+                    csi: function() {},
+                    app: {}
+                };
+            """)
             page = context.new_page()
             return {"playwright": p, "browser": browser, "context": context, "page": page}
     except Exception as e:
