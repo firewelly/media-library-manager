@@ -749,6 +749,21 @@ def main():
     else:
         actors = get_favorite_actors()
         print(f"收藏演员总数: {len(actors)}", file=sys.stderr)
+        
+        # 分离新演员和已有演员
+        new_actors = []
+        existing_actors = []
+        for actor in actors:
+            actor_code = extract_javdb_code_from_url(actor[2])
+            if actor_code in existing_actor_codes_in_csv:
+                existing_actors.append(actor)
+            else:
+                new_actors.append(actor)
+        
+        print(f"新演员: {len(new_actors)} 个，已有演员: {len(existing_actors)} 个", file=sys.stderr)
+        
+        # 先爬取新演员，再更新已有演员
+        actors = new_actors + existing_actors
 
     if not actors and not args.import_csv:
         print("无需要爬取的演员", file=sys.stderr)
