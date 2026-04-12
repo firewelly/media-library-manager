@@ -185,13 +185,21 @@ def is_cloudflare_verification_failed(page):
         return False
 
 
-def wait_for_cloudflare_pass(page, base_url=None, max_retries=5, retry_delay=8):
-    """等待Cloudflare验证通过，支持刷新和重新导航"""
+def wait_for_cloudflare_pass(page, base_url=None, max_retries=3, retry_delay=300):
+    """等待Cloudflare验证通过，支持刷新和重新导航
+    
+    Args:
+        page: Playwright页面对象
+        base_url: 基础URL，用于导航恢复
+        max_retries: 最大重试次数
+        retry_delay: 重试间隔（秒），默认300秒（5分钟）
+    """
     for attempt in range(max_retries):
         if is_cloudflare_verification_failed(page):
-            print(f"检测到Cloudflare验证失败，尝试刷新页面 (第{attempt+1}/{max_retries}次)...", file=sys.stderr)
+            print(f"检测到Cloudflare验证失败，等待{retry_delay}秒后重试 (第{attempt+1}/{max_retries}次)...", file=sys.stderr)
+            random_delay(retry_delay, retry_delay + 60)
             page.reload(wait_until="domcontentloaded", timeout=30000)
-            random_delay(retry_delay, retry_delay + 10)
+            random_delay(10, 20)
             if not is_cloudflare_challenge_pw(page):
                 print("刷新后验证通过", file=sys.stderr)
                 return True
@@ -206,18 +214,19 @@ def wait_for_cloudflare_pass(page, base_url=None, max_retries=5, retry_delay=8):
                     return True
                 time.sleep(3)
             
-            # 如果验证仍未通过，尝试刷新
+            # 如果验证仍未通过，等待更长时间后重试
             if is_cloudflare_challenge_pw(page):
-                print(f"自动验证超时，尝试刷新页面...", file=sys.stderr)
+                print(f"自动验证超时，等待{retry_delay}秒后重试...", file=sys.stderr)
+                random_delay(retry_delay, retry_delay + 60)
                 page.reload(wait_until="domcontentloaded", timeout=30000)
-                random_delay(retry_delay, retry_delay + 10)
+                random_delay(10, 20)
     
     # 所有重试都失败，尝试导航到首页重新获取cookie
     if base_url:
         print("尝试导航到首页重新获取cookie...", file=sys.stderr)
         try:
             page.goto(base_url, wait_until="domcontentloaded", timeout=30000)
-            random_delay(10, 15)
+            random_delay(60, 120)  # 首页导航后等待1-2分钟
             if not is_cloudflare_challenge_pw(page):
                 print("首页导航成功，验证通过", file=sys.stderr)
                 return True
@@ -662,7 +671,8 @@ def crawl_actor_all_pages(page, actor_url, base_url, max_pages=10, skip_codes=No
                     on_work_found(w)
             else:
                 print(f"详情页无磁力链接，跳过: {w['code']}", file=sys.stderr)
-            random_delay(MIN_DELAY, MAX_DELAY)
+            # 每个详情页爬取后增加较长间隔，防止被ban
+            random_delay(8, 15)
         skip_codes.update(w["code"] for w in works)
         has_next = False
         try:
@@ -896,7 +906,8 @@ def main():
             javdb_works = crawl_actor_all_pages(page, actor_url, base_url, max_pages=args.max_pages, skip_codes=actor_processed_codes, on_work_found=on_work_found)
             print(f"JAVDB新获取 {len(javdb_works)} 个作品", file=sys.stderr)
             
-            random_delay(5, 10)
+            # 演员之间增加较长间隔，防止被ban
+            random_delay(30, 60)
 
     except Exception as e:
         print(f"爬取失败: {e}", file=sys.stderr)
