@@ -748,8 +748,7 @@ def main():
             return
     else:
         actors = get_favorite_actors()
-        actors = [a for a in actors if extract_javdb_code_from_url(a[2]) not in existing_actor_codes_in_csv]
-        print(f"需要爬取的收藏演员数量: {len(actors)}", file=sys.stderr)
+        print(f"收藏演员总数: {len(actors)}", file=sys.stderr)
 
     if not actors and not args.import_csv:
         print("无需要爬取的演员", file=sys.stderr)
@@ -866,10 +865,15 @@ def main():
                 actor_url = urljoin(base_url, actor_url)
             actor_url = normalize_actor_url(actor_url, use_proxy, direct_domain=direct_domain)
             actor_javdb_code = extract_javdb_code_from_url(actor_url)
+            
+            # 从CSV中获取该演员已爬取的番号，用于增量爬取
             actor_processed_codes = set()
             for r in all_results:
                 if r.get("actor_javdb_code") == actor_javdb_code or r.get("actor_name") == actor_name:
                     actor_processed_codes.add(r.get("code", ""))
+            
+            if actor_processed_codes:
+                print(f"该演员已有 {len(actor_processed_codes)} 条记录，将检查新番号", file=sys.stderr)
             
             # 定义回调函数：每找到一个作品就立即保存
             def on_work_found(w):
