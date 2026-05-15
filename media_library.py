@@ -8473,8 +8473,8 @@ class MediaLibrary:
             # 导入视频内容分析器
             from video_analyzer import VideoContentAnalyzer
             
-            # 创建分析器实例，使用相同的数据库路径
-            analyzer = VideoContentAnalyzer(db_path="media_library.db")
+            # 创建分析器实例，使用流水线模式加速批量处理
+            analyzer = VideoContentAnalyzer(db_path="media_library.db", use_pipeline=True, max_workers=5)
             
             def analyze_videos():
                 try:
@@ -8562,8 +8562,8 @@ class MediaLibrary:
             # 创建进度窗口
             progress_window = ProgressWindow(self.root, "批量自动标签", len(video_paths))
             
-            # 创建分析器实例，使用相同的数据库路径
-            analyzer = VideoContentAnalyzer(db_path="media_library.db")
+            # 创建分析器实例，使用流水线模式加速批量处理
+            analyzer = VideoContentAnalyzer(db_path="media_library.db", use_pipeline=True, max_workers=3)
             
             def analyze_videos():
                 try:
@@ -8665,8 +8665,8 @@ class MediaLibrary:
             # 导入视频内容分析器
             from video_analyzer import VideoContentAnalyzer
             
-            # 创建分析器实例，使用相同的数据库路径
-            analyzer = VideoContentAnalyzer(db_path="media_library.db")
+            # 创建分析器实例，使用流水线模式加速批量处理
+            analyzer = VideoContentAnalyzer(db_path="media_library.db", use_pipeline=True, max_workers=3)
             
             # 文件夹筛选条件
             selected_folder = None

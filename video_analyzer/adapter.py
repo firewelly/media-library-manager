@@ -1,59 +1,99 @@
-import re
 import os
 from typing import List, Dict, Any
-from .video_analyzer_siliconflow_glm_with_tags import VideoAnalyzerSiliconFlowGLMWithTags
+from .video_analyzer_local_model_adult import VideoAnalyzerLocalModelAdult
+from .video_analyzer_pipeline import PipelineVideoAnalyzer
 
 class VideoContentAnalyzer:
-    def __init__(self, db_path="media_library.db"):
+    def __init__(self, db_path="media_library.db", use_pipeline=False, max_workers=3):
         self.db_path = db_path
-        # Initialize the underlying analyzer
-        # API key is retrieved from environment variables by the core class
-        self.analyzer = VideoAnalyzerSiliconFlowGLMWithTags(verbose=True)
+        self.use_pipeline = use_pipeline
+        self.max_workers = max_workers
+        
+        self.analyzer = VideoAnalyzerLocalModelAdult(
+            api_base_url="https://api.siliconflow.cn",
+            model_name="Qwen/Qwen3-VL-8B-Instruct",
+            verbose=True
+        )
+        
+        if use_pipeline:
+            self.pipeline_analyzer = PipelineVideoAnalyzer(
+                api_base_url="https://api.siliconflow.cn",
+                model_name="Qwen/Qwen3-VL-8B-Instruct",
+                num_frames=8,
+                max_api_workers=max_workers,
+                verbose=True
+            )
 
     def analyze_video_content(self, video_path, min_frames=100, max_interval=10, max_frames=300):
         """
         Analyze video content and return tags.
         Arguments min_frames, max_interval, max_frames are kept for compatibility 
-        but are largely ignored in favor of the new model's optimal settings (20 frames).
+        but are largely ignored in favor of the new model's optimal settings (5-8 frames).
         """
         try:
-            # The new analyzer logic uses fewer frames (e.g. 20) and LLM
-            # We ignore the old frame parameters to avoid excessive token usage/latency
-            # and stick to the production script's default of 20 frames
-            result = self.analyzer.analyze_video(video_path, num_frames=20)
+            result = self.analyzer.analyze_video(video_path, num_frames=8)
             
             if not result.get('success', False):
                 return {'error': result.get('error', 'Unknown error')}
             
             analysis_text = result.get('analysis', '')
-            generated_tags = self._extract_tags_from_analysis(analysis_text)
+            generated_tags = self.analyzer.extract_tags_from_analysis(analysis_text)
             
             return {
                 'generated_tags': generated_tags,
                 'frames_analyzed': result.get('frames_extracted', 0),
                 'analysis_text': analysis_text,
-                'summary': {'generated_tags': generated_tags} # For compatibility if needed
+                'summary': {'generated_tags': generated_tags}
             }
         except Exception as e:
             return {'error': str(e)}
-
-    def _extract_tags_from_analysis(self, analysis_text: str) -> List[str]:
+    
+    def analyze_videos_batch(self, video_paths: List[str], progress_callback=None) -> List[Dict[str, Any]]:
         """
-        Extract tags from analysis text.
-        Logic adapted from production_video_analyzer_fixed.py
+        Batch analyze multiple videos using pipeline mode.
+        
+        Args:
+            video_paths: List of video file paths
+            progress_callback: Optional callback function for progress updates
+            
+        Returns:
+            List of analysis results for each video
         """
-        if not analysis_text:
-            return []
+        if not self.use_pipeline or not hasattr(self, 'pipeline_analyzer'):
+            results = []
+            for i, path in enumerate(video_paths):
+                result = self.analyze_video_content(path)
+                results.append({'path': path, 'result': result})
+                if progress_callback:
+                    progress_callback(i, len(video_paths), path, result)
+            return results
         
-        # 查找匹配标签部分
-        match = re.search(r'匹配标签[：:]\s*([^\n]+)', analysis_text)
-        if match:
-            tags_text = match.group(1).strip()
-            # 清理标签文本
-            tags_text = re.sub(r'[\n\r\t]', '', tags_text)
-            tags_text = tags_text.replace('、', ',').replace('，', ',')
-            # 分割标签并清理空白
-            tags = [tag.strip() for tag in tags_text.split(',') if tag.strip()]
-            return tags
+        videos = [{'id': i, 'path': p, 'title': os.path.basename(p)} 
+                  for i, p in enumerate(video_paths)]
         
-        return []
+        def pipeline_progress(stage, task):
+            if progress_callback:
+                idx = task.video_id
+                if stage == 'api_completed':
+                    result = {
+                        'generated_tags': task.final_tags,
+                        'frames_analyzed': len(task.frames_base64),
+                        'analysis_text': task.api_result.get('analysis', ''),
+                        'error': task.api_error if task.api_error else None
+                    }
+                    progress_callback(idx, len(video_paths), task.video_path, result)
+        
+        self.pipeline_analyzer.progress_callback = pipeline_progress
+        completed_tasks = self.pipeline_analyzer.analyze_videos(videos)
+        
+        results = []
+        for task in completed_tasks:
+            result = {
+                'generated_tags': task.final_tags,
+                'frames_analyzed': len(task.frames_base64),
+                'analysis_text': task.api_result.get('analysis', ''),
+                'error': task.api_error if task.api_error else None
+            }
+            results.append({'path': task.video_path, 'result': result})
+        
+        return results
