@@ -31,6 +31,47 @@
 - **`update_msedge_driver.py`**: 驱动更新工具。自动检测系统 Edge 浏览器版本并下载对应的 WebDriver，解决爬虫驱动不兼容问题。
 - **`init_database.py`**: 数据库初始化脚本，用于首次运行时创建必要的数据库表结构。
 
+### 🔬 基于 AI 的视频内容分析（video_analyzer/）
+
+`video_analyzer/` 目录提供了一套基于 SiliconFlow API 的视频内容分析工具，能够自动为成人视频生成内容标签：
+
+- **`production_video_analyzer_fixed.py`**: 生产级批量分析主脚本
+- **`video_analyzer_local_model_adult.py`**: 基于 Qwen3-VL-30B-A3B（MoE架构）的帧分析器
+- **`video_analyzer_pipeline.py`**: 流水线分析器，帧提取串行 + API 调用并行
+- **`adapter.py`**: GUI 桥接层
+
+#### 核心技术参数
+
+| 项目 | 配置 |
+|------|------|
+| API | `https://api.siliconflow.cn` |
+| 模型 | `Qwen/Qwen3-VL-30B-A3B-Instruct`（MoE，比8B更快更强） |
+| 动态帧数 | >10分钟按1帧/分钟，最多30帧；≤10分钟固定8帧 |
+| 标签 | 最多7个，特殊特征优先 |
+| 分析规则 | 仅关注女性主角，忽略男性人物 |
+
+#### 推荐使用命令
+
+```bash
+# 全量补标签（流水线模式，帧提取串行+API并行）
+cd /Users/firewell/bin/media/video_analyzer && python3 production_video_analyzer_fixed.py --pipeline --workers 10 --verbose
+
+# 测试模式（处理10个视频）
+cd /Users/firewell/bin/media/video_analyzer && python3 production_video_analyzer_fixed.py --pipeline --workers 10 --limit 10 --verbose
+```
+
+> `--workers` 限制同时等待API响应的线程数（建议10）。帧提取始终单线程串行，不抢占CPU。
+
+#### 标签优先级
+
+```
+特殊特征（最高）→ 哺乳、乳汁、孕妇、萝莉、人妖
+服装特征         → 黑丝、制服、情趣装、丝袜、眼镜
+情节特征         → 偷情、出轨、调教、绿帽
+人物特征         → 少妇、人妻、熟女、巨乳
+行为特征（最低） → 自慰、口交、后入、内射
+```
+
 ---
 
 ## 📺 JAVDB信息更新工具
