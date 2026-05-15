@@ -52,16 +52,15 @@ class ProductionVideoAnalyzer:
         if use_pipeline:
             self.pipeline_analyzer = PipelineVideoAnalyzer(
                 api_base_url="https://api.siliconflow.cn",
-                model_name="Qwen/Qwen3-VL-8B-Instruct",
+                model_name="Qwen/Qwen3-VL-30B-A3B-Instruct",
                 api_key=self.api_key,
-                num_frames=8,
                 max_api_workers=max_workers,
                 verbose=verbose
             )
         else:
             self.analyzer = VideoAnalyzerLocalModelAdult(
                 api_base_url="https://api.siliconflow.cn",
-                model_name="Qwen/Qwen3-VL-8B-Instruct",
+                model_name="Qwen/Qwen3-VL-30B-A3B-Instruct",
                 verbose=verbose
             )
         
@@ -174,14 +173,13 @@ class ProductionVideoAnalyzer:
             conn = sqlite3.connect(self.db_path)
             cursor = conn.cursor()
             
-            # 构建查询条件
             where_conditions = [
                 "(v.tags IS NULL OR v.tags = '' OR TRIM(v.tags) = '')",
                 "v.file_path IS NOT NULL",
-                "v.file_path != ''"
+                "v.file_path != ''",
+                "f.is_active = 1"
             ]
             
-            # 如果指定了文件夹，添加文件夹筛选条件
             if folder:
                 where_conditions.append("v.source_folder LIKE ? || '%'")
             
@@ -189,6 +187,7 @@ class ProductionVideoAnalyzer:
             SELECT v.id, v.title, v.file_path, v.file_size, v.duration, 
                    v.resolution, v.description, v.tags
             FROM videos v
+            INNER JOIN folders f ON v.source_folder = f.folder_path
             WHERE {' AND '.join(where_conditions)}
             ORDER BY v.id
             """
@@ -202,6 +201,8 @@ class ProductionVideoAnalyzer:
             
             videos = []
             for row in rows:
+                if not os.path.exists(row[2]):
+                    continue
                 video = {
                     'id': row[0],
                     'title': row[1],  # 直接使用title字段
@@ -397,7 +398,7 @@ class ProductionVideoAnalyzer:
         start_time = time.time()
         
         try:
-            result = self.analyzer.analyze_video(video_path, num_frames=8)
+            result = self.analyzer.analyze_video(video_path)
             
             analysis_time = time.time() - start_time
             

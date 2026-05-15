@@ -30,9 +30,10 @@ pip install -r requirements_video_analyzer.txt -i https://pypi.tuna.tsinghua.edu
 
 - API 相关：
   - API地址：`https://api.siliconflow.cn`
-  - 模型：`Qwen/Qwen3-VL-8B-Instruct`
+  - 模型：`Qwen/Qwen3-VL-30B-A3B-Instruct`
 - 视频处理：
-  - 默认分析帧数：8帧（优化后，避免context超限）
+  - 动态帧提取：超过10分钟按每分钟1帧，最多30帧
+  - 10分钟以内固定8帧，帧均匀覆盖视频全程
   - 图片压缩：宽度640px，最大0.4MB
   - 标签数量：最多7个（特殊特征优先）
 - 分析规则：

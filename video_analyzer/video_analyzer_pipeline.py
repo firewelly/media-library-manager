@@ -46,9 +46,9 @@ class VideoTask:
 class PipelineVideoAnalyzer:
     def __init__(self,
                  api_base_url: str = "https://api.siliconflow.cn",
-                 model_name: str = "Qwen/Qwen3-VL-8B-Instruct",
+                 model_name: str = "Qwen/Qwen3-VL-30B-A3B-Instruct",
                  api_key: str = None,
-                 num_frames: int = 8,
+                 num_frames: int = None,
                  max_api_workers: int = 3,
                  verbose: bool = True,
                  progress_callback: Callable = None):
