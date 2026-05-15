@@ -11,15 +11,14 @@ class VideoContentAnalyzer:
         
         self.analyzer = VideoAnalyzerLocalModelAdult(
             api_base_url="https://api.siliconflow.cn",
-            model_name="Qwen/Qwen3-VL-8B-Instruct",
+            model_name="Qwen/Qwen3-VL-30B-A3B-Instruct",
             verbose=True
         )
         
         if use_pipeline:
             self.pipeline_analyzer = PipelineVideoAnalyzer(
                 api_base_url="https://api.siliconflow.cn",
-                model_name="Qwen/Qwen3-VL-8B-Instruct",
-                num_frames=8,
+                model_name="Qwen/Qwen3-VL-30B-A3B-Instruct",
                 max_api_workers=max_workers,
                 verbose=True
             )
@@ -31,7 +30,7 @@ class VideoContentAnalyzer:
         but are largely ignored in favor of the new model's optimal settings (5-8 frames).
         """
         try:
-            result = self.analyzer.analyze_video(video_path, num_frames=8)
+            result = self.analyzer.analyze_video(video_path)
             
             if not result.get('success', False):
                 return {'error': result.get('error', 'Unknown error')}

@@ -32,7 +32,7 @@ except ImportError:
 class VideoAnalyzerLocalModelAdult:
     def __init__(self, 
                  api_base_url: str = "https://api.siliconflow.cn",
-                 model_name: str = "Qwen/Qwen3-VL-8B-Instruct",
+                 model_name: str = "Qwen/Qwen3-VL-30B-A3B-Instruct",
                  api_key: str = None,
                  tags_file: str = None,
                  verbose: bool = True):
@@ -50,7 +50,8 @@ class VideoAnalyzerLocalModelAdult:
         self.api_key = api_key or os.getenv("SILICONFLOW_API_KEY")
         if not self.api_key:
             raise ValueError("API密钥未设置。请通过参数传入或设置环境变量 SILICONFLOW_API_KEY")
-        self.max_frames = min(video_config.DEFAULT_MAX_FRAMES, 8)
+        self.max_frames = video_config.DEFAULT_MAX_FRAMES
+        self.long_video_threshold = 600  # 10分钟 = 600秒
         self.tags_file = tags_file or file_config.VOCABULARY_TAGS_FILE
         self.verbose = verbose
         self.vocabulary_tags = self._load_vocabulary_tags()
@@ -133,12 +134,14 @@ class VideoAnalyzerLocalModelAdult:
     def extract_frames(self, video_path: str, num_frames: int = None, 
                       interval_seconds: float = 3.0) -> List[str]:
         """
-        从视频中提取帧，限制最大30帧
+        从视频中提取帧
+        - 超过10分钟的视频：按每分钟1帧，最多30帧
+        - 10分钟以内的视频：固定8帧
         
         Args:
             video_path: 视频文件路径
-            num_frames: 指定提取的帧数（如果为None则根据interval_seconds计算）
-            interval_seconds: 帧间隔时间（秒）
+            num_frames: 指定提取的帧数（如果为None则根据时长动态计算）
+            interval_seconds: 帧间隔时间（秒），仅当num_frames为None且视频较短时使用
             
         Returns:
             base64编码的帧图片列表
@@ -169,8 +172,10 @@ class VideoAnalyzerLocalModelAdult:
                 print(f"视频信息: 总帧数={total_frames}, FPS={fps:.2f}, 时长={duration:.2f}秒")
             
             if num_frames is None:
-                calculated_frames = max(1, int(duration / interval_seconds))
-                num_frames = min(calculated_frames, self.max_frames)
+                if duration > self.long_video_threshold:
+                    num_frames = min(max(1, int(duration / 60)), self.max_frames)
+                else:
+                    num_frames = min(8, self.max_frames)
             else:
                 num_frames = min(num_frames, self.max_frames)
             
@@ -615,8 +620,8 @@ def main():
                        help="分析结果输出目录")
     parser.add_argument("--api-url", type=str, default="https://api.siliconflow.cn",
                        help="API地址，默认: https://api.siliconflow.cn")
-    parser.add_argument("--model", type=str, default="Qwen/Qwen3-VL-8B-Instruct",
-                       help="模型名称，默认: Qwen/Qwen3-VL-8B-Instruct")
+    parser.add_argument("--model", type=str, default="Qwen/Qwen3-VL-30B-A3B-Instruct",
+                       help="模型名称，默认: Qwen/Qwen3-VL-30B-A3B-Instruct")
     parser.add_argument("--api-key", type=str, default=None,
                        help="API密钥，也可通过环境变量 SILICONFLOW_API_KEY 设置")
     parser.add_argument("--tags-file", type=str, default=None,
