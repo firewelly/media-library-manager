@@ -48,6 +48,9 @@ media-library.app/
 .idea/
 *.swp
 *.swo
+
+# 爬取结果文件
+results/
 *~
 
 # 系统文件
