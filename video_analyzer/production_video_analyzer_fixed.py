@@ -19,13 +19,15 @@ import re
 from datetime import datetime
 from typing import List, Dict, Any, Optional
 
-from video_analyzer_siliconflow_glm_with_tags import VideoAnalyzerSiliconFlowGLMWithTags
+from video_analyzer_local_model_adult import VideoAnalyzerLocalModelAdult
+from video_analyzer_pipeline import PipelineVideoAnalyzer
 
 
 class ProductionVideoAnalyzer:
     """Production版本视频分析器"""
     
-    def __init__(self, db_path: str, output_dir: str = None, verbose: bool = True, api_key: str = None):
+    def __init__(self, db_path: str, output_dir: str = None, verbose: bool = True, 
+                 api_key: str = None, use_pipeline: bool = False, max_workers: int = 3):
         """
         初始化分析器
         
@@ -34,19 +36,34 @@ class ProductionVideoAnalyzer:
             output_dir: 输出目录，默认为当前脚本目录
             verbose: 是否显示详细信息
             api_key: API密钥
+            use_pipeline: 是否使用流水线模式
+            max_workers: 流水线模式下API并行数
         """
         self.db_path = db_path
         self.verbose = verbose
         self.processed_count = 0
         self.success_count = 0
         self.error_count = 0
+        self.use_pipeline = use_pipeline
+        self.max_workers = max_workers
         
-        # 设置默认API密钥
-        default_api_key = None
         self.api_key = api_key or os.environ.get('SILICONFLOW_API_KEY')
         
-        # 初始化分析器
-        self.analyzer = VideoAnalyzerSiliconFlowGLMWithTags(verbose=verbose, api_key=self.api_key)
+        if use_pipeline:
+            self.pipeline_analyzer = PipelineVideoAnalyzer(
+                api_base_url="https://api.siliconflow.cn",
+                model_name="Qwen/Qwen3-VL-8B-Instruct",
+                api_key=self.api_key,
+                num_frames=8,
+                max_api_workers=max_workers,
+                verbose=verbose
+            )
+        else:
+            self.analyzer = VideoAnalyzerLocalModelAdult(
+                api_base_url="https://api.siliconflow.cn",
+                model_name="Qwen/Qwen3-VL-8B-Instruct",
+                verbose=verbose
+            )
         
         # 设置输出目录
         if output_dir:
@@ -207,32 +224,6 @@ class ProductionVideoAnalyzer:
         except Exception as e:
             self.log_message(f"查询数据库失败: {e}")
             return []
-    
-    def extract_tags_from_analysis(self, analysis_text: str) -> List[str]:
-        """
-        从分析结果中提取标签
-        
-        Args:
-            analysis_text: 分析文本
-            
-        Returns:
-            标签列表
-        """
-        if not analysis_text:
-            return []
-        
-        # 查找匹配标签部分
-        match = re.search(r'匹配标签[：:]\s*([^\n]+)', analysis_text)
-        if match:
-            tags_text = match.group(1).strip()
-            # 清理标签文本
-            tags_text = re.sub(r'[\n\r\t]', '', tags_text)
-            tags_text = tags_text.replace('、', ',').replace('，', ',')
-            # 分割标签并清理空白
-            tags = [tag.strip() for tag in tags_text.split(',') if tag.strip()]
-            return tags
-        
-        return []
     
     def extract_description_from_analysis(self, analysis_text: str) -> str:
         """
@@ -406,16 +397,14 @@ class ProductionVideoAnalyzer:
         start_time = time.time()
         
         try:
-            # 进行视频分析
-            result = self.analyzer.analyze_video(video_path, num_frames=20)
+            result = self.analyzer.analyze_video(video_path, num_frames=8)
             
             analysis_time = time.time() - start_time
             
             if result.get('success', False):
                 analysis_text = result.get('analysis', '')
                 
-                # 提取标签和描述
-                tags = self.extract_tags_from_analysis(analysis_text)
+                tags = self.analyzer.extract_tags_from_analysis(analysis_text)
                 description = self.extract_description_from_analysis(analysis_text)
                 
                 self.log_message(f"分析成功，提取到 {len(tags)} 个标签: {', '.join(tags[:5])}{'...' if len(tags) > 5 else ''}")
@@ -450,6 +439,61 @@ class ProductionVideoAnalyzer:
             self.error_count += 1
             return False
     
+    def process_batch_pipeline(self, videos: List[Dict[str, Any]]) -> int:
+        """
+        使用流水线模式批量处理视频
+        
+        Args:
+            videos: 视频列表
+            
+        Returns:
+            成功处理的数量
+        """
+        valid_videos = []
+        for video in videos:
+            if os.path.exists(video['path']):
+                valid_videos.append({
+                    'id': video['id'],
+                    'path': video['path'],
+                    'title': video.get('title', '')
+                })
+            else:
+                self.log_message(f"跳过不存在的文件: {video['path']}")
+                self.save_to_csv(video, [], "", 0, "文件不存在")
+                self.error_count += 1
+        
+        if not valid_videos:
+            self.log_message("没有有效的视频文件")
+            return 0
+        
+        self.log_message(f"流水线模式: 处理 {len(valid_videos)} 个视频，API并行数={self.max_workers}")
+        
+        def progress_callback(stage, task):
+            if stage == 'frame_extracted':
+                self.log_message(f"帧提取完成: ID={task.video_id}")
+            elif stage == 'api_completed':
+                video_info = next((v for v in videos if v['id'] == task.video_id), None)
+                if video_info:
+                    analysis_time = task.end_time - task.start_time if task.end_time > task.start_time else 0
+                    
+                    if task.api_error:
+                        self.log_message(f"API失败: ID={task.video_id} - {task.api_error}")
+                        self.save_to_csv(video_info, [], "", analysis_time, task.api_error)
+                        self.error_count += 1
+                    else:
+                        self.log_message(f"API成功: ID={task.video_id} - 标签: {task.final_tags}")
+                        self.save_tags_to_database(task.video_id, task.final_tags, task.final_description)
+                        self.save_to_csv(video_info, task.final_tags, task.final_description, analysis_time)
+                        self.success_count += 1
+                    
+                    self.processed_count += 1
+        
+        self.pipeline_analyzer.progress_callback = progress_callback
+        
+        completed_tasks = self.pipeline_analyzer.analyze_videos(valid_videos)
+        
+        return self.success_count
+    
     def run(self, limit: int = None, folder: str = None):
         """运行分析流程
         
@@ -478,22 +522,22 @@ class ProductionVideoAnalyzer:
         
         self.log_message(f"准备分析 {len(videos)} 个视频{folder_info}")
         
-        # 初始化CSV文件
         self.initialize_csv()
         
-        # 处理每个视频
         total_videos = len(videos)
         self.log_message(f"开始处理 {total_videos} 个视频")
         
-        for i, video in enumerate(videos, 1):
-            self.log_message(f"进度: {i}/{total_videos}")
-            
-            success = self.process_single_video(video)
-            self.processed_count += 1
-            
-            # 每处理10个视频显示一次统计
-            if i % 10 == 0 or i == total_videos:
-                self.log_message(f"已处理: {self.processed_count}, 成功: {self.success_count}, 失败: {self.error_count}")
+        if self.use_pipeline:
+            self.process_batch_pipeline(videos)
+        else:
+            for i, video in enumerate(videos, 1):
+                self.log_message(f"进度: {i}/{total_videos}")
+                
+                success = self.process_single_video(video)
+                self.processed_count += 1
+                
+                if i % 10 == 0 or i == total_videos:
+                    self.log_message(f"已处理: {self.processed_count}, 成功: {self.success_count}, 失败: {self.error_count}")
         
         # 最终统计
         self.log_message("=" * 50)
@@ -531,21 +575,23 @@ def main():
     parser.add_argument('--limit', type=int, help='限制处理的视频数量（用于测试）')
     parser.add_argument('--api-key', help='SiliconFlow API密钥，如果未提供则从环境变量SILICONFLOW_API_KEY获取')
     parser.add_argument('--all', action='store_true', help='跳过交互模式，直接处理所有文件夹')
+    parser.add_argument('--pipeline', action='store_true', help='使用流水线模式（帧提取串行+API并行）')
+    parser.add_argument('--workers', type=int, default=3, help='流水线模式下API并行数（默认3）')
     
     args = parser.parse_args()
     
-    # 检查数据库文件是否存在
     if not os.path.exists(args.db):
         print(f"错误: 数据库文件不存在: {args.db}")
         print("请确保数据库文件存在，或使用 --db 参数指定正确的数据库路径")
         sys.exit(1)
     
-    # 创建分析器
     analyzer = ProductionVideoAnalyzer(
         db_path=args.db,
         output_dir=args.output,
         verbose=args.verbose,
-        api_key=args.api_key
+        api_key=args.api_key,
+        use_pipeline=args.pipeline,
+        max_workers=args.workers
     )
     
     # 获取所有可用文件夹

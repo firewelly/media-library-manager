@@ -5,10 +5,11 @@
 ## 目录结构
 
 - `production_video_analyzer_fixed.py`：生产分析主脚本，负责从数据库读取未标记视频，调用分析器执行分析，写入数据库与生成 CSV 报告。
-- `video_analyzer_siliconflow_glm_with_tags.py`：基于 SiliconFlow GLM-4.1V-9B-Thinking 的视频帧分析器，包含标签判定逻辑与提示词生成。
+- `video_analyzer_local_model_adult.py`：基于 SiliconFlow Qwen3-VL-8B-Instruct 的视频帧分析器，包含标签判定逻辑与提示词生成。
+- `video_analyzer_pipeline.py`：流水线分析器，帧提取串行+API调用并行，最大化资源利用率。
+- `adapter.py`：GUI桥接层，为 media_library.py 提供统一的视频分析接口。
 - `video_integrity.py`：视频完整性检查工具，提供基础可播放与 seeking 跳转检测，避免损坏文件导致卡死。
-- `config.py`：统一配置文件，提供 API、视频处理与文件路径等配置项。
-- `vocabulary_tags.txt`：标签词汇表，分析器会从此文件加载可判定的标签集合。
+- `vocabulary_tags.txt`：标签词汇表（122个标签），分析器会从此文件加载可判定的标签集合。
 - `requirements_video_analyzer.txt`：运行所需的 Python 包。
 
 ## 环境要求
@@ -27,17 +28,26 @@ pip install -r requirements_video_analyzer.txt -i https://pypi.tuna.tsinghua.edu
 
 ## 配置说明
 
-- API 相关（`config.py` 中的 `APIConfig`）：
-  - `SILICONFLOW_BASE_URL`：`https://api.siliconflow.cn/v1`
-  - `SILICONFLOW_GLM_MODEL`：`THUDM/GLM-4.1V-9B-Thinking`
-  - `MAX_RETRIES`、`RETRY_DELAY`：请求重试控制
-- 视频处理（`VideoConfig`）：
-  - `DEFAULT_MAX_FRAMES`：默认最大分析帧数
-  - `DEFAULT_INTERVAL_SECONDS`：帧抽取间隔秒数
-  - `ENABLE_INTEGRITY_CHECK`、`INTEGRITY_SEEK_TEST`（按需使用）：完整性与跳转检测
-- 文件路径（`FileConfig`）：
-  - `VOCABULARY_TAGS_FILE`：`vocabulary_tags.txt`
-  - 输出目录默认使用脚本所在目录或运行参数指定的 `--output`
+- API 相关：
+  - API地址：`https://api.siliconflow.cn`
+  - 模型：`Qwen/Qwen3-VL-8B-Instruct`
+- 视频处理：
+  - 默认分析帧数：8帧（优化后，避免context超限）
+  - 图片压缩：宽度640px，最大0.4MB
+  - 标签数量：最多7个（特殊特征优先）
+- 分析规则：
+  - **只关注女性主角特征，完全忽略男性人物**
+  - 流水线模式：边完成边写入数据库（中断不丢失）
+
+## 标签优先级
+
+```
+特殊特征（最高） → 哺乳、乳汁、孕妇、萝莉、人妖
+服装特征         → 黑丝、制服、情趣装、丝袜、眼镜
+情节特征         → 偷情、出轨、调教、绿帽
+人物特征         → 少妇、人妻、熟女、巨乳
+行为特征（最低） → 自慰、口交、后入、内射
+```
 
 ## API 密钥
 
@@ -64,15 +74,19 @@ export SILICONFLOW_API_KEY="你的SiliconFlow密钥"
    ```bash
    python3 production_video_analyzer_fixed.py --db "/path/to/media_library.db" --all --verbose
    ```
-4. 限制处理数量用于测试
+4. 使用流水线模式（推荐，速度提升3-5倍）
+   ```bash
+   python3 production_video_analyzer_fixed.py --db "/path/to/media_library.db" --pipeline --workers 5 --verbose
+   ```
+5. 限制处理数量用于测试
    ```bash
    python3 production_video_analyzer_fixed.py --db "/path/to/media_library.db" --limit 5 --verbose
    ```
-5. 指定输出目录
+6. 指定输出目录
    ```bash
    python3 production_video_analyzer_fixed.py --db "/path/to/media_library.db" --output "./outputs" --verbose
    ```
-6. 直接传入 API Key
+7. 直接传入 API Key
    ```bash
    python3 production_video_analyzer_fixed.py --db "/path/to/media_library.db" --api-key "your_api_key" --verbose
    ```
@@ -85,11 +99,13 @@ export SILICONFLOW_API_KEY="你的SiliconFlow密钥"
 - `--limit`：限制处理的视频数量（测试用）。
 - `--api-key`：显式传入 SiliconFlow API 密钥。
 - `--all`：跳过交互模式，直接处理所有在线管理文件夹。
+- `--pipeline`：使用流水线模式（帧提取串行+API并行），推荐开启，速度提升3-5倍。
+- `--workers`：流水线模式下API并行数（默认3，建议5-10）。
 
 ## 标签词汇表
 
-- 编辑 `vocabulary_tags.txt` 可调整可判定标签集合。
-- 分析器会在提示词中动态嵌入标签，并在返回结果末尾生成“匹配标签：标签1、标签2…”的行，主脚本会解析该行并写入数据库与 CSV。
+- 编辑 `vocabulary_tags.txt` 可调整可判定标签集合（当前122个标签）。
+- 分析器会在提示词中动态嵌入标签，并在返回结果末尾生成"匹配标签：标签1、标签2…"的行，主脚本会解析该行并写入数据库与 CSV。
 
 ## 输出与结果
 
@@ -97,13 +113,15 @@ export SILICONFLOW_API_KEY="你的SiliconFlow密钥"
   - 字段：视频ID、标题、文件路径、标签数量、标签列表、描述、分析时间、错误信息等
 - 日志：`analysis_log.txt`
 - 数据库：将标签与描述写回 `videos` 表（字段：`tags`、`description`），并记录更新时间。
+- **流水线模式：边完成边写入数据库，中断后已完成的标签保留**
 
 ## 常见问题
 
-- 运行报错“数据库文件不存在”：检查 `--db` 指定路径是否有效。
-- “未找到需要分析的视频”：确保 `videos` 表中存在在线且无标签的视频记录；或切换到 `--all` 模式并确认 `folders` 表中的在线文件夹。
+- 运行报错"数据库文件不存在"：检查 `--db` 指定路径是否有效。
+- "未找到需要分析的视频"：确保 `videos` 表中存在在线且无标签的视频记录；或切换到 `--all` 模式并确认 `folders` 表中的在线文件夹。
 - API 调用失败：检查 `SILICONFLOW_API_KEY` 是否正确、网络是否可达，必要时稍后重试。
 - 视频读取失败或卡死：`video_integrity.py` 的完整性与跳转检测可过滤有问题的视频文件。
+- 中断后重新运行：已打标签的视频会自动跳过，无需担心重复处理。
 
 ## 调用关系图（主程序视角）
 
@@ -118,7 +136,7 @@ graph TD
     F --> G[initialize_csv()]
     G --> H[遍历视频列表]
     H --> I[process_single_video(video)]
-    I --> J[VideoAnalyzerSiliconFlowGLMWithTags.analyze_video(video_path, num_frames=20)]
+    I --> J[VideoAnalyzerLocalModelAdult.analyze_video(video_path, num_frames=8)]
     J --> K[SiliconFlow API /chat/completions]
     K --> L[返回 analysis_text]
     L --> M[extract_tags_from_analysis]
@@ -136,7 +154,7 @@ sequenceDiagram
     participant User as 用户
     participant Main as production_video_analyzer_fixed.py
     participant PV as ProductionVideoAnalyzer
-    participant VA as GLM分析器
+    participant VA as Qwen分析器
     participant SF as SiliconFlow API
     participant DB as SQLite数据库
     participant CSV as CSV文件
@@ -147,7 +165,7 @@ sequenceDiagram
     PV->>PV: get_videos_without_tags(folder?)
     PV->>PV: initialize_csv()
     PV->>PV: for video in videos: process_single_video(video)
-    PV->>VA: analyze_video(video_path, num_frames=20)
+    PV->>VA: analyze_video(video_path, num_frames=8)
     VA->>VA: extract_frames()
     VA->>SF: POST /chat/completions（携带提示词与帧）
     SF-->>VA: 返回分析文本与使用信息
