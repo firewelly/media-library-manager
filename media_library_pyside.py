@@ -1156,32 +1156,43 @@ class MediaLibraryCore:
         except Exception as e:
             return False, f"清理失败: {str(e)}"
 
-    def auto_tag_video(self, video_path):
-        """自动为视频生成标签"""
+    def auto_tag_video(self, video_path, use_retry=False):
+        """自动为视频生成标签
+        
+        Args:
+            video_path: 视频文件路径
+            use_retry: 是否启用重试模式（首次失败后用30帧随机采样重试，再失败标记<无标签>）
+        """
         try:
-            # 延迟导入
             from video_analyzer import VideoContentAnalyzer
             analyzer = VideoContentAnalyzer(db_path=self.db_path)
             
             if not os.path.exists(video_path):
                 return False, "文件不存在"
-                
-            result = analyzer.analyze_video_content(video_path, min_frames=100, max_interval=10, max_frames=300)
             
-            if 'error' in result:
+            if use_retry:
+                result = analyzer.analyze_video_content_with_retry(video_path)
+            else:
+                result = analyzer.analyze_video_content(video_path, min_frames=100, max_interval=10, max_frames=300)
+            
+            if 'error' in result and not result.get('no_tag'):
                 return False, result['error']
-                
-            tags = result.get('generated_tags', [])
-            if not tags:
-                return True, "未生成标签"
             
-            # 获取现有标签
             self.cursor.execute("SELECT id, tags FROM videos WHERE file_path = ?", (video_path,))
             res = self.cursor.fetchone()
             if not res:
                 return False, "数据库记录未找到"
                 
             video_id, existing_tags = res
+            
+            if result.get('no_tag'):
+                self.cursor.execute("UPDATE videos SET tags = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?", ('<无标签>', video_id))
+                self.conn.commit()
+                return True, "标记为<无标签>"
+            
+            tags = result.get('generated_tags', [])
+            if not tags:
+                return True, "未生成标签"
             
             existing_set = set([t.strip() for t in (existing_tags or "").split(",") if t.strip()])
             new_set = set(tags)
@@ -1192,7 +1203,8 @@ class MediaLibraryCore:
             self.cursor.execute("UPDATE videos SET tags = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?", (final_tags, video_id))
             self.conn.commit()
             
-            return True, f"已添加标签: {', '.join(tags)}"
+            retry_mark = " (30帧重试成功)" if result.get('retry_used') else ""
+            return True, f"已添加标签: {', '.join(tags)}{retry_mark}"
             
         except ImportError:
             return False, "未找到 video_analyzer 模块"
@@ -5539,17 +5551,33 @@ class MainWindow(QMainWindow):
             self.show_error("错误", f"批量自动更新所有标签失败: {e}")
 
     def on_batch_auto_tag_no_tags(self):
-        """批量标注没有标签的文件"""
-        try:
-            result = self.advanced_tools_manager.batch_auto_tag_no_tags()
-            if result['status'] == 'success':
-                self.show_info("成功", f"所有视频都已有关标签")
-            elif result['status'] == 'info':
-                self.show_info("提示", f"{result['message']}\n\n此功能需要视频内容分析器模块支持。")
-            else:
-                self.show_error("错误", f"批量标注没有标签的文件失败: {result['message']}")
-        except Exception as e:
-            self.show_error("错误", f"批量标注没有标签的文件失败: {e}")
+        """批量标注没有标签的文件（带重试：首次失败用30帧随机采样重试，再失败标记<无标签>）"""
+        import sqlite3
+        cursor = self.core.cursor
+        cursor.execute("""
+            SELECT v.id, v.file_path, v.file_name FROM videos v
+            WHERE (v.tags IS NULL OR v.tags = '')
+        """)
+        all_videos = cursor.fetchall()
+        videos = [(vid, path, name) for vid, path, name in all_videos
+                  if path and os.path.exists(path) and os.path.isfile(path)]
+
+        if not videos:
+            self.show_info("提示", "没有找到需要处理的无标签在线视频")
+            return
+
+        if not self.ask_yes_no("确认批量标注", f"共找到 {len(videos)} 个无标签的在线视频。\n将使用自动分析+30帧随机重试模式标注，无法识别的将标记为<无标签>。\n此操作可能需要较长时间，是否继续？"):
+            return
+
+        def tag_func(item, cb):
+            success, msg = self.core.auto_tag_video(item['path'], use_retry=True)
+            if not success:
+                raise Exception(msg)
+            return msg
+
+        self.batch_process_task("批量标注无标签视频", 
+                               [{'id': v[0], 'path': v[1], 'name': v[2]} for v in videos],
+                               tag_func, "批量标注完成")
 
     def on_batch_clean_filenames(self):
         """批量清理文件名"""
