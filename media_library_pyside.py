@@ -7,6 +7,26 @@ PySide6版本的媒体库管理器
 
 import sys
 import os
+try:
+    from dotenv import load_dotenv
+    load_dotenv(os.path.join(os.path.dirname(__file__), '.env'))
+except ImportError:
+    env_path = os.path.join(os.path.dirname(__file__), '.env')
+    if os.path.exists(env_path):
+        try:
+            with open(env_path, 'r', encoding='utf-8') as f:
+                for line in f:
+                    s = line.strip()
+                    if not s or s.startswith('#') or '=' not in s:
+                        continue
+                    k, v = s.split('=', 1)
+                    k = k.strip()
+                    v = v.strip().strip('"').strip("'")
+                    if k and v and (k not in os.environ):
+                        os.environ[k] = v
+        except Exception:
+            pass
+
 import time
 import sqlite3
 import threading
