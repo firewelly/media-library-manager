@@ -18,6 +18,7 @@
 - **`javdb_actor_all.py`**: 演员作品全量爬虫，支持抓取指定演员的所有作品、磁力链接，并支持断点续传。
 - **`actor_crawler_with_db.py`**: 演员资料爬虫，抓取演员头像及详细资料并存入数据库。
 - **`javbus_crawler_single.py`**: JavBus 源的抓取工具，作为数据补充。
+- **`javsp_*.py` (JavSP 系统)**: **[三级回退备选]** 多源爬虫系统，集成了 JavBus、JavLibrary、AvSox、FC2 等多个数据源。当主爬虫无法获取完整信息时自动降级使用，通过 `javsp_integration.py` 与媒体库无缝集成。
 
 ### 📦 媒体库维护与更新
 - **`smart_video_updater.py`**: **[核心维护]** 智能更新工具。支持 NAS 路径映射，可利用预计算的 MD5 CSV 文件加速大型媒体库的导入和更新。
@@ -65,11 +66,11 @@ cd /Users/firewell/bin/media/video_analyzer && python3 production_video_analyzer
 #### 标签优先级
 
 ```
-特殊特征（最高）→ 哺乳、乳汁、孕妇、萝莉、人妖
-服装特征         → 黑丝、制服、情趣装、丝袜、眼镜
-情节特征         → 偷情、出轨、调教、绿帽
-人物特征         → 少妇、人妻、熟女、巨乳
-行为特征（最低） → 自慰、口交、后入、内射
+特殊特征（最高）→ 如：体型特征、身体状态类标签
+服装特征         → 如：衣着、配饰类标签
+情节特征         → 如：剧情、关系类标签
+人物特征         → 如：身份、年龄、体态类标签
+行为特征（最低） → 如：动作、互动类标签
 ```
 
 ---
@@ -149,6 +150,67 @@ python3 test_refresh_by_code.py [番号]
 2. 为避免被JAVDB的反爬机制阻止，工具会在操作之间添加随机延迟
 3. 使用专用的浏览器用户数据目录保存登录状态，路径为：`~/.javdb_scraper/user_data`
 4. 刷新操作可能需要一些时间，具体取决于需要更新的视频数量
+
+## 🧩 JavSP 多源爬虫系统集成
+
+JavSP 是一套多源爬虫系统，作为本项目的核心数据补充层。当 JAVDB 主爬虫无法获取完整信息时，JavSP 提供三级回退策略，统一管理 JavBus、JavLibrary、AvSox、FC2 等多个数据源。
+
+### 🔄 三级回退策略
+
+```
+JavDB (主爬虫) → JavBus (备用1) → JavSP (备用2，含 JavLib/AvSox/FC2)
+```
+
+### 📦 JavSP 模块组成
+
+| 文件 | 说明 |
+|------|------|
+| `javsp_integration.py` | JavSP 与媒体库的集成接口，封装搜索与数据保存 |
+| `javsp_crawler_manager.py` | 多源爬虫管理器，统一调度 JavBus/JavLib/AvSox/FC2 |
+| `javsp_base.py` | 网络请求基础模块（代理、CloudScraper、重试） |
+| `javsp_config.py` / `javsp_config.yaml` | 爬虫配置（代理、优先级、超时、缓存） |
+| `javsp_config_manager.py` | YAML 配置加载与管理 |
+| `javsp_datatype.py` | 通用影片数据类型 (`MovieInfo` dataclass) |
+| `javsp_javbus.py` | JavBus 爬虫实现 |
+| `javsp_javlib.py` | JavLibrary 爬虫实现 |
+| `javsp_avsox.py` | AvSox 爬虫实现 |
+| `javsp_fc2.py` | FC2 爬虫实现 |
+| `utils/javsp_copy.py` | JavSP 视频信息复制工具 |
+| `utils/javsp_migration.py` | JavSP 视频迁移工具 |
+
+### 🔧 核心功能
+
+- **多源并行搜索**：并发查询多个数据源，取最优结果
+- **智能回退**：某源失败后自动切换到备用源
+- **数据清洗**：自动清理标题中的推广关键词
+- **统一数据类型**：所有源返回统一的 `MovieInfo` 格式
+- **代理支持**：自动应用 SOCKS5 代理（macOS/Linux: `127.0.0.1:1080`，Windows: `127.0.0.1:8800`）
+
+### ⚙️ 配置示例（`javsp_config.yaml`）
+
+```yaml
+crawlers:
+  enabled:
+    - "javbus"
+    - "javlib"
+    - "avsox"
+    - "fc2"
+  priority:
+    javbus: 1
+    javlib: 2
+    avsox: 3
+    fc2: 4
+```
+
+### 📖 GUI 集成
+
+在主程序 GUI 中，可通过以下入口使用 JavSP 功能：
+- **详情页按钮**"获取JAV信息"触发单番号搜索
+- **菜单**"批量导入JAV信息"批量处理无标题视频
+- **工具菜单**"JAV信息面板"手动输入番号获取信息
+- 搜索进度显示在状态栏，异常以弹窗提示
+
+---
 
 ## 🧩 按番号复制与填充工具
 
@@ -265,6 +327,9 @@ python media_library_pyside.py
 - `requests` - 网络请求
 - `beautifulsoup4` - HTML解析
 - `selenium` - 网页自动化
+- `PyYAML` - JavSP 配置解析
+- `cloudscraper` - JavSP CloudFlare 绕过
+- `lxml` - JavSP HTML 解析
 
 ## 📖 使用指南
 
@@ -435,18 +500,24 @@ python media_library_pyside.py
 ### 项目结构
 ```
 media-library/
-├── media_library.py         # Tkinter 主程序
-├── media_library_pyside.py  # PySide6 主程序
-├── utils/                   # 核心工具库
-│   ├── batch_ops.py         # 批量操作管理器
-│   ├── maintenance.py       # 维护工具管理器
-│   ├── thumbnails.py        # 缩略图生成器
+├── media_library.py              # Tkinter 主程序
+├── media_library_pyside.py       # PySide6 主程序
+├── javsp_*.py                    # JavSP多源爬虫系统
+├── javsp_config.yaml             # JavSP 配置文件
+├── javdb_*.py                    # JAVDB 爬虫模块
+├── utils/                        # 核心工具库
+│   ├── batch_ops.py              # 批量操作管理器
+│   ├── maintenance.py            # 维护工具管理器
+│   ├── thumbnails.py             # 缩略图生成器
+│   ├── javsp_copy.py             # JavSP 复制工具
+│   ├── javsp_migration.py        # JavSP 迁移工具
 │   └── ...
-├── init_database.py         # 数据库初始化
-├── gui_config.json          # 界面配置
-├── requirements.txt         # 依赖包列表
-├── start_media_library.sh   # 启动脚本
-└── README.md                # 项目说明
+├── doc/                          # 完整文档体系
+├── init_database.py              # 数据库初始化
+├── gui_config.json               # 界面配置
+├── requirements.txt              # 依赖包列表
+├── start_media_library.sh        # 启动脚本
+└── README.md                     # 项目说明
 ```
 
 ## 📄 许可证

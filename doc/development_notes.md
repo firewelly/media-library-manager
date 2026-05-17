@@ -121,7 +121,7 @@
 /Users/firewell/Library/CloudStorage/OneDrive-个人/bioinfo/media/
 ├── media_library.py          # 核心逻辑文件
 ├── test_nfo_mapping.py      # 测试脚本（新建）
-└── .doc/                    # 文档目录（新建）
+└── doc/                     # 文档目录（新建）
     ├── javdb_title_mapping_analysis.md
     ├── javdb_title_mapping_solutions.md
     ├── project_documentation_index.md

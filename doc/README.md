@@ -156,7 +156,7 @@ media_library.py
 ### 技术支持
 - **代码位置**：`/Users/firewell/Library/CloudStorage/OneDrive-个人/bioinfo/media/`
 - **核心文件**：`media_library.py`, `test_nfo_mapping.py`
-- **文档位置**：`.doc/`目录
+- **文档位置**：`doc/`目录
 - **问题反馈**：通过项目Issue系统
 
 ### 相关资源

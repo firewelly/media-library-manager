@@ -204,7 +204,7 @@
 - **主要开发者**：AI Assistant
 - **代码位置**：`/Users/firewell/Library/CloudStorage/OneDrive-个人/bioinfo/media/`
 - **核心文件**：`media_library.py`, `test_nfo_mapping.py`
-- **文档位置**：`.doc/`目录
+- **文档位置**：`doc/`目录
 
 ### 相关文档
 1. [NFO导入功能使用指南](./nfo_import_guide.md)
