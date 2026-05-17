@@ -8571,38 +8571,43 @@ class MediaLibrary:
                     failed = 0
                     
                     for i, video_path in enumerate(video_paths):
-                        # 检查是否取消
                         if progress_window.cancelled:
                             break
                         
                         try:
-                            # 更新进度（在GUI线程中安全更新）
                             file_name = os.path.basename(video_path)
-                            progress_num = i + 1
-                            def update_progress(p=progress_num, f=file_name):
-                                progress_window.update_progress(p, f"正在分析: {f}")
-                            self.root.after(0, update_progress)
+                            
+                            def show_analyzing(f=file_name, idx=i, total=len(video_paths)):
+                                progress_window.current_file_label.config(text=f"正在分析 ({idx+1}/{total}): {f}")
+                                progress_window.update_status(f"正在分析: {f}")
+                            self.root.after(0, show_analyzing)
                             
                             if not os.path.exists(video_path):
                                 print(f"[{i+1}/{len(video_paths)}] ✗ 文件不存在，跳过: {file_name}")
                                 failed += 1
+                                progress_num = processed + failed
+                                def show_skip(p=progress_num, f=file_name):
+                                    progress_window.update_progress(p, f"跳过: {f}", success=False)
+                                self.root.after(0, show_skip)
                                 continue
                             
                             print(f"[{i+1}/{len(video_paths)}] 分析视频: {file_name}")
                             
-                            # 分析视频内容
                             analysis_result = analyzer.analyze_video_content(video_path, min_frames=100, max_interval=10, max_frames=300)
                             
                             if 'error' in analysis_result:
                                 print(f"   ✗ 分析失败: {analysis_result['error']}")
                                 failed += 1
+                                progress_num = processed + failed
+                                def show_fail(p=progress_num, f=file_name):
+                                    progress_window.update_progress(p, f"失败: {f}", success=False)
+                                self.root.after(0, show_fail)
                                 continue
                             
                             generated_tags = analysis_result['generated_tags']
                             print(f"   ✓ 分析完成")
                             print(f"   生成标签：{', '.join(generated_tags) if generated_tags else '无'}")
                             
-                            # 查找视频记录
                             self.cursor.execute("SELECT id, tags FROM videos WHERE file_path = ?", (video_path,))
                             video_record = self.cursor.fetchone()
                             
@@ -8613,14 +8618,11 @@ class MediaLibrary:
                             video_id, existing_tags = video_record
                             print(f"   现有标签：{existing_tags or '无'}")
                             
-                            # 更新标签
                             if generated_tags:
-                                # 获取现有标签
                                 existing_set = set([tag.strip() for tag in (existing_tags or '').split(',') if tag.strip()])
                                 new_set = set(generated_tags)
                                 all_tags = existing_set.union(new_set)
                                 
-                                # 更新数据库
                                 final_tags = ', '.join(sorted(all_tags))
                                 self.cursor.execute(
                                     "UPDATE videos SET tags = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
@@ -8629,13 +8631,23 @@ class MediaLibrary:
                                 self.conn.commit()
                                 
                                 print(f"   ✓ 标签已更新: {final_tags}")
-                                processed += 1
                             else:
                                 print(f"   - 未生成新标签")
+                            
+                            processed += 1
+                            progress_num = processed + failed
+                            def show_done(p=progress_num, f=file_name, tags=generated_tags):
+                                tag_info = f" ({', '.join(tags[:3])}{'...' if len(tags) > 3 else ''})" if tags else ""
+                                progress_window.update_progress(p, f"已完成: {f}{tag_info}", success=True)
+                            self.root.after(0, show_done)
                                 
                         except Exception as e:
                             print(f"   ✗ 处理失败: {str(e)}")
                             failed += 1
+                            progress_num = processed + failed
+                            def show_error(p=progress_num, f=file_name):
+                                progress_window.update_progress(p, f"错误: {f}", success=False)
+                            self.root.after(0, show_error)
                     
                     # 关闭进度窗口（在GUI线程中安全关闭）
                     self.root.after(0, progress_window.close)
@@ -8797,54 +8809,51 @@ class MediaLibrary:
                     failed = 0
                     updated = 0
                     
-                    for i, (video_id, file_path, title, current_tags) in enumerate(videos, 1):
+                    for i, (video_id, file_path, title, current_tags) in enumerate(videos):
                         if progress_window.is_cancelled():
                             break
                             
                         current_file = os.path.basename(file_path)
-                        progress_callback(i-1, len(videos), f"正在处理: {current_file}")
+                        progress_window.update_status(f"正在分析 ({i+1}/{len(videos)}): {current_file}")
                         
                         if not os.path.exists(file_path):
                             print(f"文件不存在，跳过: {current_file}")
                             failed += 1
-                            progress_window.update_progress(i, f"跳过: {current_file}", success=False)
+                            progress_window.update_progress(processed + failed, f"跳过: {current_file}", success=False)
                             continue
                         
                         try:
-                            # 分析视频内容
                             analysis_result = analyzer.analyze_video_content(file_path, min_frames=100, max_interval=10, max_frames=300)
                             
                             if 'error' in analysis_result:
                                 print(f"分析失败: {current_file} - {analysis_result['error']}")
                                 failed += 1
-                                progress_window.update_progress(i, f"失败: {current_file}", success=False)
+                                progress_window.update_progress(processed + failed, f"失败: {current_file}", success=False)
                                 continue
                             
-                            processed += 1
                             generated_tags = analysis_result['generated_tags']
                             
                             if generated_tags:
-                                # 合并现有标签和新标签
                                 existing_tags = set(tag.strip() for tag in (current_tags or '').split(',') if tag.strip())
                                 new_tags = set(generated_tags)
                                 all_tags = existing_tags.union(new_tags)
                                 
-                                # 更新标签
                                 tags_str = ', '.join(sorted(all_tags))
                                 self.cursor.execute("UPDATE videos SET tags = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?", (tags_str, video_id))
                                 self.conn.commit()
                                 
                                 print(f"已更新标签: {current_file} - {', '.join(generated_tags)}")
                                 updated += 1
-                                progress_window.update_progress(i, f"已完成: {current_file}", success=True)
-                            else:
-                                print(f"未生成标签: {current_file}")
-                                progress_window.update_progress(i, f"已完成: {current_file}", success=True)
+                            
+                            processed += 1
+                            progress_num = processed + failed
+                            tag_info = f" ({', '.join(generated_tags[:3])}{'...' if len(generated_tags) > 3 else ''})" if generated_tags else ""
+                            progress_window.update_progress(progress_num, f"已完成: {current_file}{tag_info}", success=True)
                                 
                         except Exception as e:
                             print(f"处理失败: {current_file} - {str(e)}")
                             failed += 1
-                            progress_window.update_progress(i, f"错误: {current_file}", success=False)
+                            progress_window.update_progress(processed + failed, f"错误: {current_file}", success=False)
                     
                     # 等待一下让用户看到完成状态
                     time.sleep(1)

@@ -4786,14 +4786,18 @@ class MainWindow(QMainWindow):
                 if cancel_check():
                     break
 
+                item_name = item.get('name', '')
+                progress_callback(f"正在处理 ({i+1}/{total}): {item_name}", int((i / total) * 100))
+
                 try:
                     msg = task_func(item, progress_callback)
                     success_count += 1
+                    progress = int(((i + 1) / total) * 100)
+                    progress_callback(f"已完成: {item_name}", progress)
                 except Exception as e:
-                    failed_items.append(f"{item.get('name', 'Unknown')}: {str(e)}")
-                
-                progress = int(((i + 1) / total) * 100)
-                progress_callback(f"正在处理: {item.get('name', '')}", progress)
+                    failed_items.append(f"{item_name}: {str(e)}")
+                    progress = int(((i + 1) / total) * 100)
+                    progress_callback(f"失败: {item_name}", progress)
 
             return {
                 "success": success_count,
