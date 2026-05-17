@@ -17,6 +17,7 @@ except ImportError:
 import base64
 import json
 import os
+import random
 import requests
 from typing import List, Dict, Any, Optional
 import time
@@ -258,6 +259,94 @@ class VideoAnalyzerLocalModelAdult:
                 print(f"成功提取 {len(frames_base64)} 帧")
             return frames_base64
             
+        finally:
+            cap.release()
+
+    def extract_frames_random(self, video_path: str, num_frames: int = 30) -> List[str]:
+        """
+        从视频中随机分布提取指定数量的帧
+        用于重分析场景：当均匀采样无法获得有效标签时，尝试随机采样获取更多内容
+        
+        Args:
+            video_path: 视频文件路径
+            num_frames: 提取帧数，默认30
+            
+        Returns:
+            base64编码的帧图片列表
+        """
+        if not os.path.exists(video_path):
+            raise FileNotFoundError(f"视频文件不存在: {video_path}")
+
+        try:
+            enable_check = getattr(video_config, 'ENABLE_INTEGRITY_CHECK', True)
+            seek_test = getattr(video_config, 'INTEGRITY_SEEK_TEST', True)
+        except Exception:
+            enable_check, seek_test = True, True
+        if enable_check:
+            ok = check_video_integrity(video_path, seek_test=seek_test)
+            if not ok:
+                raise ValueError(f"视频完整性检查未通过: {video_path}")
+
+        cap = cv2.VideoCapture(video_path)
+        if not cap.isOpened():
+            raise ValueError(f"无法打开视频文件: {video_path}")
+
+        try:
+            total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+            fps = cap.get(cv2.CAP_PROP_FPS)
+            duration = total_frames / fps if fps > 0 else 0
+
+            if self.verbose:
+                print(f"随机帧提取: 总帧数={total_frames}, FPS={fps:.2f}, 时长={duration:.2f}秒, 目标帧数={num_frames}")
+
+            if total_frames <= 1 or duration <= 1.0:
+                frame_indices = [total_frames // 2]
+            elif num_frames >= total_frames:
+                frame_indices = sorted(random.sample(range(total_frames), min(num_frames, total_frames)))
+            else:
+                margin = total_frames * 0.05
+                start = int(margin)
+                end = int(total_frames - margin)
+                usable_range = end - start
+                if usable_range <= num_frames:
+                    frame_indices = sorted(random.sample(range(start, end), min(num_frames, usable_range)))
+                else:
+                    frame_indices = sorted(random.sample(range(start, end), num_frames))
+
+            overall_deadline = time.time() + 60
+            max_failures = 8
+            consecutive_failures = 0
+            frames_base64 = []
+
+            for frame_idx in frame_indices:
+                if time.time() >= overall_deadline:
+                    if self.verbose:
+                        print("随机帧提取达到超时，提前结束")
+                    break
+
+                cap.set(cv2.CAP_PROP_POS_FRAMES, frame_idx)
+                ret, frame = cap.read()
+
+                if ret:
+                    consecutive_failures = 0
+                    _, buffer = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 85])
+                    compressed_data = self._compress_image(buffer.tobytes())
+                    frame_base64 = base64.b64encode(compressed_data).decode('utf-8')
+                    frames_base64.append(frame_base64)
+                    if self.verbose:
+                        time_point = frame_idx / fps if fps and fps > 0 else 0
+                        print(f"随机提取第 {frame_idx} 帧 (时间: {time_point:.2f}s)")
+                else:
+                    consecutive_failures += 1
+                    if self.verbose:
+                        print(f"警告: 无法读取第 {frame_idx} 帧 (连续失败 {consecutive_failures}/{max_failures})")
+                    if consecutive_failures >= max_failures:
+                        break
+
+            if self.verbose:
+                print(f"随机帧提取完成: 成功 {len(frames_base64)}/{len(frame_indices)} 帧")
+            return frames_base64
+
         finally:
             cap.release()
 

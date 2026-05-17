@@ -8823,17 +8823,27 @@ class MediaLibrary:
                             continue
                         
                         try:
-                            analysis_result = analyzer.analyze_video_content(file_path, min_frames=100, max_interval=10, max_frames=300)
+                            if mode == "no_tags_update":
+                                analysis_result = analyzer.analyze_video_content_with_retry(file_path)
+                            else:
+                                analysis_result = analyzer.analyze_video_content(file_path, min_frames=100, max_interval=10, max_frames=300)
                             
-                            if 'error' in analysis_result:
+                            if 'error' in analysis_result and not analysis_result.get('no_tag'):
                                 print(f"分析失败: {current_file} - {analysis_result['error']}")
                                 failed += 1
                                 progress_window.update_progress(processed + failed, f"失败: {current_file}", success=False)
                                 continue
                             
-                            generated_tags = analysis_result['generated_tags']
+                            generated_tags = analysis_result.get('generated_tags', [])
                             
-                            if generated_tags:
+                            if analysis_result.get('no_tag'):
+                                self.cursor.execute("UPDATE videos SET tags = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?", ('<无标签>', video_id))
+                                self.conn.commit()
+                                print(f"标记为<无标签>: {current_file}")
+                                processed += 1
+                                progress_num = processed + failed
+                                progress_window.update_progress(progress_num, f"无标签: {current_file} (已标记)", success=True)
+                            elif generated_tags:
                                 existing_tags = set(tag.strip() for tag in (current_tags or '').split(',') if tag.strip())
                                 new_tags = set(generated_tags)
                                 all_tags = existing_tags.union(new_tags)
@@ -8844,11 +8854,15 @@ class MediaLibrary:
                                 
                                 print(f"已更新标签: {current_file} - {', '.join(generated_tags)}")
                                 updated += 1
-                            
-                            processed += 1
-                            progress_num = processed + failed
-                            tag_info = f" ({', '.join(generated_tags[:3])}{'...' if len(generated_tags) > 3 else ''})" if generated_tags else ""
-                            progress_window.update_progress(progress_num, f"已完成: {current_file}{tag_info}", success=True)
+                                processed += 1
+                                progress_num = processed + failed
+                                retry_mark = " (重试成功)" if analysis_result.get('retry_used') else ""
+                                tag_info = f" ({', '.join(generated_tags[:3])}{'...' if len(generated_tags) > 3 else ''}){retry_mark}"
+                                progress_window.update_progress(progress_num, f"已完成: {current_file}{tag_info}", success=True)
+                            else:
+                                processed += 1
+                                progress_num = processed + failed
+                                progress_window.update_progress(progress_num, f"已完成: {current_file} (未生成标签)", success=True)
                                 
                         except Exception as e:
                             print(f"处理失败: {current_file} - {str(e)}")
