@@ -80,3 +80,5 @@ JAVDB 爬虫系统是媒体库管理器的核心组件之一，负责从 JAVDB �
 | `database_extension.py` | 数据库扩展脚本（创建所有JAVDB相关表） |
 | `code_extractor.py` | 番号提取工具 |
 | `config.py` | 系统配置 |
+
+> 📚 **相关文档已统一移至 `doc/` 目录**，包括：JAVDB爬虫系统设计文档、README_JAVDB_IMPROVEMENTS.md、README_javdb_information_updater.md、README_javdb_login_helper.md、javdb_actor_all_help.md、javdb_title_mapping_analysis.md、javdb_title_mapping_solutions.md、FIELD_MAPPING.md、keywords_mapping.md 等。

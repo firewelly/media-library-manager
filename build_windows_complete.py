@@ -64,7 +64,7 @@ def pyinstaller_cmd(script: Path, name: str, is_main=False):
     add_data(ROOT / "vocabulary_tags.txt", ".")
     add_data(ROOT / "javsp_config.yaml", ".")
     add_data(ROOT / "README.md", ".")
-    add_data(ROOT / "USER_MANUAL.md", ".")
+    add_data(ROOT / ".doc" / "USER_MANUAL.md", ".")
     
     # 添加 utils 目录作为数据
     utils_dir = ROOT / "utils"

@@ -93,7 +93,7 @@ def collect_scripts():
 
 def copy_external_assets():
     ASSETS_DIR.mkdir(parents=True, exist_ok=True)
-    for rel in ["gui_config.json", "javsp_config.yaml", "vocabulary_tags.txt", "USER_MANUAL.md"]:
+    for rel in ["gui_config.json", "javsp_config.yaml", "vocabulary_tags.txt", "doc/USER_MANUAL.md"]:
         src = ROOT / rel
         if src.exists():
             shutil.copy2(src, ASSETS_DIR / src.name)
@@ -112,7 +112,7 @@ def copy_external_assets():
 
 def stage_runtime_files():
     BIN_DIR.mkdir(parents=True, exist_ok=True)
-    for rel in ["gui_config.json", "javsp_config.yaml", "vocabulary_tags.txt", "USER_MANUAL.md"]:
+    for rel in ["gui_config.json", "javsp_config.yaml", "vocabulary_tags.txt", "doc/USER_MANUAL.md"]:
         src = ROOT / rel
         if src.exists():
             shutil.copy2(src, BIN_DIR / src.name)
