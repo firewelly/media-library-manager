@@ -256,6 +256,23 @@ def process_folder(
 
     cur = conn.cursor()
 
+    # 0) 预先填充MD5缓存：将数据库中已有MD5的记录预填到缓存，避免重复计算
+    if enable_md5 and cache is not None:
+        for row in db_rows:
+            md5 = row["md5_hash"] or ""
+            if not md5:
+                continue
+            p = row["file_path"]
+            if not p:
+                continue
+            try:
+                st = os.stat(p)
+                key = f"{p}|{int(st.st_mtime)}|{st.st_size}"
+                if key not in cache:
+                    cache[key] = md5
+            except OSError:
+                pass
+
     # 0) 预先补齐该文件夹范围内缺失的MD5（串行计算，支持进度显示）
     if enable_md5:
         md5_updates: List[Tuple[str, int]] = []  # (md5, id)
@@ -300,6 +317,16 @@ def process_folder(
                         "UPDATE videos SET file_size = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
                         (size, row["id"]),
                     )
+            # 将已有记录的MD5预填到缓存，下次即使记录被误删也可跳过文件读取
+            if enable_md5 and cache is not None:
+                md5_existing = row["md5_hash"] or ""
+                if md5_existing:
+                    try:
+                        ck = cache_key_for(path)
+                        if ck and ck not in cache:
+                            cache[ck] = md5_existing
+                    except Exception:
+                        pass
             continue
 
         # 不在该路径：可能是新建或移动
@@ -395,12 +422,16 @@ def process_folder(
                 )
 
     # 2) 处理数据库中记录：磁盘不存在的视为删除
+    # 注意：os.walk 可能因 NAS 延迟/权限问题跳过部分文件
+    # 此处二次确认文件确实不存在再删除，避免误删后下次重新扫描
     if delete_missing:
         for row in db_rows:
             p = row["file_path"]
             if not p:
                 continue
             if p not in disk_by_path:
+                if os.path.exists(p):
+                    continue
                 stats.deleted_count += 1
                 if not dry_run:
                     cur.execute("DELETE FROM videos WHERE id = ?", (row["id"],))
