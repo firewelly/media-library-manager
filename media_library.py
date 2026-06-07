@@ -45,6 +45,7 @@ import io
 import tempfile
 import json
 import time
+import copy
 import cv2
 from send2trash import send2trash
 import sys
@@ -385,24 +386,104 @@ class MediaLibrary:
             if os.path.exists(self.config_path):
                 with open(self.config_path, 'r', encoding='utf-8') as f:
                     saved_config = json.load(f)
-                    self.column_config = saved_config.get('columns', self.default_columns.copy())
+                    self.column_config = self._sanitize_column_config(saved_config.get('columns'))
             else:
-                self.column_config = self.default_columns.copy()
+                self.column_config = self._clone_default_columns()
         except Exception as e:
             print(f"加载配置失败: {e}")
-            self.column_config = self.default_columns.copy()
+            self.column_config = self._clone_default_columns()
+
+    def _clone_default_columns(self):
+        """深拷贝默认列配置，避免运行时修改污染默认值。"""
+        return copy.deepcopy(self.default_columns)
+
+    def _sanitize_column_config(self, saved_columns=None):
+        """
+        规范化列配置。
+
+        - 缺失列回退到默认值
+        - 非法宽度回退并强制不小于最小宽度
+        - 位置字段重新归一化，避免重复/越界导致顺序异常
+        """
+        min_width = 50
+        config = self._clone_default_columns()
+
+        if not isinstance(saved_columns, dict):
+            return config
+
+        requested_positions = []
+        for index, (col_name, default_cfg) in enumerate(config.items()):
+            saved_cfg = saved_columns.get(col_name, {})
+            if not isinstance(saved_cfg, dict):
+                saved_cfg = {}
+
+            raw_width = saved_cfg.get('width', default_cfg['width'])
+            try:
+                width = int(raw_width)
+            except (TypeError, ValueError):
+                width = default_cfg['width']
+            config[col_name]['width'] = max(min_width, width)
+
+            raw_position = saved_cfg.get('position', default_cfg['position'])
+            try:
+                position = int(raw_position)
+            except (TypeError, ValueError):
+                position = default_cfg['position']
+            requested_positions.append((position, index, col_name))
+
+        for new_pos, (_, _, col_name) in enumerate(sorted(requested_positions)):
+            config[col_name]['position'] = new_pos
+
+        return config
+
+    def _get_current_treeview_widths(self):
+        """读取当前 Treeview 的列宽。"""
+        if not hasattr(self, 'video_tree') or not self.video_tree.winfo_exists():
+            return {}
+        return {col: int(self.video_tree.column(col, 'width')) for col in self.video_tree['columns']}
+
+    def _sync_current_treeview_widths_to_config(self):
+        """将当前界面的列宽同步回配置，避免重建时回退到旧宽度。"""
+        current_widths = self._get_current_treeview_widths()
+        if not current_widths:
+            return
+
+        for col, width in current_widths.items():
+            if col in self.column_config:
+                self.column_config[col]['width'] = max(50, int(width))
+
+    def _configure_treeview_columns(self, tree_widget, columns):
+        """统一配置 Treeview 列，关闭自动拉伸，防止单列调整牵连全表列宽。"""
+        for col_name in columns:
+            config = self.column_config[col_name]
+            # 排序统一由双击表头触发，避免单击/拖拽/调宽时误触发表头命令。
+            tree_widget.heading(col_name, text=config['text'])
+            width = max(50, int(config['width']))
+            tree_widget.column(col_name, width=width, minwidth=50, stretch=False)
+
+    def _refresh_sort_heading_labels(self):
+        """刷新列标题上的排序箭头显示。"""
+        if not hasattr(self, 'video_tree') or not self.video_tree.winfo_exists():
+            return
+
+        for col in self.video_tree['columns']:
+            config = self.column_config[col]
+            if getattr(self, 'sort_column_name', None) == col:
+                arrow = " ↓" if getattr(self, 'sort_reverse', False) else " ↑"
+                self.video_tree.heading(col, text=config['text'] + arrow)
+            else:
+                self.video_tree.heading(col, text=config['text'])
+
+    def _column_widths_changed(self):
+        """检测当前列宽是否相对上一次记录发生变化。"""
+        current_widths = self._get_current_treeview_widths()
+        if not current_widths:
+            return False
+        return current_widths != getattr(self, '_last_column_widths', {})
     
     def save_column_config(self):
-        """保存列配置"""
+        """保存列配置到文件（不读取 Treeview 的列宽度）"""
         try:
-            # 获取当前列宽度
-            if hasattr(self, 'video_tree'):
-                for col in self.video_tree['columns']:
-                    if col in self.column_config:
-                        current_width = self.video_tree.column(col, 'width')
-                        # 直接保存用户调整的列宽，不做任何限制
-                        self.column_config[col]['width'] = current_width
-            
             config = {'columns': self.column_config}
             with open(self.config_path, 'w', encoding='utf-8') as f:
                 json.dump(config, f, ensure_ascii=False, indent=2)
@@ -411,14 +492,20 @@ class MediaLibrary:
     
     def setup_column_drag(self):
         """设置列拖拽功能"""
-        # 拖拽状态变量
-        self.drag_data = {'dragging': False, 'start_col': None, 'start_x': 0}
-        
+        # 拖拽状态变量，包含 start_region 用于区分调整列宽和拖拽列顺序
+        self.drag_data = {'dragging': False, 'start_col': None, 'start_x': 0, 'start_region': None}
+
         # 注意：右键菜单绑定在create_gui中统一处理，避免冲突
     
     def on_drag_start(self, event):
         """开始拖拽"""
         region = self.video_tree.identify_region(event.x, event.y)
+
+        # 如果是分隔线区域（调整列宽），不启动拖拽逻辑
+        if region == "separator":
+            self.drag_data = {'dragging': False, 'start_col': None, 'start_x': 0, 'start_region': None}
+            return
+
         if region == "heading":
             column = self.video_tree.identify_column(event.x)
             if column:
@@ -429,14 +516,15 @@ class MediaLibrary:
                         'dragging': True,
                         'start_col': col_name,
                         'start_x': event.x,
-                        'current_col': col_name
+                        'current_col': col_name,
+                        'start_region': region
                     }
                     # 改变鼠标样式
                     self.video_tree.config(cursor="hand2")
                     return "break"  # 阻止事件继续传播
         else:
             # 如果不是表头区域，重置拖拽状态
-            self.drag_data = {'dragging': False, 'start_col': None, 'start_x': 0}
+            self.drag_data = {'dragging': False, 'start_col': None, 'start_x': 0, 'start_region': None}
     
     def on_drag_motion(self, event):
         """拖拽过程中"""
@@ -458,7 +546,13 @@ class MediaLibrary:
         if self.drag_data['dragging']:
             # 恢复鼠标样式
             self.video_tree.config(cursor="")
-            
+
+            # 只有从 heading 区域开始的拖拽才执行列交换
+            # 如果是从 separator 开始的（调整列宽），则不交换列
+            if self.drag_data.get('start_region') != 'heading':
+                self.drag_data = {'dragging': False, 'start_col': None, 'start_x': 0, 'start_region': None}
+                return
+
             # 检查是否需要移动列
             region = self.video_tree.identify_region(event.x, event.y)
             if region == "heading":
@@ -468,16 +562,18 @@ class MediaLibrary:
                     if 0 <= col_index < len(self.video_tree['columns']):
                         target_col = self.video_tree['columns'][col_index]
                         start_col = self.drag_data['start_col']
-                        
+
                         if target_col != start_col:
                             # 执行列移动
                             self.swap_columns(start_col, target_col)
-            
+
             # 重置拖拽状态
-            self.drag_data = {'dragging': False, 'start_col': None, 'start_x': 0}
+            self.drag_data = {'dragging': False, 'start_col': None, 'start_x': 0, 'start_region': None}
     
     def swap_columns(self, col1, col2):
         """交换两列的位置"""
+        self._sync_current_treeview_widths_to_config()
+
         pos1 = self.column_config[col1]['position']
         pos2 = self.column_config[col2]['position']
         
@@ -531,6 +627,8 @@ class MediaLibrary:
     
     def move_column(self, col_name, direction):
         """移动列位置"""
+        self._sync_current_treeview_widths_to_config()
+
         current_pos = self.column_config[col_name]['position']
         new_pos = current_pos + direction
         
@@ -554,6 +652,8 @@ class MediaLibrary:
     
     def recreate_treeview(self):
         """重新创建表格视图"""
+        self._sync_current_treeview_widths_to_config()
+
         # 保存当前选中项
         selected_items = self.video_tree.selection()
         selected_values = []
@@ -589,13 +689,7 @@ class MediaLibrary:
         self.video_tree = ttk.Treeview(list_frame, columns=columns, show='headings', height=15, selectmode='extended')
 
         # 设置列标题和宽度
-        for col_name in columns:
-            config = self.column_config[col_name]
-            self.video_tree.heading(col_name, text=config['text'],
-                                  command=lambda c=col_name: self.sort_column(c))
-            # 确保列宽不会过小，最小宽度为50
-            width = max(config['width'], 50)
-            self.video_tree.column(col_name, width=width, minwidth=50)
+        self._configure_treeview_columns(self.video_tree, columns)
 
         # 初始化排序状态 - 默认按创建时间降序排列
         if not hasattr(self, 'sort_column_name'):
@@ -622,21 +716,24 @@ class MediaLibrary:
         # 重新绑定事件
         self.setup_column_drag()
         self.video_tree.bind('<<TreeviewSelect>>', self.on_video_select)
-        
-        # 绑定列宽调整事件
-        self.video_tree.bind('<ButtonRelease-1>', self.on_column_resize_end)
+
+        # 绑定列宽调整事件和拖拽结束事件（统一处理）
+        self.video_tree.bind('<ButtonRelease-1>', self.on_button_release)
         # 初始化列宽记录
         self._last_column_widths = {}
         self._is_dragging_column = False
         for col in columns:
             self._last_column_widths[col] = self.video_tree.column(col, 'width')
-        
+
         # 绑定双击事件（使用专门的处理方法）
         self.video_tree.bind('<Double-1>', self.handle_double_click)
-        
+
         # 绑定单击事件
         self.video_tree.bind('<Button-1>', self.handle_single_click)
-        
+
+        # 绑定拖拽过程事件
+        self.video_tree.bind('<B1-Motion>', self.on_drag_motion)
+
         # 右键菜单绑定 - 支持不同平台，统一处理
         if platform.system() == "Darwin":  # macOS
             self.video_tree.bind('<Button-2>', self.handle_right_click)  # macOS右键
@@ -646,31 +743,42 @@ class MediaLibrary:
         
         # 重新加载数据
         self.load_videos()
+        self._refresh_sort_heading_labels()
         
         # 恢复滚动位置
         self.root.after(100, lambda: self.video_tree.yview_moveto(scroll_top))
     
-    def on_column_resize_end(self, event):
+    def on_column_resize_end(self, event=None):
         """列宽调整结束后保存配置"""
         try:
-            region = self.video_tree.identify_region(event.x, event.y)
-            if region == "separator":
-                # 延迟保存以确保获取最新宽度
-                if hasattr(self, '_resize_after_id'):
-                    self.root.after_cancel(self._resize_after_id)
-                self._resize_after_id = self.root.after(100, self.save_column_config_after_resize)
+            # 无论释放点是否还停留在 separator，都按实际宽度变化来保存
+            if hasattr(self, '_resize_after_id'):
+                self.root.after_cancel(self._resize_after_id)
+            self._resize_after_id = self.root.after(100, self.save_column_config_after_resize)
         except Exception as e:
             print(f"Error in on_column_resize_end: {e}")
+
+    def on_button_release(self, event):
+        """统一处理鼠标释放事件：同时处理列宽调整和列拖拽结束"""
+        try:
+            if self._column_widths_changed():
+                self.on_column_resize_end()
+
+            # 处理列拖拽结束（只有在 heading 区域开始的拖拽才执行）
+            if self.drag_data.get('dragging', False) and self.drag_data.get('start_region') == 'heading':
+                self.on_drag_end(event)
+        except Exception as e:
+            print(f"Error in on_button_release: {e}")
 
     def save_column_config_after_resize(self):
         """延迟保存以确保获取最新宽度"""
         try:
-            current_widths = {col: self.video_tree.column(col, 'width') for col in self.video_tree['columns']}
+            current_widths = self._get_current_treeview_widths()
             
             # 更新配置中的列宽
             for col, width in current_widths.items():
                 if col in self.column_config:
-                    self.column_config[col]['width'] = width
+                    self.column_config[col]['width'] = max(50, int(width))
             
             # 保存配置
             self.save_column_config()
@@ -684,6 +792,8 @@ class MediaLibrary:
     def sort_column(self, col):
         """排序列"""
         try:
+            self._sync_current_treeview_widths_to_config()
+
             # 确定排序方向
             if self.sort_column_name == col:
                 self.sort_reverse = not self.sort_reverse
@@ -711,14 +821,7 @@ class MediaLibrary:
             for index, (val, item) in enumerate(data):
                 self.video_tree.move(item, '', index)
 
-            # 更新列标题显示排序方向
-            for column in self.video_tree['columns']:
-                if column == col:
-                    direction = ' ↓' if self.sort_reverse else ' ↑'
-                    text = self.column_config[column]['text'] + direction
-                else:
-                    text = self.column_config[column]['text']
-                self.video_tree.heading(column, text=text)
+            self._refresh_sort_heading_labels()
                 
         except Exception as e:
             print(f"Error in sort_column for column {col}: {e}")
@@ -726,7 +829,7 @@ class MediaLibrary:
     def reset_gui_layout(self):
         """重置界面布局"""
         if messagebox.askyesno("确认重置", "确定要重置界面布局到默认设置吗？"):
-            self.column_config = self.default_columns.copy()
+            self.column_config = self._clone_default_columns()
             self.recreate_treeview()
             self.save_column_config()
             messagebox.showinfo("重置完成", "界面布局已重置为默认设置")
@@ -748,6 +851,12 @@ class MediaLibrary:
     
     def on_closing(self):
         """窗口关闭时保存配置"""
+        # 在关闭前读取当前列宽度并更新 column_config
+        try:
+            self._sync_current_treeview_widths_to_config()
+        except Exception as e:
+            print(f"读取列宽度失败: {e}")
+
         self.save_column_config()
         self.root.destroy()
         
@@ -1130,13 +1239,7 @@ class MediaLibrary:
         self.video_tree = ttk.Treeview(list_frame, columns=columns, show='headings', height=15, selectmode='extended')
         
         # 设置列标题和宽度，添加排序功能
-        for col_name in columns:
-            config = self.column_config[col_name]
-            self.video_tree.heading(col_name, text=config['text'], 
-                                  command=lambda c=col_name: self.sort_column(c))
-            # 确保列宽不会过小，最小宽度为50
-            width = max(config['width'], 50)
-            self.video_tree.column(col_name, width=width, minwidth=50)
+        self._configure_treeview_columns(self.video_tree, columns)
         
         # 绑定列拖拽事件
         self.setup_column_drag()
@@ -1154,27 +1257,26 @@ class MediaLibrary:
         v_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
         h_scrollbar.pack(side=tk.BOTTOM, fill=tk.X, before=self.video_tree)
         
-        # 绑定列宽调整事件
-        self.video_tree.bind('<ButtonRelease-1>', self.on_column_resize_end)
+        # 绑定列宽调整事件和拖拽结束事件（统一处理）
+        self.video_tree.bind('<ButtonRelease-1>', self.on_button_release)
         # 初始化列宽记录
         self._last_column_widths = {}
         self._is_dragging_column = False
         for col in columns:
             self._last_column_widths[col] = self.video_tree.column(col, 'width')
-        
+
         # 绑定选择事件
         self.video_tree.bind('<<TreeviewSelect>>', self.on_video_select)
-        
+
         # 绑定双击事件（使用专门的处理方法）
         self.video_tree.bind('<Double-1>', self.handle_double_click)
-        
+
         # 绑定单击事件
         self.video_tree.bind('<Button-1>', self.handle_single_click)
-        
-        # 绑定拖拽事件
+
+        # 绑定拖拽过程事件
         self.video_tree.bind('<B1-Motion>', self.on_drag_motion)
-        self.video_tree.bind('<ButtonRelease-1>', self.on_drag_end)
-        
+
         # 右键菜单绑定 - 支持不同平台，统一处理
         if platform.system() == "Darwin":  # macOS
             self.video_tree.bind('<Button-2>', self.handle_right_click)  # macOS右键
@@ -3276,8 +3378,7 @@ class MediaLibrary:
         
         # 处理表头点击（拖拽开始）
         if region == "heading":
-            self.on_drag_start(event)
-            return
+            return self.on_drag_start(event)
             
         # 处理数据行点击
         self.on_tree_click(event)
@@ -6421,6 +6522,8 @@ class MediaLibrary:
     
     def sort_column(self, col_name):
         """双击列标题排序"""
+        self._sync_current_treeview_widths_to_config()
+
         # 如果点击的是同一列，则切换排序方向
         if self.sort_column_name == col_name:
             self.sort_reverse = not self.sort_reverse
@@ -6428,17 +6531,9 @@ class MediaLibrary:
             self.sort_column_name = col_name
             self.sort_reverse = False
         
-        # 更新列标题显示排序方向
-        for col in self.video_tree['columns']:
-            config = self.column_config[col]
-            if col == col_name:
-                arrow = " ↓" if self.sort_reverse else " ↑"
-                self.video_tree.heading(col, text=config['text'] + arrow)
-            else:
-                self.video_tree.heading(col, text=config['text'])
-        
         # 重新加载并排序数据
         self.load_videos()
+        self._refresh_sort_heading_labels()
     
     def on_search(self, event=None):
         """搜索事件"""
