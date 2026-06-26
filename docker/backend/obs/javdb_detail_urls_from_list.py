@@ -730,7 +730,7 @@ def main():
         if not links:
             print("未从输入文件获得任何URL，退出。")
             return
-        # 域名归一：将可能的旧域名（如 javdb.com）统一替换成 javdb565.com
+        # 域名归一：将可能的旧域名统一替换成当前配置中的直连/代理域名
         try:
             links = [normalize_javdb_url(u, use_proxy) for u in links]
         except Exception:

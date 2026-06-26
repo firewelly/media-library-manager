@@ -123,7 +123,9 @@ class JavdbActorRepair:
         try:
             self.base_url = _cfg.get_javdb_base_url(use_proxy)
         except Exception:
-            self.base_url = ('https://javdb.com' if use_proxy else 'https://javdb565.com')
+            proxy_domain = getattr(_cfg, 'JAVDB_PROXY_DOMAIN', 'javdb.com')
+            direct_domain = getattr(_cfg, 'JAVDB_DIRECT_DOMAIN', 'javdb573.com')
+            self.base_url = f"https://{proxy_domain if use_proxy else direct_domain}"
         # URL规范化方法（浏览用）：将任意 javdb 域统一改为当前 base_url 域
         def _norm(url):
             try:
@@ -387,7 +389,7 @@ class JavdbActorRepair:
             if not self.driver:
                 return None
         try:
-            # 浏览用：将URL域名统一到当前base_url（无代理为javdb565.com，有代理为javdb.com）
+            # 浏览用：将 URL 域名统一到当前 base_url（无代理为配置中的直连域名，有代理为 javdb.com）
             browse_url = self._normalize_url(actor_url)
             try:
                 print(f"打开演员页: {browse_url}")

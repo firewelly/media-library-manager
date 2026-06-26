@@ -396,9 +396,8 @@ def process_folder(
                 # 插入包含丰富元数据，并同步抽取视频信息
                 duration, resolution = get_video_info(path)
                 title, stars = parse_title_and_stars(name)
-                md5_val = None
-                if enable_md5:
-                    md5_val = md5_with_cache(path, cache or {})
+                # 新建记录强制计算MD5（去重基础字段），不受enable_md5控制
+                md5_val = md5_with_cache(path, cache or {})
                 cur.execute(
                     """
                     INSERT OR IGNORE INTO videos (

@@ -151,6 +151,63 @@ python3 test_refresh_by_code.py [番号]
 3. 使用专用的浏览器用户数据目录保存登录状态，路径为：`~/.javdb_scraper/user_data`
 4. 刷新操作可能需要一些时间，具体取决于需要更新的视频数量
 
+---
+
+## 📺 NAS JAVDB信息更新器
+
+`nas_javdb_updater.py` 是 `javdb_information_updater.py` 的 NAS 批量更新专用变体，固定使用 Playwright 持久化用户目录（`.playwright_user_data/msedge`），适合后台长时间批量运行。
+
+### 🔧 与 `javdb_information_updater.py` 的区别
+
+| 项目 | `javdb_information_updater.py` | `nas_javdb_updater.py` |
+|------|------|------|
+| 爬虫调用方式 | subprocess 调用 `javdb_crawler_single.py` | 直接 import 调用爬虫函数 |
+| 用户目录 | fresh(临时) + persisted(持久) 轮流尝试 | **仅 persisted** 固定目录 |
+| 浏览器 | msedge + firefox | **仅 msedge** |
+| 登录方式 | 每次运行可能反复要求登录 | 登录一次永久保存 |
+
+### 🖥️ 命令行参数
+
+```bash
+python3 nas_javdb_updater.py [选项]
+```
+
+#### 选项说明
+
+- `--code <番号>`: 按番号刷新特定视频，如 `--code ADN-347`
+- `--refresh-all`: 刷新所有视频信息，包括已更新的视频
+- `--test`: 测试模式
+- `--test-folder <路径>`: 测试文件夹路径
+- `--no-proxy`: 直连模式（不使用 SOCKS5 代理）
+- `--min-delay <秒>`: 最小操作间隔（默认 1）
+- `--max-delay <秒>`: 最大操作间隔（默认 3）
+
+#### 登录机制
+
+当 Playwright 检测到需要登录时，会自动打开有界面浏览器窗口，用户在该窗口中手工完成登录后，登录态会持久化保存到 `.playwright_user_data/msedge/` 目录，后续所有无头模式调用自动复用此会话。
+
+### 🚀 使用示例
+
+#### 批量更新 NAS 文件夹（直连模式，推荐）
+
+```bash
+python3 nas_javdb_updater.py --no-proxy --test --test-folder /Volumes/app/usr
+```
+
+#### 批量脚本（三个 NAS 文件夹依次处理）
+
+参考 `_run_batch_update.py`：
+
+```python
+FOLDERS = {
+    12: "/Volumes/app/usr",
+    16: "/Volumes/HC530_1/JAV_H530",
+    28: "/Volumes/Jav_HDD4",
+}
+for fid, fpath in FOLDERS.items():
+    subprocess.run([sys.executable, "nas_javdb_updater.py", "--no-proxy", "--test", "--test-folder", fpath])
+```
+
 ## 🧩 JavSP 多源爬虫系统集成
 
 JavSP 是一套多源爬虫系统，作为本项目的核心数据补充层。当 JAVDB 主爬虫无法获取完整信息时，JavSP 提供三级回退策略，统一管理 JavBus、JavLibrary、AvSox、FC2 等多个数据源。
