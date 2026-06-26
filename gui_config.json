@@ -27,27 +27,27 @@
     },
     "status": {
       "width": 60,
-      "position": 5,
+      "position": 8,
       "text": "状态"
     },
     "device": {
       "width": 120,
-      "position": 6,
+      "position": 9,
       "text": "设备"
     },
     "duration": {
-      "width": 120,
-      "position": 7,
+      "width": 68,
+      "position": 5,
       "text": "时长"
     },
     "resolution": {
-      "width": 150,
-      "position": 8,
+      "width": 84,
+      "position": 7,
       "text": "分辨率"
     },
     "file_created_time": {
-      "width": 120,
-      "position": 9,
+      "width": 95,
+      "position": 6,
       "text": "创建时间"
     },
     "top_folder": {
@@ -89,11 +89,6 @@
       "width": 200,
       "position": 17,
       "text": "JAVDB标签"
-    },
-    "source_folder": {
-      "width": 150,
-      "position": 7,
-      "text": "来源文件夹"
     }
   }
 }

@@ -1,11 +1,9 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-JAVDB信息更新器 - 批量信息获取功能
-支持列出用户定义的数据文件夹，选择文件夹后批量更新无演员信息的视频
-
-技术栈：通过 subprocess 调用 javdb_crawler_single.py（Playwright优先 + Selenium回退）
-三级回退策略与 GUI 一致：JavDB → JavBus → JavSP
+NAS JAVDB 信息更新器 — 固定使用 Playwright 持久化用户目录
+直接从 javdb_crawler_single.py 调用爬虫（跳过 subprocess），
+强制使用 "persisted" 模式，登录一次永久有效。
 """
 
 import os
@@ -19,7 +17,6 @@ import sqlite3
 import argparse
 from urllib.parse import urlparse, urlunparse, urljoin
 
-# 从配置文件加载代理与域名设置
 from config import (
     SOCKS5_PROXY_HOST,
     SOCKS5_PROXY_PORT,
@@ -32,17 +29,15 @@ from config import (
 )
 from utils.runtime import runtime_dir
 
-# 配置信息（BASE_URL 根据是否使用代理动态设置；默认使用代理）
 USE_PROXY = True
 BASE_URL = get_javdb_base_url(USE_PROXY)
-JAVDB_MAIN_DOMAIN = JAVDB_PROXY_DOMAIN  # javdb.com — 主站域名，作为归一化目标
+JAVDB_MAIN_DOMAIN = JAVDB_PROXY_DOMAIN
 DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'media_library.db')
 COVERS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'results', 'images')
 
 
 # ---------- 工具函数 ----------
 def normalize_to_main_javdb(url: str) -> str:
-    """将 javdb 镜像域名的链接统一归一化到主站 javdb.com"""
     try:
         p = urlparse(url)
         host = (p.netloc or '').lower()
@@ -59,8 +54,9 @@ def normalize_to_main_javdb(url: str) -> str:
         return url
     except Exception:
         return url
+
+
 def random_delay(min_seconds=MIN_DELAY, max_seconds=MAX_DELAY):
-    """随机延迟，模拟人类操作间隔"""
     try:
         delay = min_seconds + (max_seconds - min_seconds) * __import__('random').random()
         time.sleep(delay)
@@ -68,21 +64,10 @@ def random_delay(min_seconds=MIN_DELAY, max_seconds=MAX_DELAY):
         time.sleep(min_seconds)
 
 
-# ---------- 爬虫调用（复用 GUI 模式） ----------
 BLOCKED_TITLES = ['官方App下載', '官方App下载', 'Official App Download']
 
 
-def _build_crawler_cmd(script_name, av_code):
-    """构建爬虫子进程命令（兼容 PyInstaller 打包）"""
-    if getattr(sys, 'frozen', False):
-        exe_name = script_name.replace('.py', '.exe')
-        return [os.path.join(runtime_dir(), exe_name), av_code]
-    else:
-        return [sys.executable, script_name, av_code]
-
-
 def _normalize_actors(maybe_list):
-    """规范化演员列表：统一为 [{name, link}, ...] 格式"""
     normalized = []
     if isinstance(maybe_list, list):
         for item in maybe_list:
@@ -98,103 +83,121 @@ def _normalize_actors(maybe_list):
     return normalized
 
 
+# ---------- 直接调用爬虫（强制 persisted 模式） ----------
+def crawl_with_persisted_profile(av_code, timeout=180):
+    """
+    直接调用 javdb_crawler_single 的爬虫函数，
+    强制使用 "persisted" Playwright 用户目录（不创建临时 fresh 目录）。
+    需要登录时会打开有界面浏览器窗口，手工登录后自动持久化。
+    """
+    # 动态导入并强制 persisted 模式
+    import importlib
+    crawler = importlib.import_module('javdb_crawler_single')
+
+    # 强制：仅持久化目录、仅 msedge、不使用代理、只试配置的主域名
+    from config import JAVDB_DIRECT_DOMAIN
+    original_get_profile_modes = crawler.get_profile_modes
+    original_get_browser_prefs = crawler.get_browser_preferences
+    original_get_url_candidates = crawler.get_base_url_candidates
+    original_use_socks = getattr(crawler, 'USE_SOCKS5_PROXY', None)
+    crawler.get_profile_modes = lambda: ["persisted"]
+    crawler.get_browser_preferences = lambda: ["msedge"]
+    crawler.get_base_url_candidates = lambda use_proxy: [f"https://{JAVDB_DIRECT_DOMAIN}"]
+    if original_use_socks is not None:
+        crawler.USE_SOCKS5_PROXY = False
+
+    try:
+        # 仅调用 Playwright，完全绕过 Selenium 降级
+        result = crawler.crawl_single_video_playwright(av_code)
+    finally:
+        crawler.get_profile_modes = original_get_profile_modes
+        crawler.get_browser_preferences = original_get_browser_prefs
+        crawler.get_base_url_candidates = original_get_url_candidates
+        if original_use_socks is not None:
+            crawler.USE_SOCKS5_PROXY = original_use_socks
+
+    if result:
+        json_result = {
+            'title': result.get('title'),
+            'video_id': result.get('video_id'),
+            'detail_url': result.get('detail_url'),
+            'release_date': result.get('release_date'),
+            'duration': result.get('duration'),
+            'rating': result.get('rating'),
+            'studio': result.get('studio'),
+            'tags': result.get('tags', []),
+            'actors': result.get('actors', []),
+            'cover_image_url': result.get('cover_image_url'),
+            'local_image_path': result.get('local_image_path'),
+            'magnet_links': result.get('magnet_links', [])
+        }
+        return json_result
+    return None
+
+
 def fetch_video_info_with_fallback(av_code, timeout=180):
-    """
-    三级回退获取视频信息（与 GUI 的 gui_fetch_single.py / gui_fetch_batch.py 一致）
-
-    回退顺序：
-        1. JavDB (javdb_crawler_single.py) — Playwright优先 + Selenium回退
-        2. JavBus (javbus_crawler_single.py) — 备用1
-        3. JavSP (javsp_integration)         — 备用2
-
-    Args:
-        av_code: 番号
-        timeout: 单个爬虫超时秒数
-
-    Returns:
-        dict | None: 爬取到的视频信息字典，失败返回 None
-    """
-    cwd_dir = runtime_dir()
+    """三级回退：JavDB(persisted) → JavBus → JavSP"""
     result_data = None
 
-    # ---- 一级：JavDB 优先 ----
+    # ---- 一级：JavDB 持久化模式 ----
     try:
-        cmd = _build_crawler_cmd('javdb_crawler_single.py', av_code)
-        process = subprocess.run(cmd, capture_output=True, text=True, cwd=cwd_dir, timeout=timeout)
-        if process.returncode == 0 and process.stdout:
-            try:
-                parsed = json.loads(process.stdout)
-                if (parsed and not parsed.get('error')
-                        and parsed.get('title')
-                        and parsed.get('title') not in BLOCKED_TITLES):
-                    result_data = parsed
-                    has_actors = isinstance(parsed.get('actors'), list) and len(parsed.get('actors')) > 0
-                    print(f"  JavDB成功" + ("（演员缺失，尝试回退）" if not has_actors else ""))
-                else:
-                    print("  JavDB信息不完整，尝试回退")
-            except json.JSONDecodeError:
-                print("  JavDB解析失败，尝试回退")
+        parsed = crawl_with_persisted_profile(av_code, timeout)
+        if (parsed and not parsed.get('error')
+                and parsed.get('title')
+                and parsed.get('title') not in BLOCKED_TITLES):
+            result_data = parsed
+            has_actors = isinstance(parsed.get('actors'), list) and len(parsed.get('actors')) > 0
+            print(f"  JavDB成功" + ("（演员缺失，尝试回退）" if not has_actors else ""))
         else:
-            stderr_hint = (process.stderr or '')[:200]
-            print(f"  JavDB爬虫失败，尝试回退" + (f" ({stderr_hint})" if stderr_hint else ""))
-    except subprocess.TimeoutExpired:
-        print("  JavDB超时，尝试回退")
+            print("  JavDB信息不完整，尝试回退")
     except Exception as e:
         print(f"  JavDB异常: {e}，尝试回退")
 
-    # ---- 判断是否需要回退（演员缺失时也回退） ----
+    # ---- 二级/三级回退 ----
     need_fallback = not result_data or not (
         isinstance(result_data.get('actors'), list) and len(result_data.get('actors')) > 0
     )
 
     if need_fallback:
-        # ---- 二级：JavBus 回退 ----
+        cwd_dir = runtime_dir()
         used_source = None
+
+        # JavBus
         try:
-            cmd_bus = _build_crawler_cmd('javbus_crawler_single.py', av_code)
+            if getattr(sys, 'frozen', False):
+                cmd_bus = [os.path.join(runtime_dir(), "javbus_crawler_single.exe"), av_code]
+            else:
+                cmd_bus = [sys.executable, "javbus_crawler_single.py", av_code]
             p_bus = subprocess.run(cmd_bus, capture_output=True, text=True, cwd=cwd_dir, timeout=60)
             if p_bus.returncode == 0 and p_bus.stdout:
-                try:
-                    bus_parsed = json.loads(p_bus.stdout)
-                    if bus_parsed and not bus_parsed.get('error'):
-                        result_data = {
-                            'title': bus_parsed.get('title'),
-                            'video_id': bus_parsed.get('number') or av_code,
-                            'detail_url': None,
-                            'release_date': bus_parsed.get('release_date'),
-                            'duration': None,
-                            'rating': None,
-                            'tags': bus_parsed.get('tags') or [],
-                            'actors': _normalize_actors(bus_parsed.get('actors', [])),
-                            'studio': bus_parsed.get('studio'),
-                            'cover_image_url': bus_parsed.get('cover_image_url'),
-                            'local_image_path': bus_parsed.get('cover_image_path'),
-                            'magnet_links': bus_parsed.get('magnet_links', [])
-                        }
-                        used_source = 'javbus'
-                        print("  已切换到 JavBus 数据")
-                    else:
-                        print("  JavBus无有效数据")
-                except json.JSONDecodeError:
-                    print("  JavBus解析失败")
-            else:
-                print("  JavBus爬虫失败")
-        except subprocess.TimeoutExpired:
-            print("  JavBus超时")
+                bus_parsed = json.loads(p_bus.stdout)
+                if bus_parsed and not bus_parsed.get('error'):
+                    result_data = {
+                        'title': bus_parsed.get('title'),
+                        'video_id': bus_parsed.get('number') or av_code,
+                        'detail_url': None,
+                        'release_date': bus_parsed.get('release_date'),
+                        'duration': None, 'rating': None,
+                        'tags': bus_parsed.get('tags') or [],
+                        'actors': _normalize_actors(bus_parsed.get('actors', [])),
+                        'studio': bus_parsed.get('studio'),
+                        'cover_image_url': bus_parsed.get('cover_image_url'),
+                        'local_image_path': bus_parsed.get('cover_image_path'),
+                        'magnet_links': bus_parsed.get('magnet_links', [])
+                    }
+                    used_source = 'javbus'
+                    print("  已切换到 JavBus 数据")
         except Exception:
-            print("  JavBus异常")
+            pass
 
-        # ---- 三级：JavSP 回退 ----
+        # JavSP
         if not used_source:
             try:
                 from javsp_integration import search_javdb_info as javsp_search
                 sp_result = javsp_search(av_code)
                 if sp_result:
                     result_data = sp_result
-                    used_source = 'javsp'
                     print("  已切换到 JavSP 数据")
-                else:
-                    print("  JavSP无有效数据")
             except Exception:
                 print("  JavSP异常，回退结束")
 
@@ -204,12 +207,10 @@ def fetch_video_info_with_fallback(av_code, timeout=180):
 # ---------- 番号提取器 ----------
 class CodeExtractor:
     """番号提取器，基于 javsp 的 get_id 逻辑"""
-
     def __init__(self):
         self.ignore_pattern = re.compile(r'', re.I)
 
     def extract_code_from_filename(self, filename: str) -> str:
-        """从文件路径中提取番号（基于 javsp.javsp.avid.get_id 逻辑）"""
         from pathlib import Path
         filepath = Path(str(filename))
         norm = self.ignore_pattern.sub('', filepath.stem).upper()
@@ -247,62 +248,48 @@ class CodeExtractor:
             if match:
                 return '10musume-' + match.group(2) + '_' + match.group(3)
         else:
-            # 先尝试移除可疑域名再匹配
             no_domain = re.sub(r'\w{3,10}\.(COM|NET|APP|XYZ)', '', norm)
             if no_domain != norm:
                 avid = self.extract_code_from_filename(no_domain)
                 if avid:
                     return avid
-            # 匹配缩写 HEY 的 heydouga
             match = re.search(r'(?:HEY)[-_]*(\d{4})[-_]0?(\d{3,5})', norm)
             if match:
                 return 'heydouga-' + '-'.join(match.groups())
-            # MUGEN 特殊格式
             match = re.search(r'(MKB?D)[-_]*(S\d{2,3})|(MK3D2DBD|S2M|S2MBD)[-_]*(\d{2,3})', norm)
             if match:
                 if match.group(1) is not None:
                     return match.group(1) + '-' + match.group(2)
                 else:
                     return match.group(3) + '-' + match.group(4)
-            # IBW 带 z 后缀
             match = re.search(r'(IBW)[-_](\d{2,5}z)', norm)
             if match:
                 return match.group(1) + '-' + match.group(2)
-            # 普通番号（带分隔符）
             match = re.search(r'([A-Z]{2,10})[-_](\d{2,5})', norm)
             if match:
                 return match.group(1) + '-' + match.group(2)
-            # 东热 red/sky/ex 无分隔符系列
             match = re.search(r'(RED[01]\d\d|SKY[0-3]\d\d|EX00[01]\d)', norm)
             if match:
                 return match.group(1)
-            # 缺失分隔符的普通番号
             match = re.search(r'([A-Z]{2,})(\d{2,5})', norm)
             if match:
                 return match.group(1) + '-' + match.group(2)
-
-        # TMA 特殊格式
         match = re.search(r'(T[23]8[-_]\d{3})', norm)
         if match:
             return match.group(1)
-        # 东热 n/k 系列
         match = re.search(r'(N\d{4}|K\d{4})', norm)
         if match:
             return match.group(1)
-        # R18 格式
         match = re.search(r'R18-?\d{3}', norm)
         if match:
             return match.group(0)
-        # 纯数字番号（无码影片）
         match = re.search(r'(\d{6}[-_]\d{2,3})', norm)
         if match:
             return match.group(1)
-        # )()( 分隔
         if ')(' in str(filepath):
             avid = self.extract_code_from_filename(str(filepath).replace(')(', '-'))
             if avid:
                 return avid
-        # 回退到父文件夹名称
         parent = filepath.parent
         if parent and parent.name:
             avid = self.extract_code_from_filename(parent.name)
@@ -312,10 +299,16 @@ class CodeExtractor:
 
 
 # ---------- 数据库操作 ----------
+def _get_db():
+    """创建 WAL 模式数据库连接，避免与 GUI 长连接锁冲突"""
+    conn = sqlite3.connect(DB_PATH, timeout=30)
+    conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("PRAGMA busy_timeout=30000")
+    return conn
+
 def get_user_defined_folders():
-    """获取用户定义的数据文件夹列表"""
     try:
-        conn = sqlite3.connect(DB_PATH)
+        conn = _get_db()
         cursor = conn.cursor()
         cursor.execute("SELECT folder_path, folder_type FROM folders WHERE is_active = 1")
         folders = cursor.fetchall()
@@ -327,15 +320,12 @@ def get_user_defined_folders():
 
 
 def get_videos_to_update(folder_path=None, refresh_all=False, filter_by_code=None):
-    """获取需要更新JAVDB信息的视频列表"""
     try:
-        conn = sqlite3.connect(DB_PATH)
+        conn = _get_db()
         cursor = conn.cursor()
-
         base_conditions = []
         params = []
 
-        # 文件夹过滤
         if folder_path:
             norm_path = folder_path.rstrip('/\\')
             if platform.system() == "Windows":
@@ -345,40 +335,27 @@ def get_videos_to_update(folder_path=None, refresh_all=False, filter_by_code=Non
                 base_conditions.append("((v.source_folder = ? OR v.source_folder = ? OR v.source_folder LIKE ?) OR v.file_path LIKE ?)")
                 params.extend([norm_path, norm_path + '/', norm_path + '/%', norm_path + '/%'])
 
-        # 番号过滤
         if filter_by_code:
             base_conditions.append("j.javdb_code = ?")
             params.append(filter_by_code)
 
         if refresh_all:
-            base_query = """
-                SELECT v.id, v.file_path, v.title, j.javdb_code 
-                FROM videos v
-                LEFT JOIN javdb_info j ON v.id = j.video_id
-            """
+            base_query = """SELECT v.id, v.file_path, v.title, j.javdb_code FROM videos v LEFT JOIN javdb_info j ON v.id = j.video_id"""
             if base_conditions:
                 where_clause = " WHERE " + " AND ".join(base_conditions)
             else:
                 where_clause = ""
-
             if not filter_by_code and not folder_path:
                 order_clause = " ORDER BY v.id DESC LIMIT 100"
             else:
                 order_clause = ""
-
             query = base_query + where_clause + order_clause
         else:
-            base_query = """
-                SELECT v.id, v.file_path, v.title, j.javdb_code 
-                FROM videos v
-                LEFT JOIN javdb_info j ON v.id = j.video_id
-            """
-
+            base_query = """SELECT v.id, v.file_path, v.title, j.javdb_code FROM videos v LEFT JOIN javdb_info j ON v.id = j.video_id"""
             if base_conditions:
                 where_clause = " WHERE " + " AND ".join(base_conditions) + " AND ("
             else:
                 where_clause = " WHERE ("
-
             update_conditions = ""
             update_conditions += "j.id IS NULL\n"
             update_conditions += "OR NOT EXISTS (\n"
@@ -387,16 +364,13 @@ def get_videos_to_update(folder_path=None, refresh_all=False, filter_by_code=Non
             update_conditions += "    WHERE va.video_id = v.id \n"
             update_conditions += f"    AND a.profile_url LIKE '%{JAVDB_MAIN_DOMAIN}%'\n"
             update_conditions += ")\n"
-
             query = base_query + where_clause + update_conditions + ")"
 
         cursor.execute(query, params)
         videos = cursor.fetchall()
         conn.close()
-
         return [{
-            'id': video[0],
-            'file_path': video[1],
+            'id': video[0], 'file_path': video[1],
             'title': video[2],
             'av_code': video[3] if len(video) > 3 and video[3] is not None else None
         } for video in videos]
@@ -406,12 +380,10 @@ def get_videos_to_update(folder_path=None, refresh_all=False, filter_by_code=Non
 
 
 def get_videos_without_actors(folder_path=None):
-    """获取指定文件夹下需要更新JAVDB信息的视频列表（兼容旧版）"""
     return get_videos_to_update(folder_path)
 
 
 def _find_local_poster(file_path):
-    """当网络封面下载失败时，尝试使用视频同目录下的poster.jpg作为封面"""
     try:
         if not file_path:
             return None
@@ -424,31 +396,17 @@ def _find_local_poster(file_path):
     return None
 
 
+# ---------- 数据库保存 ----------
 def save_javdb_info_to_db_standalone(video_id, javdb_info):
-    """
-    保存JAVDB信息到数据库（独立函数，复用 javdb_system/save_javdb_info.py 的逻辑）
-
-    Args:
-        video_id: 视频ID (videos表主键)
-        javdb_info: 爬虫返回的字典数据
-
-    数据库操作:
-        1. 读取本地封面图片 → BLOB
-        2. 如果已存在记录则UPDATE，否则INSERT
-        3. 保存标签到 javdb_tags + javdb_info_tags
-        4. 保存演员到 actors + video_actors
-    """
     try:
-        conn = sqlite3.connect(DB_PATH)
+        conn = _get_db()
         cursor = conn.cursor()
 
-        # 归一化所有 javdb 链接到主站 javdb.com
         for field in ('detail_url', 'cover_image_url'):
             val = javdb_info.get(field)
             if val:
                 javdb_info[field] = normalize_to_main_javdb(val)
 
-        # 读取本地图片文件并转换为二进制数据
         cover_image_data = None
         local_image_path = javdb_info.get('local_image_path', '')
         if local_image_path:
@@ -457,14 +415,12 @@ def save_javdb_info_to_db_standalone(video_id, javdb_info):
                 try:
                     with open(abs_path, 'rb') as f:
                         cover_image_data = f.read()
-                except Exception as e:
-                    print(f"读取封面文件失败 {abs_path}: {e}")
+                except Exception:
+                    pass
 
-        # 检查是否已存在该video_id的JAVDB信息
         cursor.execute("SELECT id FROM javdb_info WHERE video_id = ?", (video_id,))
         existing_record = cursor.fetchone()
 
-        # 解析评分
         score_val = None
         try:
             rating = javdb_info.get('rating')
@@ -475,9 +431,8 @@ def save_javdb_info_to_db_standalone(video_id, javdb_info):
                 if cleaned and cleaned != 'N/A':
                     score_val = float(cleaned)
         except Exception:
-            score_val = None
+            pass
 
-        # 序列化磁力链接
         magnet_json = None
         try:
             magnet_links = javdb_info.get('magnet_links', [])
@@ -487,7 +442,6 @@ def save_javdb_info_to_db_standalone(video_id, javdb_info):
             pass
 
         if existing_record:
-            # 更新已有记录
             javdb_info_id = existing_record[0]
             cursor.execute("""
                 UPDATE javdb_info SET 
@@ -499,90 +453,58 @@ def save_javdb_info_to_db_standalone(video_id, javdb_info):
                 magnet_links = COALESCE(?, magnet_links), updated_at = datetime('now')
                 WHERE video_id = ?
             """, (
-                javdb_info.get('video_id') or None,
-                javdb_info.get('detail_url') or None,
-                javdb_info.get('title') or None,
-                javdb_info.get('release_date') or None,
-                javdb_info.get('duration') or None,
-                javdb_info.get('studio') or None,
-                score_val,
-                javdb_info.get('cover_image_url') or None,
-                local_image_path or None,
-                cover_image_data,
-                magnet_json,
-                video_id
+                javdb_info.get('video_id') or None, javdb_info.get('detail_url') or None,
+                javdb_info.get('title') or None, javdb_info.get('release_date') or None,
+                javdb_info.get('duration') or None, javdb_info.get('studio') or None,
+                score_val, javdb_info.get('cover_image_url') or None,
+                local_image_path or None, cover_image_data, magnet_json, video_id
             ))
-
-            # 清除旧的标签和演员关联（重新写入）
             cursor.execute("DELETE FROM javdb_info_tags WHERE javdb_info_id = ?", (javdb_info_id,))
             cursor.execute("DELETE FROM video_actors WHERE video_id = ?", (video_id,))
         else:
-            # 插入新记录
             cursor.execute("""
-                INSERT INTO javdb_info 
-                (video_id, javdb_code, javdb_url, javdb_title, release_date, duration, 
-                 studio, score, cover_url, local_cover_path, cover_image_data, magnet_links, 
-                 created_at, updated_at)
+                INSERT INTO javdb_info (video_id, javdb_code, javdb_url, javdb_title, release_date,
+                duration, studio, score, cover_url, local_cover_path, cover_image_data, magnet_links,
+                created_at, updated_at)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))
             """, (
-                video_id,
-                javdb_info.get('video_id') or '',
-                javdb_info.get('detail_url') or '',
-                javdb_info.get('title') or None,
-                javdb_info.get('release_date') or None,
-                javdb_info.get('duration') or None,
-                javdb_info.get('studio') or None,
-                score_val,
-                javdb_info.get('cover_image_url') or None,
-                local_image_path or '',
-                cover_image_data,
-                magnet_json
+                video_id, javdb_info.get('video_id') or '', javdb_info.get('detail_url') or '',
+                javdb_info.get('title') or None, javdb_info.get('release_date') or None,
+                javdb_info.get('duration') or None, javdb_info.get('studio') or None,
+                score_val, javdb_info.get('cover_image_url') or None,
+                local_image_path or '', cover_image_data, magnet_json
             ))
             javdb_info_id = cursor.lastrowid
 
-        # 保存标签信息
         tags = javdb_info.get('tags', [])
         if tags:
             for tag_name in tags:
                 tag_name = (tag_name or '').strip()
                 if not tag_name:
                     continue
-                cursor.execute(
-                    "INSERT OR IGNORE INTO javdb_tags (tag_name) VALUES (?)",
-                    (tag_name,)
-                )
+                cursor.execute("INSERT OR IGNORE INTO javdb_tags (tag_name) VALUES (?)", (tag_name,))
                 cursor.execute("SELECT id FROM javdb_tags WHERE tag_name = ?", (tag_name,))
                 tag_result = cursor.fetchone()
                 if tag_result:
-                    cursor.execute(
-                        "INSERT OR IGNORE INTO javdb_info_tags (javdb_info_id, tag_id) VALUES (?, ?)",
-                        (javdb_info_id, tag_result[0])
-                    )
+                    cursor.execute("INSERT OR IGNORE INTO javdb_info_tags (javdb_info_id, tag_id) VALUES (?, ?)",
+                                   (javdb_info_id, tag_result[0]))
 
-        # 保存演员信息
         actors = javdb_info.get('actors', [])
         if actors:
             for actor in actors:
                 actor_name = (actor.get('name') or '').strip()
                 actor_link = (actor.get('link') or '').strip()
-
                 if not actor_name:
                     continue
-
-                # 规范化链接：相对路径转绝对 + 镜像域名归一化到主站 javdb.com
                 if actor_link:
                     if actor_link.startswith('/'):
                         actor_link = urljoin(BASE_URL, actor_link)
                     actor_link = normalize_to_main_javdb(actor_link)
-
-                # 查找现有演员（优先按profile_url匹配，其次按name匹配）
                 cursor.execute("SELECT id, profile_url FROM actors WHERE profile_url = ?", (actor_link,))
                 row = cursor.fetchone()
                 actor_id = None
-
                 if row:
                     actor_id = row[0]
-                    cursor.execute("UPDATE actors SET updated_at = datetime('now') WHERE id = ?", (actor_id,))
                 else:
                     cursor.execute("SELECT id, profile_url FROM actors WHERE name = ?", (actor_name,))
                     row = cursor.fetchone()
@@ -590,79 +512,57 @@ def save_javdb_info_to_db_standalone(video_id, javdb_info):
                         actor_id = row[0]
                         existing_profile = row[1] or ''
                         if actor_link and not existing_profile.strip():
-                            cursor.execute(
-                                "UPDATE actors SET profile_url = ?, updated_at = datetime('now') WHERE id = ?",
-                                (actor_link, actor_id)
-                            )
+                            cursor.execute("UPDATE actors SET profile_url = ?, updated_at = datetime('now') WHERE id = ?",
+                                           (actor_link, actor_id))
                     else:
-                        cursor.execute(
-                            "INSERT INTO actors (name, profile_url, created_at, updated_at) VALUES (?, ?, datetime('now'), datetime('now'))",
-                            (actor_name, actor_link)
-                        )
+                        cursor.execute("INSERT INTO actors (name, profile_url, created_at, updated_at) VALUES (?, ?, datetime('now'), datetime('now'))",
+                                       (actor_name, actor_link))
                         actor_id = cursor.lastrowid
-
-                # 建立视频-演员关联
                 if actor_id:
-                    cursor.execute(
-                        "INSERT OR IGNORE INTO video_actors (video_id, actor_id, created_at) VALUES (?, ?, datetime('now'))",
-                        (video_id, actor_id)
-                    )
+                    cursor.execute("INSERT OR IGNORE INTO video_actors (video_id, actor_id, created_at) VALUES (?, ?, datetime('now'))",
+                                   (video_id, actor_id))
 
-        # 同步更新 videos 表的标题和缩略图
         try:
             cursor.execute("PRAGMA table_info(videos);")
             available_cols = {row[1] for row in cursor.fetchall()}
-
             update_fields = []
             update_params = []
-
             title = javdb_info.get('title')
             if title and title not in BLOCKED_TITLES and 'title' in available_cols:
                 update_fields.append("title = ?")
                 update_params.append(title)
-
             if local_image_path and 'thumbnail_path' in available_cols:
                 update_fields.append("thumbnail_path = ?")
                 update_params.append(local_image_path)
-
             if cover_image_data is not None and 'thumbnail_data' in available_cols:
                 update_fields.append("thumbnail_data = ?")
                 update_params.append(cover_image_data)
-
             if score_val is not None and 'rating' in available_cols:
                 update_fields.append("rating = ?")
                 update_params.append(score_val)
-
             if update_fields:
                 update_params.append(video_id)
                 cursor.execute(f"UPDATE videos SET {', '.join(update_fields)} WHERE id = ?", update_params)
-        except Exception as e:
-            print(f"更新videos表附加字段失败（不影响主流程）: {e}")
+        except Exception:
+            pass
 
         conn.commit()
         conn.close()
         print(f"  已保存到数据库: {javdb_info.get('title', 'Unknown')}")
         return True
-
     except Exception as e:
         print(f"保存JAVDB信息到数据库失败: {e}")
         return False
 
 
-# ---------- 主功能函数 ----------
+# ---------- 主功能 ----------
 def update_videos_batch(folder_path=None, refresh_all=False, filter_by_code=None):
-    """批量更新视频信息（核心逻辑）"""
     videos = get_videos_to_update(folder_path, refresh_all=refresh_all, filter_by_code=filter_by_code)
     if not videos:
         print("没有找到需要更新的视频")
         return
-
     print(f"找到 {len(videos)} 个需要更新的视频")
-
-    # 初始化番号提取器
     code_extractor = CodeExtractor()
-
-    # 先按番号分组去重，确保每个番号只爬取一次
     code_map = {}
     for video in videos:
         av_code = video.get('av_code')
@@ -670,39 +570,22 @@ def update_videos_batch(folder_path=None, refresh_all=False, filter_by_code=None
             av_code = code_extractor.extract_code_from_filename(video.get('file_path') or '')
             if not av_code:
                 av_code = code_extractor.extract_code_from_filename(video.get('title') or '')
-        if not av_code:
-            av_code = None
         code_map.setdefault(av_code, []).append(video)
-
-    # 去掉无效番号键
     invalid_group = code_map.pop(None, [])
-
     unique_codes = list(code_map.keys())
     print(f"去重后需要处理的番号数: {len(unique_codes)}")
-
-    # 成功和失败计数
     success_count = 0
     failed_count = 0
     failed_videos = []
-    total_tags = 0
-    total_actors = 0
-    total_magnet_links = 0
-    unique_studios = set()
-
-    # 记录无法提取番号的失败项
     for v in invalid_group:
         failed_count += 1
         failed_videos.append((v.get('title') or v.get('file_path') or '未知', "无法提取番号"))
 
-    # 按唯一番号进行爬取并批量更新同番号的所有视频
     for idx, code in enumerate(unique_codes):
         group = code_map.get(code, [])
         sample_title = (group[0].get('title') or '')
         print(f"\n正在处理番号 {idx + 1}/{len(unique_codes)}: {code}（关联视频数 {len(group)}）")
-
-        # 使用三级回退爬取
         result = fetch_video_info_with_fallback(code)
-
         if not result or result.get('title') in BLOCKED_TITLES:
             error_msg = '爬取失败' if not result else '信息被屏蔽'
             failed_count += len(group)
@@ -710,80 +593,52 @@ def update_videos_batch(folder_path=None, refresh_all=False, filter_by_code=None
                 failed_videos.append((v.get('title') or v.get('file_path') or '未知', error_msg))
             random_delay(MIN_DELAY, MAX_DELAY)
             continue
-
-        # 打印该番号的摘要
         tags_cnt = len(result.get('tags') or [])
         actors_cnt = len(result.get('actors') or [])
         magnets_cnt = len(result.get('magnet_links') or [])
         studio_str = result.get('studio') or 'N/A'
         print(f"  摘要：标签 {tags_cnt} 个，演员 {actors_cnt} 名，片商 {studio_str}，下载链接 {magnets_cnt} 条")
-
-        total_tags += tags_cnt
-        total_actors += actors_cnt
-        total_magnet_links += magnets_cnt
-        if studio_str and studio_str != 'N/A':
-            unique_studios.add(studio_str)
-
-        # 将结果应用到所有关联视频
         for v in group:
-            # 优先使用网络下载的封面；如无则回退到同目录poster.jpg
             cover_path = result.get('local_image_path')
             if not cover_path:
                 cover_path = _find_local_poster(v.get('file_path'))
-
-            # 构建保存数据（补充本地封面路径）
             save_data = dict(result)
             if cover_path and not save_data.get('local_image_path'):
                 save_data['local_image_path'] = cover_path
-
             save_result = save_javdb_info_to_db_standalone(v['id'], save_data)
             if save_result:
                 success_count += 1
             else:
                 failed_count += 1
                 failed_videos.append((v.get('title') or v.get('file_path') or '未知', "更新数据库失败"))
-
-        # 番号间随机延迟，避免被反爬
         random_delay(MIN_DELAY, MAX_DELAY)
 
-    # 打印统计结果
     print(f"\n=== 更新完成 ===")
     print(f"总视频数: {len(videos)}")
     print(f"去重后番号数: {len(unique_codes)}")
     print(f"成功更新: {success_count}")
     print(f"更新失败: {failed_count}")
-    print(f"汇总：标签 {total_tags} 个，演员 {total_actors} 名，下载链接 {total_magnet_links} 条")
-    if unique_studios:
-        print(f"片商数: {len(unique_studios)}（例如：{list(unique_studios)[:3]}）")
-
     if failed_videos:
         print("\n失败的视频列表:")
         for title, reason in failed_videos[:10]:
             print(f"- {title[:50]}...: {reason}")
-        if len(failed_videos) > 10:
-            print(f"... 还有 {len(failed_videos) - 10} 个失败视频未显示")
 
 
 def select_folder(test_mode=False, test_folder_path=None):
-    """列出用户定义的文件夹，让用户通过编号选择"""
     folders = get_user_defined_folders()
     if not folders:
         print("没有找到用户定义的数据文件夹")
         return None
-
-    # 测试模式：自动选择指定的文件夹
     if test_mode and test_folder_path:
         print(f"测试模式：自动选择文件夹: {test_folder_path}")
         return test_folder_path
-
     print("请选择要更新的文件夹:")
     for i, (folder_path, folder_type) in enumerate(folders):
         print(f"{i + 1}. {folder_path} ({folder_type})")
-
     try:
         choice = int(input("请输入文件夹编号 (0表示全部): "))
         if choice == 0:
-            return None  # 返回None表示选择全部文件夹
+            return None
         elif 1 <= choice <= len(folders):
             return folders[choice - 1][0]
         else:
@@ -795,22 +650,15 @@ def select_folder(test_mode=False, test_folder_path=None):
 
 
 def main(test_mode=False, test_folder_path=None, refresh_all=False, filter_by_code=None):
-    """主入口：批量更新视频信息"""
     if filter_by_code:
-        # 按番号刷新特定视频
         print(f"正在刷新番号为 {filter_by_code} 的视频")
         result = fetch_video_info_with_fallback(filter_by_code)
         if result:
-            # 查询数据库中是否有该番号的视频
-            conn = sqlite3.connect(DB_PATH)
+            conn = _get_db()
             cursor = conn.cursor()
-            cursor.execute(
-                "SELECT v.id, v.file_path FROM videos v WHERE v.id IN (SELECT video_id FROM javdb_info WHERE javdb_code = ?)",
-                (filter_by_code,)
-            )
+            cursor.execute("SELECT v.id, v.file_path FROM videos v WHERE v.id IN (SELECT video_id FROM javdb_info WHERE javdb_code = ?)", (filter_by_code,))
             row = cursor.fetchone()
             conn.close()
-
             if row:
                 cover_path = result.get('local_image_path')
                 if not cover_path:
@@ -818,17 +666,12 @@ def main(test_mode=False, test_folder_path=None, refresh_all=False, filter_by_co
                 save_data = dict(result)
                 if cover_path and not save_data.get('local_image_path'):
                     save_data['local_image_path'] = cover_path
-                save_result = save_javdb_info_to_db_standalone(row[0], save_data)
-                if save_result:
-                    print(f"成功更新番号为 {filter_by_code} 的视频信息")
-                else:
-                    print(f"更新番号为 {filter_by_code} 的视频信息失败")
+                save_javdb_info_to_db_standalone(row[0], save_data)
             else:
                 print(f"数据库中未找到番号为 {filter_by_code} 的视频")
         else:
             print(f"爬取番号为 {filter_by_code} 的视频信息失败")
     else:
-        # 选择要更新的文件夹
         folder_path = select_folder(test_mode, test_folder_path)
         if folder_path is not None or (not folder_path and (test_mode or input("确定要更新所有文件夹的视频吗？(y/n): ").lower() == 'y')):
             update_videos_batch(folder_path, refresh_all=refresh_all)
@@ -837,19 +680,17 @@ def main(test_mode=False, test_folder_path=None, refresh_all=False, filter_by_co
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description='JAVDB视频信息更新工具')
-    parser.add_argument('--refresh-all', action='store_true', help='刷新所有视频信息，包括已更新的视频')
-    parser.add_argument('--code', type=str, help='按番号刷新特定视频，如 --code ADN-347')
-    parser.add_argument('--test', action='store_true', help='测试模式')
-    parser.add_argument('--test-folder', type=str, help='测试文件夹路径')
-    parser.add_argument('--db-path', type=str, help='指定数据库文件路径或目录（目录将自动追加media_library.db）')
-    parser.add_argument('--min-delay', type=float, help='最小操作间隔秒，默认3')
-    parser.add_argument('--max-delay', type=float, help='最大操作间隔秒，默认7')
-    parser.add_argument('--no-proxy', dest='no_proxy', action='store_true', help='不使用代理（使用直连域名）')
-
+    parser = argparse.ArgumentParser(description='NAS JAVDB视频信息更新器')
+    parser.add_argument('--refresh-all', action='store_true')
+    parser.add_argument('--code', type=str)
+    parser.add_argument('--test', action='store_true')
+    parser.add_argument('--test-folder', type=str)
+    parser.add_argument('--db-path', type=str)
+    parser.add_argument('--min-delay', type=float)
+    parser.add_argument('--max-delay', type=float)
+    parser.add_argument('--no-proxy', dest='no_proxy', action='store_true')
     args = parser.parse_args()
 
-    # 覆盖默认数据库路径
     if args.db_path:
         new_db_path = args.db_path
         try:
@@ -858,11 +699,9 @@ if __name__ == "__main__":
             os.makedirs(os.path.dirname(new_db_path), exist_ok=True)
             DB_PATH = new_db_path
             print(f"使用数据库路径: {DB_PATH}")
-        except Exception as e:
-            print(f"设置数据库路径失败: {e}")
-            print(f"回退到默认数据库路径: {DB_PATH}")
+        except Exception:
+            pass
 
-    # 根据命令行参数调整默认随机延迟范围
     try:
         if args.min_delay is not None:
             MIN_DELAY = float(args.min_delay)
@@ -874,7 +713,6 @@ if __name__ == "__main__":
     except Exception:
         pass
 
-    # 设置是否使用代理
     try:
         USE_PROXY = not getattr(args, 'no_proxy', False)
         BASE_URL = get_javdb_base_url(USE_PROXY)
@@ -883,9 +721,5 @@ if __name__ == "__main__":
     except Exception as e:
         print(f"设置访问域名失败，仍使用默认：{BASE_URL}。错误：{e}")
 
-    main(
-        test_mode=args.test,
-        test_folder_path=args.test_folder,
-        refresh_all=args.refresh_all,
-        filter_by_code=args.code
-    )
+    main(test_mode=args.test, test_folder_path=args.test_folder,
+         refresh_all=args.refresh_all, filter_by_code=args.code)

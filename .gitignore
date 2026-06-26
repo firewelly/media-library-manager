@@ -1,6 +1,8 @@
 # 数据库文件
 *.db
 *.db-journal
+*.db-shm
+*.db-wal
 *.db.backup_*
 
 # Python缓存文件
@@ -126,3 +128,4 @@ requirement/
 !build/windows/
 !build/windows/build_release.py
 release/
+*.jsonl
