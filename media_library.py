@@ -1869,13 +1869,30 @@ class MediaLibrary:
             log_scroll.pack(side=tk.RIGHT, fill=tk.Y)
 
             cancel_var = tk.BooleanVar(value=False)
-            ttk.Button(progress_window, text="取消", command=lambda: cancel_var.set(True)).pack(pady=8)
+
+            def _cancel_task():
+                """关闭进度窗口时取消后台任务，避免worker继续占用数据库写锁导致后续操作锁死"""
+                cancel_var.set(True)
+                try:
+                    progress_window.destroy()
+                except Exception:
+                    pass
+
+            ttk.Button(progress_window, text="取消", command=_cancel_task).pack(pady=8)
+            # 用户点窗口X关闭时，同样触发取消（否则worker线程不知情，继续占用DB写锁）
+            progress_window.protocol("WM_DELETE_WINDOW", _cancel_task)
 
             def log_message(msg: str):
                 ts = datetime.now().strftime('%H:%M:%S')
-                log_text.insert(tk.END, f"{ts} - {msg}\n")
-                log_text.see(tk.END)
-                progress_window.update()
+                def _update_log():
+                    # 控件可能已被销毁（用户提前关闭了进度窗口）
+                    if not log_text.winfo_exists():
+                        return
+                    log_text.insert(tk.END, f"{ts} - {msg}\n")
+                    log_text.see(tk.END)
+                # 必须调度到主线程执行，worker线程不能直接操作Tkinter控件
+                if progress_window.winfo_exists():
+                    progress_window.after(0, _update_log)
 
             def worker():
                 try:
