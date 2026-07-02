@@ -6,6 +6,7 @@
 """
 
 import os
+import base64
 import sqlite3
 import xml.etree.ElementTree as ET
 import shutil
@@ -43,20 +44,33 @@ class NFOImporter:
             if title_element is not None:
                 nfo_data['title'] = title_element.text
 
-            # 解析演员
+            # 解析演员（含头像URL）
             actors = []
+            actor_thumbs = {}
             for actor in root.findall('.//actor'):
                 name_element = actor.find('name')
-                if name_element is not None:
-                    actors.append(name_element.text)
+                if name_element is not None and name_element.text:
+                    actor_name = name_element.text.strip()
+                    actors.append(actor_name)
+                    thumb_element = actor.find('thumb')
+                    if thumb_element is not None and thumb_element.text:
+                        actor_thumbs[actor_name] = thumb_element.text.strip()
             if actors:
                 nfo_data['actors'] = ', '.join(actors)
+            if actor_thumbs:
+                nfo_data['actor_thumbs'] = actor_thumbs
 
-            # 解析年份
+            # 解析年份（优先用premiered的年份）
             year_element = root.find('.//year')
             if year_element is not None:
                 try:
                     nfo_data['year'] = int(year_element.text)
+                except ValueError:
+                    pass
+            premiered_element = root.find('.//premiered')
+            if premiered_element is not None and premiered_element.text and 'year' not in nfo_data:
+                try:
+                    nfo_data['year'] = int(premiered_element.text[:4])
                 except ValueError:
                     pass
 
@@ -93,6 +107,16 @@ class NFOImporter:
             if plot_element is not None and plot_element.text:
                 nfo_data['description'] = plot_element.text
 
+            # 解析片商
+            studio_element = root.find('.//studio')
+            if studio_element is not None and studio_element.text:
+                nfo_data['studio'] = studio_element.text.strip()
+
+            # 解析番号
+            uniqueid_element = root.find('.//uniqueid')
+            if uniqueid_element is not None and uniqueid_element.text:
+                nfo_data['javdb_code'] = uniqueid_element.text.strip()
+
             logger.info(f"NFO解析完成: {nfo_file_path}")
             return nfo_data
 
@@ -100,8 +124,120 @@ class NFOImporter:
             logger.error(f"NFO文件解析失败 {nfo_file_path}: {e}")
             return {}
 
+    def _find_cover_image(self, video_dir: str, video_name: str) -> Optional[str]:
+        """查找视频同目录下的封面图片"""
+        # 按优先级查找封面图片
+        cover_candidates = [
+            os.path.join(video_dir, f"{video_name}-poster.jpg"),
+            os.path.join(video_dir, f"{video_name}.jpg"),
+            os.path.join(video_dir, "poster.jpg"),
+            os.path.join(video_dir, "folder.jpg"),
+            os.path.join(video_dir, "cover.jpg"),
+        ]
+        for candidate in cover_candidates:
+            if os.path.exists(candidate):
+                return candidate
+        return None
+
+    def _load_image_as_base64(self, image_path: str) -> Optional[str]:
+        """读取图片文件为base64编码"""
+        try:
+            with open(image_path, 'rb') as f:
+                data = f.read()
+            return base64.b64encode(data).decode('utf-8')
+        except Exception as e:
+            logger.error(f"读取图片失败 {image_path}: {e}")
+            return None
+
+    def _sync_actor_thumbs(self, actor_thumbs: Dict[str, str]) -> int:
+        """将NFO中的演员头像URL同步到actors表"""
+        updated = 0
+        for actor_name, thumb_url in actor_thumbs.items():
+            try:
+                result = self.db_manager.execute_update(
+                    "UPDATE actors SET avatar_url = ?, updated_at = CURRENT_TIMESTAMP "
+                    "WHERE name = ? AND (avatar_url IS NULL OR avatar_url = '')",
+                    (thumb_url, actor_name)
+                )
+                updated += result
+            except Exception as e:
+                logger.error(f"更新演员头像失败 {actor_name}: {e}")
+        return updated
+
+    def _update_javdb_info_from_nfo(self, video_id: int, javdb_fields: Dict[str, Any]):
+        """将NFO中的番号/片商等字段更新到javdb_info表"""
+        try:
+            # 检查是否已有 javdb_info 记录
+            existing = self.db_manager.execute_query(
+                "SELECT id FROM javdb_info WHERE video_id = ?", (video_id,)
+            )
+            if existing:
+                # 有记录则补充缺失字段（不覆盖已有值）
+                set_clauses = []
+                values = []
+                field_map = {
+                    'javdb_code': 'javdb_code',
+                    'release_date': 'release_date',
+                    'studio': 'studio',
+                    'director': None,  # javdb_info无director字段，跳过
+                }
+                for nfo_key, db_key in field_map.items():
+                    if db_key and nfo_key in javdb_fields and javdb_fields[nfo_key]:
+                        set_clauses.append(f"{db_key} = CASE WHEN {db_key} IS NULL OR {db_key} = '' THEN ? ELSE {db_key} END")
+                        values.append(javdb_fields[nfo_key])
+                if set_clauses:
+                    set_clauses.append("updated_at = CURRENT_TIMESTAMP")
+                    values.append(video_id)
+                    self.db_manager.execute_update(
+                        f"UPDATE javdb_info SET {', '.join(set_clauses)} WHERE video_id = ?",
+                        tuple(values)
+                    )
+            else:
+                # 无记录则插入（至少要有番号）
+                code = javdb_fields.get('javdb_code', '')
+                if code:
+                    self.db_manager.execute_update(
+                        "INSERT INTO javdb_info (video_id, javdb_code, release_date, studio, created_at, updated_at) "
+                        "VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)",
+                        (video_id, code, javdb_fields.get('release_date'), javdb_fields.get('studio'))
+                    )
+        except Exception as e:
+            logger.error(f"更新javdb_info失败 video_id={video_id}: {e}")
+
+    def _sync_video_actors(self, video_id: int, actors_str: str):
+        """将NFO中的演员字符串同步到video_actors关联表"""
+        try:
+            actor_names = [a.strip() for a in actors_str.split(',') if a.strip()]
+            for actor_name in actor_names:
+                # 查找或创建演员记录
+                existing = self.db_manager.execute_query(
+                    "SELECT id FROM actors WHERE name = ?", (actor_name,)
+                )
+                if existing:
+                    actor_id = existing[0][0]
+                else:
+                    # 创建新演员
+                    self.db_manager.execute_update(
+                        "INSERT INTO actors (name, created_at, updated_at) VALUES (?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)",
+                        (actor_name,)
+                    )
+                    created = self.db_manager.execute_query(
+                        "SELECT id FROM actors WHERE name = ?", (actor_name,)
+                    )
+                    actor_id = created[0][0] if created else None
+
+                if actor_id:
+                    # 建立关联（忽略已存在的）
+                    self.db_manager.execute_update(
+                        "INSERT OR IGNORE INTO video_actors (video_id, actor_id, created_at) "
+                        "VALUES (?, ?, CURRENT_TIMESTAMP)",
+                        (video_id, actor_id)
+                    )
+        except Exception as e:
+            logger.error(f"同步演员关联失败 video_id={video_id}: {e}")
+
     def import_nfo_for_video(self, video_id: int, video_path: str) -> bool:
-        """为指定视频导入NFO信息"""
+        """为指定视频导入NFO信息（含封面图片和演员头像）"""
         try:
             # 查找同目录下的NFO文件
             video_dir = os.path.dirname(video_path)
@@ -130,8 +266,50 @@ class NFOImporter:
             if not nfo_data:
                 return False
 
-            # 更新数据库
-            return self.db_manager.update_video(video_id, nfo_data) > 0
+            # 查找并导入封面图片
+            cover_path = self._find_cover_image(video_dir, video_name)
+            if cover_path:
+                cover_b64 = self._load_image_as_base64(cover_path)
+                if cover_b64:
+                    nfo_data['thumbnail_data'] = cover_b64
+                    nfo_data['thumbnail_path'] = cover_path
+                    logger.info(f"导入封面: {os.path.basename(cover_path)}")
+
+            # 提取演员头像URL（单独处理）
+            actor_thumbs = nfo_data.pop('actor_thumbs', {})
+
+            # 提取演员列表（单独处理）
+            actors_str = nfo_data.pop('actors', '')
+            
+            # 提取需要写入 javdb_info 表的字段（不在 videos 表里）
+            javdb_fields = {}
+            for field in ['release_date', 'studio', 'javdb_code']:
+                if field in nfo_data:
+                    javdb_fields[field] = nfo_data.pop(field)
+
+            # 剩余的 nfo_data 都是 videos 表的合法字段
+            # 更新 videos 表
+            success = True
+            if nfo_data:
+                try:
+                    self.db_manager.update_video(video_id, nfo_data)
+                except Exception as e:
+                    logger.error(f"更新videos表失败: {e}")
+                    success = False
+
+            # 更新 javdb_info 表（如果NFO有番号/片商等额外信息）
+            if javdb_fields:
+                self._update_javdb_info_from_nfo(video_id, javdb_fields)
+
+            # 同步演员关联到 video_actors 表
+            if actors_str:
+                self._sync_video_actors(video_id, actors_str)
+
+            # 同步演员头像URL到actors表
+            if actor_thumbs:
+                self._sync_actor_thumbs(actor_thumbs)
+
+            return success
 
         except Exception as e:
             logger.error(f"导入NFO失败 {video_path}: {e}")
