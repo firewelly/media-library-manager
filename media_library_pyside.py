@@ -2701,8 +2701,20 @@ class MainWindow(QMainWindow):
                 
             if result.get('error'):
                 msg += f"\n错误: {result.get('error')}"
-                
-            QMessageBox.information(self, "完成", msg)
+
+            # 未匹配演员提示（NFO导入特有）
+            unmatched_actors = result.get('unmatched_actors', [])
+            if unmatched_actors:
+                msg += (f"\n\n⚠️ 以下 {len(unmatched_actors)} 个演员未匹配到已有记录（已新建），"
+                        f"如与已有演员是同一人，请手动合并：\n\n")
+                shown = unmatched_actors[:20]
+                msg += "\n".join(f"• {n}" for n in shown)
+                if len(unmatched_actors) > 20:
+                    msg += f"\n... 等共 {len(unmatched_actors)} 个"
+                QMessageBox.warning(self, "完成（有未匹配演员）", msg)
+            else:
+                QMessageBox.information(self, "完成", msg)
+            
             self.refresh_data()
             
         worker.finished_signal.connect(on_finished)

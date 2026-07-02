@@ -319,7 +319,7 @@ class MediaLibrary:
         self.root.geometry("1200x800")
         
         # 配置文件路径
-        self.config_path = ensure_file_in_runtime('gui_config_fixed.json')
+        self.config_path = ensure_file_in_runtime('gui_config.json')
         
         # 默认列配置
         self.default_columns = {
@@ -1869,13 +1869,30 @@ class MediaLibrary:
             log_scroll.pack(side=tk.RIGHT, fill=tk.Y)
 
             cancel_var = tk.BooleanVar(value=False)
-            ttk.Button(progress_window, text="取消", command=lambda: cancel_var.set(True)).pack(pady=8)
+
+            def _cancel_task():
+                """关闭进度窗口时取消后台任务，避免worker继续占用数据库写锁导致后续操作锁死"""
+                cancel_var.set(True)
+                try:
+                    progress_window.destroy()
+                except Exception:
+                    pass
+
+            ttk.Button(progress_window, text="取消", command=_cancel_task).pack(pady=8)
+            # 用户点窗口X关闭时，同样触发取消（否则worker线程不知情，继续占用DB写锁）
+            progress_window.protocol("WM_DELETE_WINDOW", _cancel_task)
 
             def log_message(msg: str):
                 ts = datetime.now().strftime('%H:%M:%S')
-                log_text.insert(tk.END, f"{ts} - {msg}\n")
-                log_text.see(tk.END)
-                progress_window.update()
+                def _update_log():
+                    # 控件可能已被销毁（用户提前关闭了进度窗口）
+                    if not log_text.winfo_exists():
+                        return
+                    log_text.insert(tk.END, f"{ts} - {msg}\n")
+                    log_text.see(tk.END)
+                # 必须调度到主线程执行，worker线程不能直接操作Tkinter控件
+                if progress_window.winfo_exists():
+                    progress_window.after(0, _update_log)
 
             def worker():
                 try:
@@ -4002,8 +4019,18 @@ class MediaLibrary:
         except Exception as e:
             messagebox.showerror("错误", f"导入NFO失败: {str(e)}")
             
-    def auto_import_nfo_for_video(self, video_id):
-        """为指定视频自动定位 NFO 并导入（基于 JavSP 规则）"""
+    def auto_import_nfo_for_video(self, video_id, return_unmatched=False):
+        """为指定视频自动定位 NFO 并导入（基于 JavSP 规则）
+        
+        Args:
+            video_id: 视频ID
+            return_unmatched: 是否返回未匹配的演员名列表
+        
+        Returns:
+            默认返回 bool；
+            return_unmatched=True 时返回 (bool, List[str])
+        """
+        unmatched_actors = []
         # 获取视频路径
         self.cursor.execute("SELECT file_path FROM videos WHERE id = ?", (video_id,))
         row = self.cursor.fetchone()
@@ -4147,11 +4174,32 @@ class MediaLibrary:
         existing_actor_count = int(row_cnt[0]) if row_cnt else 0
         if nfo_data.get('actors'):
             for actor_name in nfo_data['actors']:
-                self.cursor.execute("INSERT OR IGNORE INTO actors (name) VALUES (?)", (actor_name,))
+                # 多策略匹配：精确name → name_traditional → name_common → aliases → 创建
+                actor_id = None
                 self.cursor.execute("SELECT id FROM actors WHERE name = ?", (actor_name,))
                 row_a = self.cursor.fetchone()
                 if row_a:
                     actor_id = row_a[0]
+                if not actor_id:
+                    self.cursor.execute("SELECT id FROM actors WHERE name_traditional = ?", (actor_name,))
+                    row_a = self.cursor.fetchone()
+                    if row_a: actor_id = row_a[0]
+                if not actor_id:
+                    self.cursor.execute("SELECT id FROM actors WHERE name_common = ?", (actor_name,))
+                    row_a = self.cursor.fetchone()
+                    if row_a: actor_id = row_a[0]
+                if not actor_id:
+                    self.cursor.execute("SELECT id FROM actors WHERE aliases LIKE ?", (f'%{actor_name}%',))
+                    row_a = self.cursor.fetchone()
+                    if row_a: actor_id = row_a[0]
+                if not actor_id:
+                    self.cursor.execute("INSERT OR IGNORE INTO actors (name) VALUES (?)", (actor_name,))
+                    self.cursor.execute("SELECT id FROM actors WHERE name = ?", (actor_name,))
+                    row_a = self.cursor.fetchone()
+                    if row_a:
+                        actor_id = row_a[0]
+                        unmatched_actors.append(actor_name)
+                if actor_id:
                     self.cursor.execute(
                         """
                         INSERT OR IGNORE INTO video_actors (video_id, actor_id) 
@@ -4204,6 +4252,8 @@ class MediaLibrary:
                         )
 
         self.conn.commit()
+        if return_unmatched:
+            return True, unmatched_actors
         return True
             
     def batch_calculate_md5(self):
@@ -11336,6 +11386,7 @@ class MediaLibrary:
                     imported_count = 0
                     skipped_count = 0
                     failed_count = 0
+                    all_unmatched_actors = []
 
                     for i, (video_id, file_path, file_name) in enumerate(videos_to_process):
                         if self.cancel_import:
@@ -11344,10 +11395,12 @@ class MediaLibrary:
                         progress_label.config(text=f"处理: {file_name} ({i + 1}/{len(videos_to_process)})")
 
                         try:
-                            ok = self.auto_import_nfo_for_video(video_id)
+                            ok, unmatched = self.auto_import_nfo_for_video(video_id, return_unmatched=True)
                             if ok:
                                 imported_count += 1
                                 log_message(f"✓ 成功导入: {file_name}")
+                                if unmatched:
+                                    all_unmatched_actors.extend(unmatched)
                             else:
                                 skipped_count += 1
                                 log_message(f"- 未找到可用的NFO: {file_name}")
@@ -11360,6 +11413,25 @@ class MediaLibrary:
                     log_message(f"成功导入: {imported_count} 个")
                     log_message(f"未找到NFO/跳过: {skipped_count} 个")
                     log_message(f"失败: {failed_count} 个")
+
+                    # 去重并提示未匹配的演员
+                    all_unmatched_actors = list(dict.fromkeys(all_unmatched_actors))
+                    if all_unmatched_actors:
+                        log_message(f"\n⚠️ 以下演员未匹配到已有记录（已新建）:")
+                        for name in all_unmatched_actors:
+                            log_message(f"  - {name}")
+                        msg = (f"成功导入 {imported_count} 个，跳过 {skipped_count} 个，失败 {failed_count} 个。\n\n"
+                               f"以下 {len(all_unmatched_actors)} 个演员未匹配到已有记录（已新建），"
+                               f"如与已有演员是同一人，请手动合并：\n\n"
+                               + "\n".join(f"• {n}" for n in all_unmatched_actors[:20]))
+                        if len(all_unmatched_actors) > 20:
+                            msg += f"\n... 等共 {len(all_unmatched_actors)} 个"
+                        self.root.after(0, lambda: messagebox.showwarning("NFO导入完成（有未匹配演员）", msg))
+                    else:
+                        self.root.after(0, lambda: messagebox.showinfo(
+                            "NFO导入完成",
+                            f"成功导入 {imported_count} 个，跳过 {skipped_count} 个，失败 {failed_count} 个"))
+
                     cancel_button.config(text="关闭", command=progress_window.destroy)
                     self.root.after(100, self.load_videos)
                 except Exception as e:

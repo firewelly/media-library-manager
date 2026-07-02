@@ -204,19 +204,52 @@ class NFOImporter:
         except Exception as e:
             logger.error(f"更新javdb_info失败 video_id={video_id}: {e}")
 
-    def _sync_video_actors(self, video_id: int, actors_str: str):
-        """将NFO中的演员字符串同步到video_actors关联表"""
+    def _sync_video_actors(self, video_id: int, actors_str: str) -> List[str]:
+        """将NFO中的演员字符串同步到video_actors关联表
+        
+        匹配顺序：name精确 → name_traditional → name_common → aliases模糊 → 创建新演员
+        Returns:
+            未匹配到已有演员（创建了新演员）的名字列表
+        """
+        unmatched = []
         try:
             actor_names = [a.strip() for a in actors_str.split(',') if a.strip()]
             for actor_name in actor_names:
-                # 查找或创建演员记录
-                existing = self.db_manager.execute_query(
+                actor_id = None
+
+                # 1. 精确匹配 name
+                result = self.db_manager.execute_query(
                     "SELECT id FROM actors WHERE name = ?", (actor_name,)
                 )
-                if existing:
-                    actor_id = existing[0][0]
-                else:
-                    # 创建新演员
+                if result:
+                    actor_id = result[0][0]
+
+                # 2. 匹配 name_traditional（繁体名）
+                if not actor_id:
+                    result = self.db_manager.execute_query(
+                        "SELECT id FROM actors WHERE name_traditional = ?", (actor_name,)
+                    )
+                    if result:
+                        actor_id = result[0][0]
+
+                # 3. 匹配 name_common（常用名）
+                if not actor_id:
+                    result = self.db_manager.execute_query(
+                        "SELECT id FROM actors WHERE name_common = ?", (actor_name,)
+                    )
+                    if result:
+                        actor_id = result[0][0]
+
+                # 4. 模糊匹配 aliases（别名）
+                if not actor_id:
+                    result = self.db_manager.execute_query(
+                        "SELECT id FROM actors WHERE aliases LIKE ?", (f'%{actor_name}%',)
+                    )
+                    if result:
+                        actor_id = result[0][0]
+
+                # 5. 都没匹配到，创建新演员
+                if not actor_id:
                     self.db_manager.execute_update(
                         "INSERT INTO actors (name, created_at, updated_at) VALUES (?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)",
                         (actor_name,)
@@ -225,9 +258,11 @@ class NFOImporter:
                         "SELECT id FROM actors WHERE name = ?", (actor_name,)
                     )
                     actor_id = created[0][0] if created else None
+                    if actor_id:
+                        unmatched.append(actor_name)
 
+                # 建立关联（忽略已存在的）
                 if actor_id:
-                    # 建立关联（忽略已存在的）
                     self.db_manager.execute_update(
                         "INSERT OR IGNORE INTO video_actors (video_id, actor_id, created_at) "
                         "VALUES (?, ?, CURRENT_TIMESTAMP)",
@@ -235,9 +270,21 @@ class NFOImporter:
                     )
         except Exception as e:
             logger.error(f"同步演员关联失败 video_id={video_id}: {e}")
+        
+        return unmatched
 
-    def import_nfo_for_video(self, video_id: int, video_path: str) -> bool:
-        """为指定视频导入NFO信息（含封面图片和演员头像）"""
+    def import_nfo_for_video(self, video_id: int, video_path: str, return_unmatched: bool = False):
+        """为指定视频导入NFO信息（含封面图片和演员头像）
+        
+        Args:
+            video_id: 视频ID
+            video_path: 视频文件路径
+            return_unmatched: 是否返回未匹配的演员名列表
+            
+        Returns:
+            默认返回 bool（是否成功）；
+            return_unmatched=True 时返回 (bool, List[str])，第二个元素是未匹配到已有演员的名字列表
+        """
         try:
             # 查找同目录下的NFO文件
             video_dir = os.path.dirname(video_path)
@@ -302,13 +349,16 @@ class NFOImporter:
                 self._update_javdb_info_from_nfo(video_id, javdb_fields)
 
             # 同步演员关联到 video_actors 表
+            unmatched_actors = []
             if actors_str:
-                self._sync_video_actors(video_id, actors_str)
+                unmatched_actors = self._sync_video_actors(video_id, actors_str)
 
             # 同步演员头像URL到actors表
             if actor_thumbs:
                 self._sync_actor_thumbs(actor_thumbs)
 
+            if return_unmatched:
+                return success, unmatched_actors
             return success
 
         except Exception as e:
