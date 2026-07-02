@@ -71,10 +71,11 @@ class BatchOperationManager:
     def batch_import_nfo(self, video_ids: List[int], 
                         filter_no_actors: bool = False,
                         progress_callback: Optional[Callable[[str, int, dict], None]] = None,
-                        cancel_check: Optional[Callable[[], bool]] = None) -> Dict[str, int]:
+                        cancel_check: Optional[Callable[[], bool]] = None) -> Dict[str, Any]:
         """
         批量导入NFO信息
         :param filter_no_actors: 是否只处理没有演员信息的视频
+        :return: dict含 success/failed/skipped/unmatched_actors(未匹配到已有演员的名字列表)
         """
         videos = self._get_videos_by_ids(video_ids)
         
@@ -95,9 +96,10 @@ class BatchOperationManager:
         success_count = 0
         failed_count = 0
         skipped_count = 0
+        all_unmatched_actors = []  # 收集所有未匹配的演员
         
         if total == 0:
-            return {'success': 0, 'failed': 0, 'skipped': 0}
+            return {'success': 0, 'failed': 0, 'skipped': 0, 'unmatched_actors': []}
 
         for i, video in enumerate(videos):
             if cancel_check and cancel_check():
@@ -111,18 +113,32 @@ class BatchOperationManager:
             if progress_callback:
                 progress_callback(f"正在导入NFO: {os.path.basename(file_path)}", int((i / total) * 100))
             
-            # 尝试导入
-            if self.nfo_importer.import_nfo_for_video(video['id'], file_path):
+            # 尝试导入（收集未匹配的演员）
+            success, unmatched = self.nfo_importer.import_nfo_for_video(
+                video['id'], file_path, return_unmatched=True
+            )
+            if success:
                 success_count += 1
+                if unmatched:
+                    all_unmatched_actors.extend(unmatched)
             else:
                 # 检查NFO是否存在，区分失败和跳过
                 nfo_path = os.path.splitext(file_path)[0] + '.nfo'
-                if os.path.exists(nfo_path):
+                movie_nfo = os.path.join(os.path.dirname(file_path), 'movie.nfo')
+                if os.path.exists(nfo_path) or os.path.exists(movie_nfo):
                     failed_count += 1
                 else:
                     skipped_count += 1
+        
+        # 去重
+        all_unmatched_actors = list(dict.fromkeys(all_unmatched_actors))
                     
-        return {'success': success_count, 'failed': failed_count, 'skipped': skipped_count}
+        return {
+            'success': success_count, 
+            'failed': failed_count, 
+            'skipped': skipped_count,
+            'unmatched_actors': all_unmatched_actors
+        }
 
     def batch_import_javdb(self, video_ids: List[int],
                           filter_no_title: bool = False,
