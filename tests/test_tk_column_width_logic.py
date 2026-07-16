@@ -7,7 +7,7 @@ import unittest
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from media_library_fixed import MediaLibrary
+from media_library import MediaLibrary
 
 
 class FakeTreeWidget:
