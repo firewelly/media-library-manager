@@ -353,17 +353,18 @@ def process_folder(
                     # 优先同名
                     same_name = [r for r in candidates if (r["file_name"] or "") == name]
                     match_row = (same_name[0] if same_name else candidates[0])
-        if match_row is None and enable_md5:
-            # 二级回退：文件名匹配，必要时再比对MD5以消歧
+        if match_row is None:
+            # 二级回退：文件名 + 文件大小匹配，必要时再比对MD5以消歧
+            # 注意：文件名匹配不依赖 enable_md5，确保即使不计算MD5也能检测移动
             candidates = []
             if name_to_rows is not None:
                 candidates = name_to_rows.get(name, [])
             else:
-                cur.execute("SELECT id, file_path, file_name, source_folder, md5_hash FROM videos WHERE file_name = ?", (name,))
+                cur.execute("SELECT id, file_path, file_name, file_size, source_folder, md5_hash FROM videos WHERE file_name = ?", (name,))
                 candidates = cur.fetchall()
-            # 仅考虑当前文件夹内的候选项
+            # 仅考虑当前文件夹内的候选项，且文件大小必须一致（防止同名不同内容误匹配）
             folder_prefix = folder.rstrip("/") + "/"
-            candidates = [r for r in candidates if (r["source_folder"] == folder) or ((r["file_path"] or "").startswith(folder_prefix))]
+            candidates = [r for r in candidates if ((r["source_folder"] == folder) or ((r["file_path"] or "").startswith(folder_prefix))) and (r["file_size"] or 0) == size]
             if candidates:
                 if len(candidates) == 1:
                     match_row = candidates[0]
@@ -376,6 +377,8 @@ def process_folder(
                             match_row = md5_filtered[0]
                         else:
                             match_row = candidates[0]
+                    else:
+                        match_row = candidates[0]
 
         if match_row:
             moved = True
