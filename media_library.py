@@ -8633,6 +8633,31 @@ class MediaLibrary:
         # 调用视频内容分析器的无标签更新模式
         self.run_video_content_analyzer_mode("no_tags_update")
     
+    def get_javdb_tags_for_video(self, video_id):
+        """从javdb关联表读取单个视频的JAVDB标签集合（不读videos.tags，避免混入自动标签）。
+        JAVDB标签的权威数据存在独立的 javdb_tags / javdb_info_tags 表中，此处只做读取。
+        返回 set[str]，无关联标签时返回空 set。
+        """
+        tags = set()
+        try:
+            self.cursor.execute(
+                """
+                SELECT jt.tag_name
+                FROM javdb_info j
+                JOIN javdb_info_tags jit ON j.id = jit.javdb_info_id
+                JOIN javdb_tags jt ON jit.tag_id = jt.id
+                WHERE j.video_id = ?
+                """,
+                (video_id,)
+            )
+            for (tag_name,) in self.cursor.fetchall():
+                tag_name = (tag_name or '').strip()
+                if tag_name:
+                    tags.add(tag_name)
+        except Exception as e:
+            print(f"读取JAVDB标签失败(video_id={video_id}): {e}")
+        return tags
+
     def run_video_content_analyzer(self, video_paths):
         """运行视频内容分析器处理指定文件"""
         try:
@@ -8678,14 +8703,15 @@ class MediaLibrary:
                             
                             video_id, existing_tags = video_record
                             print(f"   现有标签：{existing_tags or '无'}")
-                            
-                            # 更新标签
+
+                            # 更新标签：清空旧的自动标签，重建为「JAVDB标签 ∪ 新生成标签」
+                            # 说明：JAVDB标签数据不动（独立表），此处只从关联表读取后并入 videos.tags
                             if generated_tags:
-                                # 获取现有标签
-                                existing_set = set([tag.strip() for tag in (existing_tags or '').split(',') if tag.strip()])
+                                # 从javdb关联表读取该视频的JAVDB标签（权威来源）
+                                javdb_tag_set = self.get_javdb_tags_for_video(video_id)
                                 new_set = set(generated_tags)
-                                all_tags = existing_set.union(new_set)
-                                
+                                all_tags = javdb_tag_set.union(new_set)
+
                                 # 更新数据库
                                 final_tags = ', '.join(sorted(all_tags))
                                 self.cursor.execute(
@@ -8693,7 +8719,7 @@ class MediaLibrary:
                                     (final_tags, video_id)
                                 )
                                 self.conn.commit()
-                                
+
                                 print(f"   ✓ 标签已更新: {final_tags}")
                                 processed += 1
                             else:
@@ -8783,19 +8809,20 @@ class MediaLibrary:
                             
                             video_id, existing_tags = video_record
                             print(f"   现有标签：{existing_tags or '无'}")
-                            
+
                             if generated_tags:
-                                existing_set = set([tag.strip() for tag in (existing_tags or '').split(',') if tag.strip()])
+                                # 清空旧的自动标签，重建为「JAVDB标签 ∪ 新生成标签」
+                                javdb_tag_set = self.get_javdb_tags_for_video(video_id)
                                 new_set = set(generated_tags)
-                                all_tags = existing_set.union(new_set)
-                                
+                                all_tags = javdb_tag_set.union(new_set)
+
                                 final_tags = ', '.join(sorted(all_tags))
                                 self.cursor.execute(
                                     "UPDATE videos SET tags = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
                                     (final_tags, video_id)
                                 )
                                 self.conn.commit()
-                                
+
                                 print(f"   ✓ 标签已更新: {final_tags}")
                             else:
                                 print(f"   - 未生成新标签")
@@ -9010,14 +9037,15 @@ class MediaLibrary:
                                 progress_num = processed + failed
                                 progress_window.update_progress(progress_num, f"无标签: {current_file} (已标记)", success=True)
                             elif generated_tags:
-                                existing_tags = set(tag.strip() for tag in (current_tags or '').split(',') if tag.strip())
+                                # 清空旧的自动标签，重建为「JAVDB标签 ∪ 新生成标签」
+                                javdb_tag_set = self.get_javdb_tags_for_video(video_id)
                                 new_tags = set(generated_tags)
-                                all_tags = existing_tags.union(new_tags)
-                                
+                                all_tags = javdb_tag_set.union(new_tags)
+
                                 tags_str = ', '.join(sorted(all_tags))
                                 self.cursor.execute("UPDATE videos SET tags = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?", (tags_str, video_id))
                                 self.conn.commit()
-                                
+
                                 print(f"已更新标签: {current_file} - {', '.join(generated_tags)}")
                                 updated += 1
                                 processed += 1
