@@ -3,21 +3,41 @@
 
 # ============ 必需的第三方库 / Required Third-party Libraries ============
 
+# GUI 框架 / GUI Framework
+# PySide6 v1/v2/v4 版本均依赖 / Required by PySide6 v1/v2/v4 versions
+PySide6>=6.5.0
+
+# 环境变量加载 / Environment Variables Loader
+# 用于加载 .env 文件（API 密钥等）/ For loading .env files (API keys etc.)
+python-dotenv>=1.0.0
+
 # 图像处理库 / Image Processing Library
 # 用于缩略图生成、图像显示和处理 / For thumbnail generation, image display and processing
 Pillow>=10.0.0
 opencv-python>=4.10.0.0
+
+# 数值计算 / Numerical Computing
+# 视频分析、特征处理依赖 / For video analysis and feature processing
+numpy>=1.24.0
 
 # 网络请求库 / HTTP Requests Library  
 # 用于网络相关功能和爬虫系统 / For network-related features and crawler system
 requests>=2.31.0
 requests[socks]>=2.31.0  # SOCKS代理支持 / SOCKS proxy support
 PySocks>=1.7.1  # SOCKS代理依赖 / SOCKS proxy dependency
+urllib3>=2.0.0
 playwright>=1.48.0
+
+# 浏览器自动化 / Browser Automation
+# 爬虫驱动 / For crawler drivers
+selenium>=4.15.0
 
 # HTML解析库 / HTML Parsing Library
 # 用于网页内容解析 / For web content parsing
 lxml>=4.9.0
+
+# 文件回收站 / Send to Trash
+# 安全删除文件到回收站 / Safely send files to trash
 Send2Trash>=1.8.2
 
 # CloudFlare绕过 / CloudFlare Bypass
@@ -31,6 +51,22 @@ coloredlogs>=15.0
 # 配置文件处理 / Configuration File Processing
 # 用于YAML配置文件 / For YAML configuration files
 PyYAML>=6.0
+
+# 数据处理 / Data Processing
+# 爬虫数据导出、批量处理 / For crawler data export and batch processing
+pandas>=2.0.0
+
+# 中文分词 / Chinese Word Segmentation
+# 标签、标题处理 / For tag and title processing
+jieba>=0.42.1
+
+# 进度条 / Progress Bar
+# 批量操作进度显示 / For batch operation progress display
+tqdm>=4.66.0
+
+# 系统监控 / System Monitoring
+# 进程、资源监控 / For process and resource monitoring
+psutil>=5.9.0
 
 # ============ Python内置库 / Built-in Python Libraries ============
 # 以下库为Python标准库，无需单独安装 / The following are Python standard libraries, no separate installation required
@@ -91,9 +127,16 @@ PyYAML>=6.0
 # Python 3.7+ 是最低要求 / Python 3.7+ is the minimum requirement
 # 推荐使用 Python 3.9+ / Python 3.9+ is recommended
 
+# ============ 可选依赖（AI 视频分析）/ Optional (AI Video Analysis) ============
+# 仅 video_analyzer/ 模块需要 / Only needed for video_analyzer/ module
+# mlx-whisper  # macOS Apple Silicon 字幕提取（MLX-Whisper → SRT）
+
 # ============ 安装说明 / Installation Instructions ============
-# 1. 确保已安装Python 3.7+ / Ensure Python 3.7+ is installed
+# 1. 确保已安装Python 3.9+ / Ensure Python 3.9+ is installed
 # 2. 运行: pip install -r requirements.txt
 # 3. 安装FFmpeg（见上述说明）/ Install FFmpeg (see instructions above)
 # 4. 运行: python init_database.py (首次使用) / Run: python init_database.py (first time)
-# 5. 运行: python media_library.py 或 ./start_media_library.sh / Run: python media_library.py or ./start_media_library.sh
+# 5. 启动应用 / Launch the app:
+#    python media_library_v2.py        # PySide6 v2（推荐）/ Recommended
+#    python media_library.py           # Tk 经典版 / Tk classic
+#    python media_library_v4.py        # PySide6 v4

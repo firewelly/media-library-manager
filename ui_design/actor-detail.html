@@ -1,0 +1,199 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>演员详情窗口</title>
+<link rel="stylesheet" href="assets/tokens.css">
+<link rel="stylesheet" href="assets/theme-dark.css">
+<link rel="stylesheet" href="assets/common.css">
+<style>
+  /* 演员详情页特有布局 */
+  body { padding: var(--sp-6); overflow: auto; }
+  .actor-page {
+    max-width: 1200px; margin: 0 auto;
+    display: grid; grid-template-columns: 280px 1fr; gap: var(--sp-6);
+  }
+  .actor-card {
+    background: var(--bg-panel-solid); border-radius: var(--r-lg);
+    overflow: hidden; box-shadow: var(--shadow-panel);
+  }
+  .actor-card .avatar {
+    width: 100%; aspect-ratio: 3/4; object-fit: cover;
+    background: var(--bg-skeleton); display: block;
+  }
+  .actor-card .info { padding: var(--sp-4); }
+  .actor-card h1 { font-size: var(--fs-20); margin-bottom: var(--sp-1); }
+  .actor-card .alias { color: var(--text-3); font-size: var(--fs-12); margin-bottom: var(--sp-3); }
+  .actor-card .stats { display: flex; gap: var(--sp-4); margin-bottom: var(--sp-4); }
+  .actor-card .stat { text-align: center; }
+  .actor-card .stat .num { font-size: var(--fs-18); font-weight: 700; color: var(--accent); }
+  .actor-card .stat .label { font-size: var(--fs-11); color: var(--text-3); }
+  .actor-card .kv { display: flex; padding: 4px 0; font-size: var(--fs-12); }
+  .actor-card .kv .k { width: 60px; color: var(--text-3); flex-shrink: 0; }
+  .actor-card .kv .v { flex: 1; }
+  .actor-card .actions { display: flex; gap: var(--sp-2); margin-top: var(--sp-4); }
+  .actor-card .actions .btn { flex: 1; justify-content: center; }
+
+  .works-section {
+    background: var(--bg-panel-solid); border-radius: var(--r-lg);
+    padding: var(--sp-4); box-shadow: var(--shadow-panel);
+  }
+  .works-section .header {
+    display: flex; align-items: center; justify-content: space-between;
+    margin-bottom: var(--sp-4);
+  }
+  .works-section .header h2 { font-size: var(--fs-16); }
+  .works-section .header .tools { display: flex; gap: var(--sp-2); }
+
+  /* 封面网格 */
+  .cover-grid {
+    display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+    gap: var(--sp-3);
+  }
+  .cover-item {
+    position: relative; border-radius: var(--r-md); overflow: hidden;
+    cursor: pointer; transition: transform var(--dur-fast) var(--ease-out);
+  }
+  .cover-item:hover { transform: translateY(-2px); }
+  .cover-item .thumb {
+    width: 100%; aspect-ratio: 2/3; object-fit: cover;
+    background: var(--bg-skeleton); display: block;
+  }
+  .cover-item .meta {
+    position: absolute; left: 0; right: 0; bottom: 0;
+    padding: var(--sp-2); background: linear-gradient(transparent, rgba(0,0,0,0.8));
+    color: #fff; font-size: var(--fs-11);
+  }
+  .cover-item .meta .code { font-family: var(--font-mono); opacity: 0.8; }
+  .cover-item .meta .stars { font-size: var(--fs-10); }
+  .cover-item .badge-online {
+    position: absolute; top: var(--sp-2); right: var(--sp-2);
+    width: 8px; height: 8px; border-radius: 50%;
+    background: var(--online); box-shadow: 0 0 6px var(--online);
+  }
+  .cover-item .badge-offline {
+    position: absolute; top: var(--sp-2); right: var(--sp-2);
+    width: 8px; height: 8px; border-radius: 50%;
+    background: var(--offline);
+  }
+</style>
+</head>
+<body class="theme-dark">
+
+<div class="actor-page">
+  <!-- 左侧演员卡片 -->
+  <div class="actor-card">
+    <div class="avatar"></div>
+    <div class="info">
+      <h1>橋本ありな</h1>
+      <div class="alias">Hashimoto Arina · 桥本有菜</div>
+      <div class="stats">
+        <div class="stat"><div class="num">127</div><div class="label">作品数</div></div>
+        <div class="stat"><div class="num">4.38</div><div class="label">JAVDB均分</div></div>
+        <div class="stat"><div class="num">89</div><div class="label">在线数</div></div>
+      </div>
+      <div class="kv"><span class="k">生日</span><span class="v">1996-08-29</span></div>
+      <div class="kv"><span class="k">出生地</span><span class="v">东京都</span></div>
+      <div class="kv"><span class="k">身高</span><span class="v">162 cm</span></div>
+      <div class="kv"><span class="k">血型</span><span class="v">O型</span></div>
+      <div class="kv"><span class="k">JAVDB</span><span class="v" style="color:var(--accent)">查看主页 →</span></div>
+      <div class="actions">
+        <button class="btn primary">★ 收藏</button>
+        <button class="btn">同步信息</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 右侧作品列表 -->
+  <div class="works-section">
+    <div class="header">
+      <h2>作品列表（127）</h2>
+      <div class="tools">
+        <div class="seg">
+          <span class="opt on">▦ 封面</span>
+          <span class="opt">☰ 列表</span>
+        </div>
+        <button class="btn">排序：评分 ▾</button>
+        <button class="btn on">仅在线</button>
+      </div>
+    </div>
+    <div class="cover-grid">
+      <div class="cover-item">
+        <div class="thumb"></div>
+        <span class="badge-online"></span>
+        <div class="meta"><div class="code">MIDE-837</div><div class="stars">★★★★★</div></div>
+      </div>
+      <div class="cover-item">
+        <div class="thumb"></div>
+        <span class="badge-online"></span>
+        <div class="meta"><div class="code">MIDE-643</div><div class="stars">★★★★★</div></div>
+      </div>
+      <div class="cover-item">
+        <div class="thumb"></div>
+        <span class="badge-online"></span>
+        <div class="meta"><div class="code">MIDE-705</div><div class="stars">★★★★★</div></div>
+      </div>
+      <div class="cover-item">
+        <div class="thumb"></div>
+        <span class="badge-online"></span>
+        <div class="meta"><div class="code">MIDE-569</div><div class="stars">★★★★</div></div>
+      </div>
+      <div class="cover-item">
+        <div class="thumb"></div>
+        <span class="badge-online"></span>
+        <div class="meta"><div class="code">MIDE-512</div><div class="stars">★★★★</div></div>
+      </div>
+      <div class="cover-item">
+        <div class="thumb"></div>
+        <span class="badge-offline"></span>
+        <div class="meta"><div class="code">MIDE-448</div><div class="stars">★★★</div></div>
+      </div>
+      <div class="cover-item">
+        <div class="thumb"></div>
+        <span class="badge-online"></span>
+        <div class="meta"><div class="code">MIDE-402</div><div class="stars">★★★★</div></div>
+      </div>
+      <div class="cover-item">
+        <div class="thumb"></div>
+        <span class="badge-online"></span>
+        <div class="meta"><div class="code">MIDE-389</div><div class="stars">★★★★</div></div>
+      </div>
+      <div class="cover-item">
+        <div class="thumb"></div>
+        <span class="badge-offline"></span>
+        <div class="meta"><div class="code">MIDE-356</div><div class="stars">★★★</div></div>
+      </div>
+      <div class="cover-item">
+        <div class="thumb"></div>
+        <span class="badge-online"></span>
+        <div class="meta"><div class="code">MIDE-312</div><div class="stars">★★★★</div></div>
+      </div>
+      <div class="cover-item">
+        <div class="thumb"></div>
+        <span class="badge-online"></span>
+        <div class="meta"><div class="code">MIDE-287</div><div class="stars">★★★★★</div></div>
+      </div>
+      <div class="cover-item">
+        <div class="thumb"></div>
+        <span class="badge-online"></span>
+        <div class="meta"><div class="code">MIDE-256</div><div class="stars">★★★★</div></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- 设计稿画板导航 -->
+<div class="artboard-tag">演员详情窗口</div>
+<nav class="artboard-nav">
+  <a href="index.html">索引</a>
+  <a href="main-dark.html">A·主界面</a>
+  <a href="main-light.html">B·主界面</a>
+  <a href="cover-wall.html">封面墙</a>
+  <a href="actor-detail.html" class="here">演员详情</a>
+  <a href="tag-manager.html">标签管理</a>
+  <a href="scan-progress.html">扫描进度</a>
+</nav>
+
+</body>
+</html>
