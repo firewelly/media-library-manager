@@ -1,0 +1,203 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>扫描进度窗口</title>
+<link rel="stylesheet" href="assets/tokens.css">
+<link rel="stylesheet" href="assets/theme-dark.css">
+<link rel="stylesheet" href="assets/common.css">
+<style>
+  body { padding: var(--sp-6); overflow: auto; }
+  .scan-page {
+    max-width: 900px; margin: 0 auto;
+    background: var(--bg-panel-solid); border-radius: var(--r-lg);
+    box-shadow: var(--shadow-panel); padding: var(--sp-6);
+  }
+  .scan-page h1 { font-size: var(--fs-20); margin-bottom: var(--sp-1); }
+  .scan-page .sub { color: var(--text-3); font-size: var(--fs-12); margin-bottom: var(--sp-6); }
+
+  /* 总进度 */
+  .overall {
+    background: var(--bg-hover); border-radius: var(--r-md);
+    padding: var(--sp-4); margin-bottom: var(--sp-6);
+  }
+  .overall .header {
+    display: flex; align-items: center; justify-content: space-between;
+    margin-bottom: var(--sp-3);
+  }
+  .overall .header .title { font-size: var(--fs-14); font-weight: 600; }
+  .overall .header .stats { font-size: var(--fs-12); color: var(--text-2); }
+  .overall .header .stats b { color: var(--accent); font-weight: 700; }
+  .progress-bar {
+    height: 8px; background: var(--bg-active); border-radius: var(--r-full);
+    overflow: hidden; margin-bottom: var(--sp-2);
+  }
+  .progress-bar .fill {
+    height: 100%; border-radius: var(--r-full);
+    background: linear-gradient(90deg, var(--accent), var(--accent-hover));
+    transition: width var(--dur-med) var(--ease-out);
+  }
+  .overall .meta {
+    display: flex; gap: var(--sp-4); font-size: var(--fs-12); color: var(--text-3);
+  }
+  .overall .meta span b { color: var(--text-1); font-weight: 600; }
+
+  /* 设备列表 */
+  .devices { margin-bottom: var(--sp-6); }
+  .devices h2 { font-size: var(--fs-14); margin-bottom: var(--sp-3); }
+  .device-item {
+    display: flex; align-items: center; gap: var(--sp-3);
+    padding: var(--sp-3); border: 1px solid var(--border);
+    border-radius: var(--r-md); margin-bottom: var(--sp-2);
+  }
+  .device-item .icon { font-size: var(--fs-18); }
+  .device-item .info { flex: 1; }
+  .device-item .info .name { font-size: var(--fs-13); font-weight: 600; margin-bottom: 2px; }
+  .device-item .info .path { font-size: var(--fs-11); color: var(--text-3); font-family: var(--font-mono); }
+  .device-item .progress { width: 200px; }
+  .device-item .progress .bar {
+    height: 6px; background: var(--bg-active); border-radius: var(--r-full);
+    overflow: hidden; margin-bottom: 2px;
+  }
+  .device-item .progress .bar .fill {
+    height: 100%; border-radius: var(--r-full);
+    background: var(--accent);
+  }
+  .device-item .progress .text {
+    font-size: var(--fs-11); color: var(--text-3); text-align: right;
+  }
+  .device-item .status {
+    width: 80px; text-align: right; font-size: var(--fs-12);
+  }
+  .device-item .status.done { color: var(--success); }
+  .device-item .status.scanning { color: var(--accent); }
+  .device-item .status.pending { color: var(--text-3); }
+
+  /* 日志区 */
+  .log-section h2 { font-size: var(--fs-14); margin-bottom: var(--sp-3); }
+  .log-box {
+    background: var(--bg-app); border: 1px solid var(--border);
+    border-radius: var(--r-md); padding: var(--sp-3);
+    font-family: var(--font-mono); font-size: var(--fs-11);
+    color: var(--text-2); max-height: 240px; overflow-y: auto;
+    line-height: 1.6;
+  }
+  .log-box .line { white-space: pre-wrap; word-break: break-all; }
+  .log-box .line.info { color: var(--text-2); }
+  .log-box .line.success { color: var(--success); }
+  .log-box .line.warning { color: var(--warning); }
+  .log-box .line.error { color: var(--danger); }
+  .log-box .line .time { color: var(--text-3); margin-right: var(--sp-2); }
+
+  /* 底部操作 */
+  .scan-page .footer {
+    display: flex; justify-content: flex-end; gap: var(--sp-2);
+    margin-top: var(--sp-6); padding-top: var(--sp-4);
+    border-top: 1px solid var(--border);
+  }
+</style>
+</head>
+<body class="theme-dark">
+
+<div class="scan-page">
+  <h1>扫描媒体库</h1>
+  <div class="sub">正在扫描所有存储设备，检测新增、移动、删除的视频文件…</div>
+
+  <!-- 总进度 -->
+  <div class="overall">
+    <div class="header">
+      <span class="title">总体进度</span>
+      <span class="stats">已扫描 <b>31,247</b> / 48,888 个文件</span>
+    </div>
+    <div class="progress-bar"><div class="fill" style="width:64%"></div></div>
+    <div class="meta">
+      <span>新增：<b>127</b></span>
+      <span>移动：<b>34</b></span>
+      <span>删除：<b>8</b></span>
+      <span>耗时：<b>02:34</b></span>
+      <span>预计剩余：<b>01:28</b></span>
+    </div>
+  </div>
+
+  <!-- 设备列表 -->
+  <div class="devices">
+    <h2>存储设备</h2>
+    <div class="device-item">
+      <span class="icon">▣</span>
+      <div class="info">
+        <div class="name">本地磁盘</div>
+        <div class="path">/Users/firewell/Movies</div>
+      </div>
+      <div class="progress">
+        <div class="bar"><div class="fill" style="width:100%"></div></div>
+        <div class="text">21,430 / 21,430</div>
+      </div>
+      <div class="status done">✓ 完成</div>
+    </div>
+    <div class="device-item">
+      <span class="icon">☁</span>
+      <div class="info">
+        <div class="name">NAS · app</div>
+        <div class="path">/Volumes/app</div>
+      </div>
+      <div class="progress">
+        <div class="bar"><div class="fill" style="width:72%"></div></div>
+        <div class="text">12,157 / 16,885</div>
+      </div>
+      <div class="status scanning">扫描中…</div>
+    </div>
+    <div class="device-item">
+      <span class="icon">☁</span>
+      <div class="info">
+        <div class="name">NAS · Video</div>
+        <div class="path">/Volumes/Video</div>
+      </div>
+      <div class="progress">
+        <div class="bar"><div class="fill" style="width:0%"></div></div>
+        <div class="text">0 / 10,573</div>
+      </div>
+      <div class="status pending">等待中</div>
+    </div>
+  </div>
+
+  <!-- 日志区 -->
+  <div class="log-section">
+    <h2>扫描日志</h2>
+    <div class="log-box">
+      <div class="line info"><span class="time">14:22:01</span>开始扫描本地磁盘 /Users/firewell/Movies</div>
+      <div class="line success"><span class="time">14:22:15</span>发现新增文件：SSIS-698.mp4 (6.82 GB)</div>
+      <div class="line success"><span class="time">14:22:18</span>发现新增文件：SSIS-950.mp4 (11.24 GB)</div>
+      <div class="line info"><span class="time">14:22:34</span>MD5 匹配：MIDE-837.mp4 → 已存在于数据库</div>
+      <div class="line warning"><span class="time">14:23:02</span>文件移动检测：MIDE-643.mp4 从 /old/path 移动到 /new/path</div>
+      <div class="line success"><span class="time">14:23:45</span>本地磁盘扫描完成，共 21,430 个文件</div>
+      <div class="line info"><span class="time">14:23:46</span>开始扫描 NAS · app /Volumes/app</div>
+      <div class="line success"><span class="time">14:24:12</span>发现新增文件：MIDE-705.mp4 (5.91 GB)</div>
+      <div class="line error"><span class="time">14:24:38</span>无法访问文件：/Volumes/app/corrupted.mp4 (权限不足)</div>
+      <div class="line info"><span class="time">14:25:01</span>正在计算 MD5：MIDE-569.mp4 (4.76 GB)...</div>
+      <div class="line success"><span class="time">14:25:23</span>MD5 计算完成：MIDE-569.mp4 → a3f8b2c1d4e5...</div>
+    </div>
+  </div>
+
+  <!-- 底部操作 -->
+  <div class="footer">
+    <button class="btn">暂停</button>
+    <button class="btn">取消</button>
+    <button class="btn primary">在后台运行</button>
+  </div>
+</div>
+
+<!-- 设计稿画板导航 -->
+<div class="artboard-tag">扫描进度窗口</div>
+<nav class="artboard-nav">
+  <a href="index.html">索引</a>
+  <a href="main-dark.html">A·主界面</a>
+  <a href="main-light.html">B·主界面</a>
+  <a href="cover-wall.html">封面墙</a>
+  <a href="actor-detail.html">演员详情</a>
+  <a href="tag-manager.html">标签管理</a>
+  <a href="scan-progress.html" class="here">扫描进度</a>
+</nav>
+
+</body>
+</html>

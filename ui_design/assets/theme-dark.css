@@ -1,0 +1,56 @@
+/* ==========================================================================
+   方向 A · 深色主题 theme-dark.css
+   风格：影院感深色 + 玻璃拟态面板 + 琥珀金强调色
+   适用：长时间浏览、暗光环境、突出封面色彩
+   ========================================================================== */
+
+body.theme-dark {
+  /* 背景层次 */
+  --bg-app: #0f1115;          /* 应用底色 */
+  --bg-sidebar: #14171d;      /* 侧栏 */
+  --bg-panel: rgba(255, 255, 255, 0.04);   /* 玻璃面板 */
+  --bg-panel-solid: #1a1e26;  /* 实心面板（详情/弹窗） */
+  --bg-hover: rgba(255, 255, 255, 0.06);
+  --bg-active: rgba(255, 255, 255, 0.10);
+  --bg-input: rgba(0, 0, 0, 0.30);
+  --bg-skeleton: rgba(255, 255, 255, 0.07);  /* 骨架屏占位 */
+
+  /* 边框与分隔 */
+  --border: rgba(255, 255, 255, 0.08);
+  --border-strong: rgba(255, 255, 255, 0.14);
+
+  /* 文字 */
+  --text-1: #f2f4f8;   /* 主文字 */
+  --text-2: #aab2c0;   /* 次文字 */
+  --text-3: #6b7382;   /* 弱提示 */
+  --text-on-accent: #1a1405;
+
+  /* 强调色：琥珀金 */
+  --accent: #f0b429;
+  --accent-hover: #ffc53d;
+  --accent-soft: rgba(240, 180, 41, 0.14);
+
+  /* 语义色 */
+  --success: #3fb950;
+  --warning: #d29922;
+  --danger: #f47067;
+  --info: #58a6ff;
+
+  /* NAS 在线状态 */
+  --online: #3fb950;
+  --offline: #8b949e;
+
+  /* 星级 */
+  --star-on: #f0b429;
+  --star-off: rgba(255, 255, 255, 0.18);
+
+  /* 阴影 */
+  --shadow-panel: 0 8px 32px rgba(0, 0, 0, 0.45);
+  --shadow-pop: 0 12px 40px rgba(0, 0, 0, 0.6);
+
+  /* 玻璃拟态 */
+  --blur: saturate(140%) blur(18px);
+
+  background: var(--bg-app);
+  color: var(--text-1);
+}

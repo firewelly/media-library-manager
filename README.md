@@ -7,9 +7,123 @@
 本系统包含多个专门的工具脚本，分别负责爬虫、维护、更新等不同任务。以下是根目录下主要脚本的功能说明：
 
 ### 🖥️ 主程序
-- **`media_library.py`**: **[经典版]** 基于 Tkinter 的媒体库管理主程序。
-- **`media_library_pyside.py`**: **[推荐]** 基于 PySide6 的现代化图形界面版本，功能已完全对齐经典版，并增强了批量操作和视觉体验。
-- **`start_media_library.sh`**: macOS/Linux 系统的快捷启动脚本，会自动检查环境依赖并启动 PySide6 版本。
+
+本项目有两个**可用入口**（共享同一套后端：数据库、爬虫、文件操作、`utils/` 工具层）：
+
+| 版本 | 入口 | 工具包 | 定位 | 推荐场景 |
+|------|------|--------|------|----------|
+| **经典版（Tkinter）** | `media_library.py` | Tkinter | 单文件、历史悠久、功能最全 | 老用户、轻量环境、兼容旧系统 |
+| **PySide6 v2（推荐）** | `media_library_v2.py` | PySide6 | 模块化包、双主题、高性能、对齐 ui_design | 日常使用、大数据量 |
+
+> ⚠️ **关于其他版本**：
+> - `media_library_pyside.py`（PySide6 v1）：v2 的前身，单文件桥接版，已被 v2 取代，**不再维护**。
+> - `media_library_v4.py`（PySide6 v4）：早期并行实验版本，**已废弃、不可用**，勿使用。
+>
+> **可用的主要是 Tk 版和 v2 两个入口。**
+
+> **Tk 与 v2 的关系**：v2 通过 `gui_adapter` 桥接复用 Tk 版（`media_library.py`）的全部后端方法（166 个方法动态绑定到 Qt 窗口），**零改动后端代码**。Tk 版既是独立应用，也是 v2 的逻辑库。
+
+#### PySide6 v2（推荐版本）
+
+基于 `ui_design/` 设计稿实现，模块化包结构，支持双主题切换，针对万级数据量做了性能优化。
+
+**启动：**
+```bash
+# 方式 1：模块入口（推荐）
+python -m pyside_v2.app
+
+# 方式 2：直接运行
+python pyside_v2/app.py
+```
+
+**主要特性：**
+- 🎨 **双主题**：影院感深色（琥珀金强调）+ Fluent 浅色（青蓝强调），顶部一键切换，选择持久化
+- ⚡ **高性能列表**：`QTableView + QAbstractTableModel` 分页（300条/页），首屏 0.5s（Tk 全量加载需 31s+）
+- 🔍 **异步查询**：搜索/筛选在后台线程执行，UI 不冻结（SQLite 大库冷查询 2-5s 期间仍可操作）
+- 🧭 **侧栏导航**：全部/收藏/最近/无标签 + 存储位置（自动加载 NAS 文件夹）+ 管理入口
+- 🎴 **卡片式详情**：右侧悬浮卡片（封面 + 可编辑标题/标签/描述 + 8 个操作按钮）
+- 🗂️ **模块化结构**：按职责拆分（`widgets/` `dialogs/` `workers/` `theme/` `windows/`）
+
+**与 Tk 经典版的关系：**
+- ✅ **完全对齐**：文件/工具/界面菜单全部功能（扫描、导入、去重、MD5、JAVDB 抓取、标签/文件夹管理、演员详情等）均通过 `gui_adapter` 桥接复用，零改动后端
+- 🆕 **v2 新增**（Tk 版没有的增强功能）：
+  - **演员库浏览**：网格卡片式浏览全部演员（头像/名字/作品数），支持搜索/排序/收藏筛选/翻页，点击进详情（v1 只能搜索单个演员）
+  - **双主题切换**：深色影院风 ↔ 浅色 Fluent，运行时一键切换并持久化
+  - **高性能分页**：49000+ 视频首屏 0.5s（v1 全量加载 31s+）
+  - **异步查询**：搜索/筛选不冻结 UI
+  - **侧栏导航**：收藏/最近/无标签/存储位置一键筛选
+
+**性能优化（针对 49000+ 视频的真实库验证）：**
+
+| 场景 | Tk 经典版 | PySide v2 | 提升 |
+|------|-----------|-----------|------|
+| 首屏加载 | ~31s（全量 JOIN 卡顿） | **0.5s**（分页 + 索引） | 60x |
+| 搜索（热查询） | 卡顿 | **0.1-0.6s** | - |
+| 翻页 | 重新全量查询 | **0.04s** | - |
+| UI 响应 | 查询时冻结 | **异步不冻结** | - |
+
+> 优化手段：复合索引 `(is_nas_online, file_created_time)`、`id IN (子查询)` 替代 OR LIKE、查询在 `QueryWorker` 后台线程执行。
+
+**包结构：**
+```
+pyside_v2/
+├── app.py                 # 入口：init_qt_logging → 主题 → MainWindow
+├── core/
+│   ├── bridge.py          # MediaLibraryCore（后端 facade，原样移入）
+│   └── logging.py         # Qt 日志路由（monkey-patch 后端 _output_log）
+├── theme/
+│   ├── base.qss           # 双主题共用样式模板（占位符插值）
+│   ├── theme_manager.py   # 主题加载/切换/持久化
+│   └── colors.py          # 设计令牌 + 调色板（对齐 ui_design）
+├── widgets/
+│   ├── video_model.py     # QAbstractTableModel（分页 + 核心字段）
+│   ├── video_table.py     # QTableView（翻页/排序/右键）
+│   ├── star_delegate.py   # 星级金黄色绘制
+│   └── sidebar.py         # 左侧导航栏
+├── dialogs/
+│   ├── import_videos.py   # 导入视频（三阶段 worker，对齐 Tk 流程）
+│   ├── tag_manager.py     # 标签管理
+│   ├── folder_manager.py  # 文件夹管理
+│   ├── jav_info_dialog.py # JAV 信息面板
+│   ├── actor_browser.py   # 演员库浏览（v2 新增·网格卡片）
+│   └── actor_detail.py    # 演员详情
+├── workers/
+│   └── query_worker.py    # 异步查询线程
+└── windows/
+    └── main_window.py     # 主窗口（组装 + 菜单 + 桥接 + 信号路由）
+```
+
+#### Tk 经典版
+
+单文件 `media_library.py`（~12600 行），自包含的 Tkinter 应用。既是独立 GUI，也是 v1/v2 import 的逻辑库（`MediaLibrary` 类）。
+
+```bash
+python media_library.py
+```
+
+### 🚀 启动入口
+
+两个可用入口在根目录都有对应的 Python 入口文件：
+
+| 入口文件 | 启动版本 | 说明 |
+|----------|----------|------|
+| `media_library.py` | Tk 经典版 | 单文件，历史悠久 |
+| `media_library_v2.py` | PySide6 v2（推荐） | 模块化包 `pyside_v2/`，双主题·高性能 |
+
+```bash
+python media_library.py            # Tk 经典版
+python media_library_v2.py         # PySide6 v2（推荐·双主题·高性能）
+```
+
+另有跨平台启动脚本（自动检查 Python + 按需装 PySide6）：
+
+| 脚本 | 平台 | 启动版本 |
+|------|------|----------|
+| `start_media_library.sh` | macOS / Linux | Tk 经典版 |
+| `start_media_library_v2.sh` | macOS / Linux | PySide6 v2（推荐） |
+| `start_media_library_v2.bat` | Windows | PySide6 v2（推荐） |
+
+> macOS 用户也可用 Spotlight（`⌘ + 空格`）搜索 `Media Library` 启动 Tk 版，或 `Media Library v2` 启动 v2（双击对应的 `.app`）。
 
 ### 🕷️ 数据爬虫与登录
 - **`javdb_login_helper.py`**: **[基础组件]** JAVDB 登录助手。使用独立的浏览器用户数据目录（`~/.javdb_scraper/user_data` 或本地 `.edge_driver_user_data`）来持久化登录状态，只需登录一次即可供所有爬虫脚本使用。
@@ -368,11 +482,15 @@ python init_database.py
 
 4. **启动应用**
 ```bash
-# 方法1: 直接运行 (PySide6 GUI)
-python media_library_pyside.py
+# 推荐：PySide6 v2（自动检查环境 + 按需装 PySide6）
+python media_library_v2.py
 
-# 方法2: 使用启动脚本 (MacOS/Linux)
-./start_media_library.sh
+# 或用启动脚本（自动检查 Python + 装依赖）
+./start_media_library_v2.sh            # macOS/Linux
+start_media_library_v2.bat             # Windows
+
+# 或 Tk 经典版
+python media_library.py
 ```
 
 ### 主要依赖
@@ -557,8 +675,20 @@ python media_library_pyside.py
 ### 项目结构
 ```
 media-library/
-├── media_library.py              # Tkinter 主程序
-├── media_library_pyside.py       # PySide6 主程序
+├── media_library.py              # Tk 经典版主程序（也是后端逻辑库）
+├── media_library_v2.py           # PySide6 v2 启动入口（推荐）
+├── pyside_v2/                    # PySide6 v2 主程序（模块化包）
+│   ├── app.py                    # 入口
+│   ├── core/                     # 后端桥接 + 日志
+│   ├── theme/                    # 双主题 QSS + 设计令牌
+│   ├── widgets/                  # 列表/侧栏/delegate
+│   ├── dialogs/                  # 导入/标签/文件夹/JAV/演员对话框
+│   ├── workers/                  # 异步查询线程
+│   └── windows/                  # 主窗口
+├── media_library_pyside.py       # [已废弃] PySide6 v1，被 v2 取代
+├── media_library_v4.py           # [已废弃] PySide6 v4，不可用
+├── gui_adapter.py                # Tk→PySide 桥接层（v2 用）
+├── ui_design/                    # v2 设计稿（HTML/CSS 原型）
 ├── javsp_*.py                    # JavSP多源爬虫系统
 ├── javsp_config.yaml             # JavSP 配置文件
 ├── javdb_*.py                    # JAVDB 爬虫模块
@@ -573,7 +703,9 @@ media-library/
 ├── init_database.py              # 数据库初始化
 ├── gui_config.json               # 界面配置
 ├── requirements.txt              # 依赖包列表
-├── start_media_library.sh        # 启动脚本
+├── start_media_library.sh        # 启动脚本：Tk 经典版（macOS/Linux）
+├── start_media_library_v2.sh     # 启动脚本：PySide6 v2（macOS/Linux）
+├── start_media_library_v2.bat    # 启动脚本：PySide6 v2（Windows）
 └── README.md                     # 项目说明
 ```
 

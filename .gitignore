@@ -130,3 +130,7 @@ requirement/
 !build/windows/build_release.py
 release/
 *.jsonl
+
+# 临时测试文件 / Temporary test files
+_theme_showcase.py
+test_v4_*.py

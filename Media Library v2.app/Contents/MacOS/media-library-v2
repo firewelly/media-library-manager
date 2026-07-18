@@ -1,0 +1,58 @@
+#!/bin/bash
+
+# Media Library v2 启动器（macOS .app bundle）
+# PySide6 v2：双主题界面 + 高性能分页列表
+# 后台静默启动（不弹 Terminal），作为原生 GUI 应用运行
+
+# 日志（排查用）
+LOG_FILE="/tmp/media_library_v2_launch.log"
+echo "=== Starting Media Library v2 ===" > "$LOG_FILE"
+echo "Time: $(date)" >> "$LOG_FILE"
+
+# 程序目录（.app 的上两级即项目根）
+PROJECT_DIR="/Users/firewell/bin/media"
+echo "程序目录: $PROJECT_DIR" >> "$LOG_FILE"
+
+if [ ! -d "$PROJECT_DIR" ]; then
+    echo "错误: 未找到程序目录 $PROJECT_DIR" >> "$LOG_FILE"
+    osascript -e 'display alert "启动错误" message "未找到程序目录：'"$PROJECT_DIR"'"' 2>/dev/null
+    exit 1
+fi
+
+cd "$PROJECT_DIR" || exit 1
+
+# 检查 Python（完全按 PATH 顺序，不主动探测绝对路径）
+PYTHON_CMD=""
+if command -v python3 &> /dev/null; then
+    PYTHON_CMD="python3"
+elif command -v python &> /dev/null; then
+    PYTHON_CMD="python"
+else
+    echo "错误: 未找到 python3 或 python" >> "$LOG_FILE"
+    osascript -e 'display alert "启动错误" message "未找到 Python，请先安装 Python 3.9+。"' 2>/dev/null
+    exit 1
+fi
+echo "Python: $PYTHON_CMD ($($PYTHON_CMD --version 2>&1))" >> "$LOG_FILE"
+
+# 检查主程序文件
+if [ ! -f "media_library_v2.py" ]; then
+    echo "错误: 未找到 media_library_v2.py" >> "$LOG_FILE"
+    osascript -e 'display alert "启动错误" message "未找到 media_library_v2.py 文件。"' 2>/dev/null
+    exit 1
+fi
+
+# 检查 PySide6，缺失则安装
+if ! "$PYTHON_CMD" -c "import PySide6" 2>/dev/null; then
+    echo "PySide6 缺失，正在安装..." >> "$LOG_FILE"
+    "$PYTHON_CMD" -m pip install PySide6 -i https://pypi.tuna.tsinghua.edu.cn/simple >> "$LOG_FILE" 2>&1
+fi
+
+# 后台静默启动（nohup + disown，不弹 Terminal，应用退出后启动器自动退出）
+echo "正在启动 Media Library v2..." >> "$LOG_FILE"
+nohup "$PYTHON_CMD" media_library_v2.py >> "$LOG_FILE" 2>&1 &
+APP_PID=$!
+disown $APP_PID
+echo "已启动，PID: $APP_PID" >> "$LOG_FILE"
+
+# 启动器立即退出（GUI 进程已 detach）
+exit 0

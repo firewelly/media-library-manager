@@ -1,0 +1,56 @@
+/* ==========================================================================
+   方向 B · 浅色主题 theme-light.css
+   风格：Fluent 浅色 + 云母质感 + 青蓝主色
+   适用：日间办公、与操作系统浅色模式融合
+   ========================================================================== */
+
+body.theme-light {
+  /* 背景层次 */
+  --bg-app: #f3f4f7;          /* 应用底色 */
+  --bg-sidebar: #eceef2;      /* 侧栏 */
+  --bg-panel: rgba(255, 255, 255, 0.72);   /* 云母面板 */
+  --bg-panel-solid: #ffffff;  /* 实心面板 */
+  --bg-hover: rgba(16, 24, 40, 0.05);
+  --bg-active: rgba(16, 24, 40, 0.09);
+  --bg-input: #ffffff;
+  --bg-skeleton: rgba(16, 24, 40, 0.06);   /* 骨架屏占位 */
+
+  /* 边框与分隔 */
+  --border: rgba(16, 24, 40, 0.09);
+  --border-strong: rgba(16, 24, 40, 0.16);
+
+  /* 文字 */
+  --text-1: #1b1f27;
+  --text-2: #52596b;
+  --text-3: #8a91a1;
+  --text-on-accent: #ffffff;
+
+  /* 强调色：青蓝 */
+  --accent: #0f6fde;
+  --accent-hover: #2b84e8;
+  --accent-soft: rgba(15, 111, 222, 0.10);
+
+  /* 语义色 */
+  --success: #1a7f37;
+  --warning: #9a6700;
+  --danger: #cf222e;
+  --info: #0969da;
+
+  /* NAS 在线状态 */
+  --online: #1a7f37;
+  --offline: #8a91a1;
+
+  /* 星级 */
+  --star-on: #e8a009;
+  --star-off: rgba(16, 24, 40, 0.14);
+
+  /* 阴影 */
+  --shadow-panel: 0 2px 12px rgba(16, 24, 40, 0.08);
+  --shadow-pop: 0 12px 40px rgba(16, 24, 40, 0.16);
+
+  /* 云母质感 */
+  --blur: saturate(160%) blur(20px);
+
+  background: var(--bg-app);
+  color: var(--text-1);
+}

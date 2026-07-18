@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>媒体库管理器 · 设计稿索引</title>
+<link rel="stylesheet" href="assets/tokens.css">
+<link rel="stylesheet" href="assets/theme-dark.css">
+<link rel="stylesheet" href="assets/common.css">
+<style>
+  body { padding: var(--sp-10); overflow: auto; }
+  .index-page { max-width: 960px; margin: 0 auto; }
+  .index-page h1 { font-size: var(--fs-32); font-weight: 800; margin-bottom: var(--sp-2); }
+  .index-page .sub { color: var(--text-2); font-size: var(--fs-14); margin-bottom: var(--sp-8); line-height: 1.6; }
+  .index-page .sub code {
+    font-family: var(--font-mono); font-size: var(--fs-12);
+    background: var(--bg-hover); padding: 1px 6px; border-radius: var(--r-sm);
+  }
+
+  .section-title {
+    font-size: var(--fs-12); color: var(--text-3); letter-spacing: 0.08em;
+    margin-bottom: var(--sp-3); text-transform: uppercase;
+  }
+
+  .card-grid {
+    display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+    gap: var(--sp-4); margin-bottom: var(--sp-8);
+  }
+  .card {
+    display: block; text-decoration: none; color: inherit;
+    background: var(--bg-panel-solid); border: 1px solid var(--border);
+    border-radius: var(--r-lg); overflow: hidden;
+    transition: all var(--dur-med) var(--ease-out);
+  }
+  .card:hover {
+    border-color: var(--accent); transform: translateY(-2px);
+    box-shadow: var(--shadow-pop);
+  }
+  .card .preview {
+    height: 160px; background: var(--bg-skeleton);
+    display: grid; place-items: center; color: var(--text-3);
+    font-size: var(--fs-24); position: relative; overflow: hidden;
+  }
+  .card .preview .tag {
+    position: absolute; top: var(--sp-2); left: var(--sp-2);
+    padding: 2px 8px; border-radius: var(--r-sm);
+    font-size: var(--fs-11); font-weight: 600;
+  }
+  .card .preview .tag.dark { background: #1a1e26; color: #f0b429; }
+  .card .preview .tag.light { background: #fff; color: #0f6fde; }
+  .card .preview .tag.neutral { background: rgba(0,0,0,0.6); color: #fff; }
+  .card .body { padding: var(--sp-4); }
+  .card .body h3 { font-size: var(--fs-14); margin-bottom: var(--sp-1); }
+  .card .body p { font-size: var(--fs-12); color: var(--text-3); line-height: 1.5; }
+
+  .design-notes {
+    background: var(--bg-panel-solid); border: 1px solid var(--border);
+    border-radius: var(--r-lg); padding: var(--sp-5);
+    margin-bottom: var(--sp-6);
+  }
+  .design-notes h2 { font-size: var(--fs-16); margin-bottom: var(--sp-3); }
+  .design-notes ul { padding-left: var(--sp-5); }
+  .design-notes li { font-size: var(--fs-13); color: var(--text-2); line-height: 1.8; }
+  .design-notes li b { color: var(--text-1); }
+  .design-notes code {
+    font-family: var(--font-mono); font-size: var(--fs-12);
+    background: var(--bg-hover); padding: 1px 5px; border-radius: var(--r-sm);
+  }
+</style>
+</head>
+<body class="theme-dark">
+
+<div class="index-page">
+  <h1>媒体库管理器</h1>
+  <div class="sub">
+    现代化前端设计稿 · 基于 <code>tokens.css</code> 设计令牌 + 双主题变量（深色 / 浅色）<br>
+    所有页面共享 <code>common.css</code> 公共组件，通过 <code>body.theme-dark</code> / <code>body.theme-light</code> 切换主题
+  </div>
+
+  <div class="section-title">主界面 · 双方向对比</div>
+  <div class="card-grid">
+    <a class="card" href="main-dark.html">
+      <div class="preview" style="background:linear-gradient(135deg,#0f1115,#1a1e26)">
+        <span class="tag dark">方向 A</span>
+        ▦
+      </div>
+      <div class="body">
+        <h3>深色影院风</h3>
+        <p>琥珀金强调色 + 玻璃拟态面板 + 紧凑行高。适合长时间浏览、暗光环境，突出封面色彩。</p>
+      </div>
+    </a>
+    <a class="card" href="main-light.html">
+      <div class="preview" style="background:linear-gradient(135deg,#f3f4f7,#eceef2)">
+        <span class="tag light">方向 B</span>
+        ☰
+      </div>
+      <div class="body">
+        <h3>浅色 Fluent 风</h3>
+        <p>青蓝主色 + 云母质感 + 舒适行高 + 卡片式详情面板。与操作系统浅色模式融合。</p>
+      </div>
+    </a>
+  </div>
+
+  <div class="section-title">功能页面</div>
+  <div class="card-grid">
+    <a class="card" href="cover-wall.html">
+      <div class="preview" style="background:linear-gradient(135deg,#14171d,#1a1e26)">
+        <span class="tag neutral">封面墙</span>
+        ▦
+      </div>
+      <div class="body">
+        <h3>封面墙视图</h3>
+        <p>2:3 竖版封面网格，悬浮显示番号与星级，支持懒加载与虚拟滚动。</p>
+      </div>
+    </a>
+    <a class="card" href="actor-detail.html">
+      <div class="preview" style="background:linear-gradient(135deg,#14171d,#1a1e26)">
+        <span class="tag neutral">演员</span>
+        ◉
+      </div>
+      <div class="body">
+        <h3>演员详情窗口</h3>
+        <p>左侧演员卡片（头像、统计、基本信息）+ 右侧封面网格作品列表。</p>
+      </div>
+    </a>
+    <a class="card" href="tag-manager.html">
+      <div class="preview" style="background:linear-gradient(135deg,#14171d,#1a1e26)">
+        <span class="tag neutral">标签</span>
+        #
+      </div>
+      <div class="body">
+        <h3>标签管理窗口</h3>
+        <p>左侧分类树 + 右侧标签列表，支持颜色标记、批量合并/删除、搜索筛选。</p>
+      </div>
+    </a>
+    <a class="card" href="scan-progress.html">
+      <div class="preview" style="background:linear-gradient(135deg,#14171d,#1a1e26)">
+        <span class="tag neutral">扫描</span>
+        ⟳
+      </div>
+      <div class="body">
+        <h3>扫描进度窗口</h3>
+        <p>总进度条 + 设备列表（完成/扫描中/等待）+ 实时日志区，支持后台运行。</p>
+      </div>
+    </a>
+  </div>
+
+  <div class="design-notes">
+    <h2>设计说明</h2>
+    <ul>
+      <li><b>设计令牌</b>：<code>tokens.css</code> 定义字体、间距、圆角、布局尺寸等全局变量，与主题无关</li>
+      <li><b>双主题</b>：<code>theme-dark.css</code>（琥珀金 + 玻璃拟态）与 <code>theme-light.css</code>（青蓝 + 云母质感）通过 CSS 变量切换</li>
+      <li><b>公共组件</b>：<code>common.css</code> 包含按钮、搜索框、筛选 chip、虚拟列表、星级、骨架屏、详情面板、状态栏等</li>
+      <li><b>虚拟滚动</b>：列表页使用骨架屏行演示向下滚动时的懒加载占位效果</li>
+      <li><b>画板导航</b>：每个页面底部有统一的画板导航条，方便在各设计稿间切换</li>
+      <li><b>列配置</b>：主界面列表支持 18 列配置，设计稿中展示了最常用的 9 列</li>
+      <li><b>封面比例</b>：统一使用 2:3 竖版海报比例（<code>--cover-ratio: 0.6667</code>）</li>
+    </ul>
+  </div>
+</div>
+
+</body>
+</html>

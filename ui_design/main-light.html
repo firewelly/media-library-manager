@@ -1,0 +1,227 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>方向 B · 浅色 Fluent 风 — 媒体库主界面</title>
+<link rel="stylesheet" href="assets/tokens.css">
+<link rel="stylesheet" href="assets/theme-light.css">
+<link rel="stylesheet" href="assets/common.css">
+<style>
+  /* 方向 B 特有：舒适行高 + 卡片式详情 */
+  .vrow { height: var(--row-h-comfy); }
+  .detail { border-left: none; box-shadow: var(--shadow-panel); margin: var(--sp-3); border-radius: var(--r-lg); overflow-y: auto; }
+  .content { background: var(--bg-app); }
+  .vtable { background: var(--bg-panel-solid); margin: var(--sp-3) 0 var(--sp-3) var(--sp-3); border-radius: var(--r-lg); box-shadow: var(--shadow-panel); overflow: hidden; }
+  .detail .cover-wrap { border-radius: var(--r-lg) var(--r-lg) 0 0; overflow: hidden; }
+</style>
+</head>
+<body class="theme-light">
+
+<div class="app">
+  <!-- ================= 左侧导航 ================= -->
+  <aside class="sidebar">
+    <div class="brand"><span class="logo">M</span>媒体库</div>
+
+    <div class="nav-section">媒体库</div>
+    <div class="nav-item active"><span class="ico">▦</span>全部视频<span class="count">48,888</span></div>
+    <div class="nav-item"><span class="ico">★</span>收藏<span class="count">312</span></div>
+    <div class="nav-item"><span class="ico">◷</span>最近添加<span class="count">86</span></div>
+    <div class="nav-item"><span class="ico">⌀</span>无标签<span class="count">9,204</span></div>
+
+    <div class="nav-section">存储位置</div>
+    <div class="nav-item"><span class="ico">▣</span>本地磁盘<span class="count">21,430</span></div>
+    <div class="nav-item"><span class="ico">☁</span>NAS · app<span class="count">16,885</span></div>
+    <div class="nav-item"><span class="ico">☁</span>NAS · Video<span class="count">10,573</span></div>
+
+    <div class="nav-section">管理</div>
+    <div class="nav-item"><span class="ico">◉</span>演员库</div>
+    <div class="nav-item"><span class="ico">#</span>标签管理</div>
+    <div class="nav-item"><span class="ico">▸</span>文件夹管理</div>
+    <div class="nav-item"><span class="ico">⚙</span>设置</div>
+
+    <div class="storage">
+      <div class="storage-line"><span class="dot online"></span>本地磁盘 · 在线</div>
+      <div class="storage-line"><span class="dot online"></span>NAS /Volumes/app · 在线</div>
+      <div class="storage-line"><span class="dot offline"></span>NAS /Volumes/Video · 离线</div>
+    </div>
+  </aside>
+
+  <!-- ================= 主区 ================= -->
+  <div class="main">
+    <!-- 顶部工具栏 -->
+    <div class="topbar">
+      <div class="search-box">
+        <span>⌕</span>
+        <input type="text" placeholder="搜索标题 / 番号 / 演员 / 标签…" value="MIDE">
+        <kbd>⌘K</kbd>
+      </div>
+      <button class="btn">筛选 ▾</button>
+      <button class="btn on">仅在线</button>
+      <button class="btn">排序：JAVDB评分 ▾</button>
+      <div class="spacer"></div>
+      <div class="seg">
+        <span class="opt on">☰ 列表</span>
+        <span class="opt">▦ 封面墙</span>
+      </div>
+      <button class="btn primary">⟳ 扫描媒体库</button>
+    </div>
+
+    <!-- 已选筛选条件 -->
+    <div class="filterbar">
+      <span class="label">筛选：</span>
+      <span class="chip">演员：桥本ありな<span class="x">✕</span></span>
+      <span class="chip">JAVDB ≥ 4.0<span class="x">✕</span></span>
+      <span class="chip">状态：在线<span class="x">✕</span></span>
+      <span class="chip clear">清空全部</span>
+      <span class="label" style="margin-left:auto">匹配 47 条 · 耗时 5ms</span>
+    </div>
+
+    <!-- 内容区 -->
+    <div class="content">
+      <!-- 虚拟滚动列表 -->
+      <div class="vtable">
+        <div class="vtable-head">
+          <div class="col-check"><input type="checkbox"></div>
+          <div class="col-title sortable">标题</div>
+          <div class="col-actors sortable">演员</div>
+          <div class="col-stars sortable">星级</div>
+          <div class="col-tags">标签</div>
+          <div class="col-size sortable">大小</div>
+          <div class="col-status">状态</div>
+          <div class="col-duration">时长</div>
+          <div class="col-date sortable sorted">评分 ↑</div>
+        </div>
+        <div class="vtable-body">
+          <div class="vrow selected">
+            <div class="col-check"><input type="checkbox" checked></div>
+            <div class="col-title"><div class="cell-title"><div class="thumb"></div><span class="name">MIDE-837 高清中字</span><span class="code">MIDE-837</span></div></div>
+            <div class="col-actors">橋本ありな</div>
+            <div class="col-stars"><span class="stars"><b>★★★★★</b></span></div>
+            <div class="col-tags"><span class="mtag hot">高清</span><span class="mtag">中文字幕</span></div>
+            <div class="col-size">6.02 GB</div>
+            <div class="col-status"><span class="badge"><span class="dot online"></span>在线</span></div>
+            <div class="col-duration">2:29:55</div>
+            <div class="col-date">4.62</div>
+          </div>
+          <div class="vrow">
+            <div class="col-check"><input type="checkbox"></div>
+            <div class="col-title"><div class="cell-title"><div class="thumb"></div><span class="name">MIDE-643</span><span class="code">MIDE-643</span></div></div>
+            <div class="col-actors">橋本ありな</div>
+            <div class="col-stars"><span class="stars"><b>★★★★</b>★</span></div>
+            <div class="col-tags"><span class="mtag hot">高清</span></div>
+            <div class="col-size">5.38 GB</div>
+            <div class="col-status"><span class="badge"><span class="dot online"></span>在线</span></div>
+            <div class="col-duration">2:18:20</div>
+            <div class="col-date">4.48</div>
+          </div>
+          <div class="vrow">
+            <div class="col-check"><input type="checkbox"></div>
+            <div class="col-title"><div class="cell-title"><div class="thumb"></div><span class="name">MIDE-705 中文字幕</span><span class="code">MIDE-705</span></div></div>
+            <div class="col-actors">橋本ありな</div>
+            <div class="col-stars"><span class="stars"><b>★★★★</b>★</span></div>
+            <div class="col-tags"><span class="mtag hot">高清</span><span class="mtag">中文字幕</span></div>
+            <div class="col-size">5.91 GB</div>
+            <div class="col-status"><span class="badge"><span class="dot online"></span>在线</span></div>
+            <div class="col-duration">2:24:08</div>
+            <div class="col-date">4.41</div>
+          </div>
+          <div class="vrow">
+            <div class="col-check"><input type="checkbox"></div>
+            <div class="col-title"><div class="cell-title"><div class="thumb"></div><span class="name">MIDE-569</span><span class="code">MIDE-569</span></div></div>
+            <div class="col-actors">橋本ありな</div>
+            <div class="col-stars"><span class="stars"><b>★★★</b>★★</span></div>
+            <div class="col-tags"><span class="mtag hot">高清</span></div>
+            <div class="col-size">4.76 GB</div>
+            <div class="col-status"><span class="badge"><span class="dot online"></span>在线</span></div>
+            <div class="col-duration">2:09:37</div>
+            <div class="col-date">4.22</div>
+          </div>
+          <div class="vrow">
+            <div class="col-check"><input type="checkbox"></div>
+            <div class="col-title"><div class="cell-title"><div class="thumb"></div><span class="name">MIDE-512 4K 修复</span><span class="code">MIDE-512</span></div></div>
+            <div class="col-actors">橋本ありな</div>
+            <div class="col-stars"><span class="stars"><b>★★★★</b>★</span></div>
+            <div class="col-tags"><span class="mtag hot">高清</span><span class="mtag">4K</span></div>
+            <div class="col-size">9.85 GB</div>
+            <div class="col-status"><span class="badge"><span class="dot online"></span>在线</span></div>
+            <div class="col-duration">2:15:51</div>
+            <div class="col-date">4.15</div>
+          </div>
+          <div class="vrow">
+            <div class="col-check"><input type="checkbox"></div>
+            <div class="col-title"><div class="cell-title"><div class="thumb"></div><span class="name">MIDE-448</span><span class="code">MIDE-448</span></div></div>
+            <div class="col-actors">橋本ありな</div>
+            <div class="col-stars"><span class="stars"><b>★★★</b>★★</span></div>
+            <div class="col-tags"><span class="mtag hot">高清</span></div>
+            <div class="col-size">4.55 GB</div>
+            <div class="col-status"><span class="badge"><span class="dot online"></span>在线</span></div>
+            <div class="col-duration">1:58:44</div>
+            <div class="col-date">4.08</div>
+          </div>
+          <!-- 骨架屏行 -->
+          <div class="vrow skeleton"><div class="col-check"></div><div class="col-title"><div class="sk" style="width:70%"></div></div><div class="col-actors"><div class="sk" style="width:58%"></div></div><div class="col-stars"><div class="sk" style="width:70%"></div></div><div class="col-tags"><div class="sk" style="width:50%"></div></div><div class="col-size"><div class="sk" style="width:80%"></div></div><div class="col-status"><div class="sk" style="width:60%"></div></div><div class="col-duration"><div class="sk" style="width:70%"></div></div><div class="col-date"><div class="sk" style="width:50%"></div></div></div>
+          <div class="vrow skeleton"><div class="col-check"></div><div class="col-title"><div class="sk" style="width:64%"></div></div><div class="col-actors"><div class="sk" style="width:55%"></div></div><div class="col-stars"><div class="sk" style="width:70%"></div></div><div class="col-tags"><div class="sk" style="width:46%"></div></div><div class="col-size"><div class="sk" style="width:80%"></div></div><div class="col-status"><div class="sk" style="width:60%"></div></div><div class="col-duration"><div class="sk" style="width:70%"></div></div><div class="col-date"><div class="sk" style="width:50%"></div></div></div>
+          <div class="vrow skeleton"><div class="col-check"></div><div class="col-title"><div class="sk" style="width:76%"></div></div><div class="col-actors"><div class="sk" style="width:60%"></div></div><div class="col-stars"><div class="sk" style="width:70%"></div></div><div class="col-tags"><div class="sk" style="width:52%"></div></div><div class="col-size"><div class="sk" style="width:80%"></div></div><div class="col-status"><div class="sk" style="width:60%"></div></div><div class="col-duration"><div class="sk" style="width:70%"></div></div><div class="col-date"><div class="sk" style="width:50%"></div></div></div>
+        </div>
+      </div>
+
+      <!-- 右侧详情面板（卡片式悬浮） -->
+      <aside class="detail">
+        <div class="cover-wrap">
+          <div class="cover"></div>
+          <span class="res-badge">1920×1080 · H.264</span>
+        </div>
+        <div class="body">
+          <h2>MIDE-837 高清中字</h2>
+          <div class="sub">MIDE-837 · 2020-10-13 发行</div>
+          <div class="rate-row">
+            <span class="stars" style="font-size:15px"><b>★★★★★</b></span>
+            <span class="badge" style="color:var(--warning)">JAVDB 4.62</span>
+          </div>
+          <div class="kv"><span class="k">演员</span><span class="v">橋本ありな</span></div>
+          <div class="kv"><span class="k">大小</span><span class="v">6.02 GB</span></div>
+          <div class="kv"><span class="k">时长</span><span class="v">2:29:55</span></div>
+          <div class="kv"><span class="k">分辨率</span><span class="v">1920×1080 · 29.97fps</span></div>
+          <div class="kv"><span class="k">设备</span><span class="v">NAS · app</span></div>
+          <div class="kv"><span class="k">创建时间</span><span class="v">2026-05-18 09:41</span></div>
+          <div class="kv"><span class="k">路径</span><span class="v mono">/Volumes/app/MIDE/MIDE-837.mp4</span></div>
+          <div class="sec-title">标签 <a style="color:var(--accent);cursor:pointer">编辑</a></div>
+          <div><span class="mtag hot">高清</span><span class="mtag">中文字幕</span><span class="mtag">收藏</span></div>
+          <div class="sec-title">JAVDB 标签</div>
+          <div><span class="mtag">單體作品</span><span class="mtag">中文字幕</span><span class="mtag">高清</span></div>
+          <div class="actions">
+            <button class="btn primary">▶ 播放</button>
+            <button class="btn">打开目录</button>
+            <button class="btn icon">⋯</button>
+          </div>
+        </div>
+      </aside>
+    </div>
+
+    <!-- 底部状态栏 -->
+    <div class="statusbar">
+      <span>共 48,888 条 · 匹配 47 条</span>
+      <span>已加载 47 条（虚拟滚动）</span>
+      <span class="perf">列表渲染 2ms · 搜索 5ms</span>
+      <div class="spacer"></div>
+      <span>行高：舒适 ▾</span>
+      <span>18 列 · 已显示 9 列</span>
+    </div>
+  </div>
+</div>
+
+<!-- 设计稿画板导航 -->
+<div class="artboard-tag">方向 B · 浅色 Fluent 风 · 主界面</div>
+<nav class="artboard-nav">
+  <a href="index.html">索引</a>
+  <a href="main-dark.html">A·主界面</a>
+  <a href="main-light.html" class="here">B·主界面</a>
+  <a href="cover-wall.html">封面墙</a>
+  <a href="actor-detail.html">演员详情</a>
+  <a href="tag-manager.html">标签管理</a>
+  <a href="scan-progress.html">扫描进度</a>
+</nav>
+
+</body>
+</html>

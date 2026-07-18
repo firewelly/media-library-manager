@@ -1,0 +1,242 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>方向 A · 深色影院风 — 媒体库主界面</title>
+<link rel="stylesheet" href="assets/tokens.css">
+<link rel="stylesheet" href="assets/theme-dark.css">
+<link rel="stylesheet" href="assets/common.css">
+</head>
+<body class="theme-dark">
+
+<div class="app">
+  <!-- ================= 左侧导航 ================= -->
+  <aside class="sidebar">
+    <div class="brand"><span class="logo">M</span>媒体库</div>
+
+    <div class="nav-section">媒体库</div>
+    <div class="nav-item active"><span class="ico">▦</span>全部视频<span class="count">48,888</span></div>
+    <div class="nav-item"><span class="ico">★</span>收藏<span class="count">312</span></div>
+    <div class="nav-item"><span class="ico">◷</span>最近添加<span class="count">86</span></div>
+    <div class="nav-item"><span class="ico">⌀</span>无标签<span class="count">9,204</span></div>
+
+    <div class="nav-section">存储位置</div>
+    <div class="nav-item"><span class="ico">▣</span>本地磁盘<span class="count">21,430</span></div>
+    <div class="nav-item"><span class="ico">☁</span>NAS · app<span class="count">16,885</span></div>
+    <div class="nav-item"><span class="ico">☁</span>NAS · Video<span class="count">10,573</span></div>
+
+    <div class="nav-section">管理</div>
+    <div class="nav-item"><span class="ico">◉</span>演员库</div>
+    <div class="nav-item"><span class="ico">#</span>标签管理</div>
+    <div class="nav-item"><span class="ico">▸</span>文件夹管理</div>
+    <div class="nav-item"><span class="ico">⚙</span>设置</div>
+
+    <div class="storage">
+      <div class="storage-line"><span class="dot online"></span>本地磁盘 · 在线</div>
+      <div class="storage-line"><span class="dot online"></span>NAS /Volumes/app · 在线</div>
+      <div class="storage-line"><span class="dot offline"></span>NAS /Volumes/Video · 离线</div>
+    </div>
+  </aside>
+
+  <!-- ================= 主区 ================= -->
+  <div class="main">
+    <!-- 顶部工具栏 -->
+    <div class="topbar">
+      <div class="search-box">
+        <span>⌕</span>
+        <input type="text" placeholder="搜索标题 / 番号 / 演员 / 标签…" value="SSIS">
+        <kbd>⌘K</kbd>
+      </div>
+      <button class="btn">筛选 ▾</button>
+      <button class="btn on">星级 ≥ 3</button>
+      <button class="btn">排序：创建时间 ▾</button>
+      <div class="spacer"></div>
+      <div class="seg">
+        <span class="opt on">☰ 列表</span>
+        <span class="opt">▦ 封面墙</span>
+      </div>
+      <button class="btn primary">⟳ 扫描媒体库</button>
+    </div>
+
+    <!-- 已选筛选条件 -->
+    <div class="filterbar">
+      <span class="label">筛选：</span>
+      <span class="chip">分辨率 ≥ 1080P<span class="x">✕</span></span>
+      <span class="chip">标签：高清<span class="x">✕</span></span>
+      <span class="chip">状态：在线<span class="x">✕</span></span>
+      <span class="chip clear">清空全部</span>
+      <span class="label" style="margin-left:auto">匹配 12,306 条 · 耗时 8ms</span>
+    </div>
+
+    <!-- 内容区 -->
+    <div class="content">
+      <!-- 虚拟滚动列表 -->
+      <div class="vtable">
+        <div class="vtable-head">
+          <div class="col-check"><input type="checkbox"></div>
+          <div class="col-title sortable sorted">标题 ↑</div>
+          <div class="col-actors sortable">演员</div>
+          <div class="col-stars sortable">星级</div>
+          <div class="col-tags">标签</div>
+          <div class="col-size sortable">大小</div>
+          <div class="col-status">状态</div>
+          <div class="col-duration">时长</div>
+          <div class="col-date sortable">创建时间</div>
+        </div>
+        <div class="vtable-body">
+          <div class="vrow selected">
+            <div class="col-check"><input type="checkbox" checked></div>
+            <div class="col-title"><div class="cell-title"><div class="thumb"></div><span class="name">SSIS-698 高清收藏版 字幕付</span><span class="code">SSIS-698</span></div></div>
+            <div class="col-actors">三上悠亜</div>
+            <div class="col-stars"><span class="stars"><b>★★★★</b>★</span></div>
+            <div class="col-tags"><span class="mtag hot">高清</span><span class="mtag">中文字幕</span></div>
+            <div class="col-size">6.82 GB</div>
+            <div class="col-status"><span class="badge"><span class="dot online"></span>在线</span></div>
+            <div class="col-duration">2:28:41</div>
+            <div class="col-date">2026-06-30</div>
+          </div>
+          <div class="vrow">
+            <div class="col-check"><input type="checkbox"></div>
+            <div class="col-title"><div class="cell-title"><div class="thumb"></div><span class="name">SSIS-950 4K 修复版</span><span class="code">SSIS-950</span></div></div>
+            <div class="col-actors">河北彩花</div>
+            <div class="col-stars"><span class="stars"><b>★★★★★</b></span></div>
+            <div class="col-tags"><span class="mtag hot">高清</span><span class="mtag">4K</span></div>
+            <div class="col-size">11.24 GB</div>
+            <div class="col-status"><span class="badge"><span class="dot online"></span>在线</span></div>
+            <div class="col-duration">2:05:17</div>
+            <div class="col-date">2026-06-28</div>
+          </div>
+          <div class="vrow">
+            <div class="col-check"><input type="checkbox"></div>
+            <div class="col-title"><div class="cell-title"><div class="thumb"></div><span class="name">SSIS-816</span><span class="code">SSIS-816</span></div></div>
+            <div class="col-actors"> miru</div>
+            <div class="col-stars"><span class="stars"><b>★★★</b>★★</span></div>
+            <div class="col-tags"><span class="mtag hot">高清</span></div>
+            <div class="col-size">5.47 GB</div>
+            <div class="col-status"><span class="badge"><span class="dot online"></span>在线</span></div>
+            <div class="col-duration">1:58:03</div>
+            <div class="col-date">2026-06-25</div>
+          </div>
+          <div class="vrow">
+            <div class="col-check"><input type="checkbox"></div>
+            <div class="col-title"><div class="cell-title"><div class="thumb"></div><span class="name">SSIS-607 无修正流出</span><span class="code">SSIS-607</span></div></div>
+            <div class="col-actors">七ツ森りり</div>
+            <div class="col-stars"><span class="stars"><b>★★★★</b>★</span></div>
+            <div class="col-tags"><span class="mtag hot">高清</span><span class="mtag">流出</span></div>
+            <div class="col-size">7.15 GB</div>
+            <div class="col-status"><span class="badge"><span class="dot offline"></span>离线</span></div>
+            <div class="col-duration">2:11:49</div>
+            <div class="col-date">2026-06-21</div>
+          </div>
+          <div class="vrow">
+            <div class="col-check"><input type="checkbox"></div>
+            <div class="col-title"><div class="cell-title"><div class="thumb"></div><span class="name">SSIS-546</span><span class="code">SSIS-546</span></div></div>
+            <div class="col-actors">小宵こなん</div>
+            <div class="col-stars"><span class="stars"><b>★★★</b>★★</span></div>
+            <div class="col-tags"><span class="mtag hot">高清</span></div>
+            <div class="col-size">4.98 GB</div>
+            <div class="col-status"><span class="badge"><span class="dot online"></span>在线</span></div>
+            <div class="col-duration">2:33:12</div>
+            <div class="col-date">2026-06-18</div>
+          </div>
+          <div class="vrow">
+            <div class="col-check"><input type="checkbox"></div>
+            <div class="col-title"><div class="cell-title"><div class="thumb"></div><span class="name">SSIS-448 中文字幕</span><span class="code">SSIS-448</span></div></div>
+            <div class="col-actors">楓ふうあ</div>
+            <div class="col-stars"><span class="stars"><b>★★★★★</b></span></div>
+            <div class="col-tags"><span class="mtag hot">高清</span><span class="mtag">中文字幕</span></div>
+            <div class="col-size">6.31 GB</div>
+            <div class="col-status"><span class="badge"><span class="dot offline"></span>离线</span></div>
+            <div class="col-duration">2:02:56</div>
+            <div class="col-date">2026-06-15</div>
+          </div>
+          <div class="vrow">
+            <div class="col-check"><input type="checkbox"></div>
+            <div class="col-title"><div class="cell-title"><div class="thumb"></div><span class="name">SSIS-402</span><span class="code">SSIS-402</span></div></div>
+            <div class="col-actors">山手梨愛</div>
+            <div class="col-stars"><span class="stars"><b>★★★</b>★★</span></div>
+            <div class="col-tags"><span class="mtag hot">高清</span></div>
+            <div class="col-size">5.72 GB</div>
+            <div class="col-status"><span class="badge"><span class="dot online"></span>在线</span></div>
+            <div class="col-duration">1:47:30</div>
+            <div class="col-date">2026-06-12</div>
+          </div>
+          <div class="vrow">
+            <div class="col-check"><input type="checkbox"></div>
+            <div class="col-title"><div class="cell-title"><div class="thumb"></div><span class="name">SSIS-389 4K</span><span class="code">SSIS-389</span></div></div>
+            <div class="col-actors">葵つかさ</div>
+            <div class="col-stars"><span class="stars"><b>★★★★</b>★</span></div>
+            <div class="col-tags"><span class="mtag hot">高清</span><span class="mtag">4K</span></div>
+            <div class="col-size">10.08 GB</div>
+            <div class="col-status"><span class="badge"><span class="dot online"></span>在线</span></div>
+            <div class="col-duration">2:19:44</div>
+            <div class="col-date">2026-06-09</div>
+          </div>
+          <!-- 骨架屏行：演示虚拟滚动向下滚动时的懒加载占位 -->
+          <div class="vrow skeleton"><div class="col-check"></div><div class="col-title"><div class="sk" style="width:72%"></div></div><div class="col-actors"><div class="sk" style="width:60%"></div></div><div class="col-stars"><div class="sk" style="width:70%"></div></div><div class="col-tags"><div class="sk" style="width:55%"></div></div><div class="col-size"><div class="sk" style="width:80%"></div></div><div class="col-status"><div class="sk" style="width:60%"></div></div><div class="col-duration"><div class="sk" style="width:70%"></div></div><div class="col-date"><div class="sk" style="width:85%"></div></div></div>
+          <div class="vrow skeleton"><div class="col-check"></div><div class="col-title"><div class="sk" style="width:65%"></div></div><div class="col-actors"><div class="sk" style="width:55%"></div></div><div class="col-stars"><div class="sk" style="width:70%"></div></div><div class="col-tags"><div class="sk" style="width:48%"></div></div><div class="col-size"><div class="sk" style="width:80%"></div></div><div class="col-status"><div class="sk" style="width:60%"></div></div><div class="col-duration"><div class="sk" style="width:70%"></div></div><div class="col-date"><div class="sk" style="width:85%"></div></div></div>
+          <div class="vrow skeleton"><div class="col-check"></div><div class="col-title"><div class="sk" style="width:78%"></div></div><div class="col-actors"><div class="sk" style="width:62%"></div></div><div class="col-stars"><div class="sk" style="width:70%"></div></div><div class="col-tags"><div class="sk" style="width:52%"></div></div><div class="col-size"><div class="sk" style="width:80%"></div></div><div class="col-status"><div class="sk" style="width:60%"></div></div><div class="col-duration"><div class="sk" style="width:70%"></div></div><div class="col-date"><div class="sk" style="width:85%"></div></div></div>
+          <div class="vrow skeleton"><div class="col-check"></div><div class="col-title"><div class="sk" style="width:70%"></div></div><div class="col-actors"><div class="sk" style="width:58%"></div></div><div class="col-stars"><div class="sk" style="width:70%"></div></div><div class="col-tags"><div class="sk" style="width:50%"></div></div><div class="col-size"><div class="sk" style="width:80%"></div></div><div class="col-status"><div class="sk" style="width:60%"></div></div><div class="col-duration"><div class="sk" style="width:70%"></div></div><div class="col-date"><div class="sk" style="width:85%"></div></div></div>
+        </div>
+      </div>
+
+      <!-- 右侧详情面板 -->
+      <aside class="detail">
+        <div class="cover-wrap">
+          <div class="cover"></div>
+          <span class="res-badge">1920×1080 · H.265</span>
+        </div>
+        <div class="body">
+          <h2>SSIS-698 高清收藏版 字幕付</h2>
+          <div class="sub">SSIS-698 · 2023-05-09 发行</div>
+          <div class="rate-row">
+            <span class="stars" style="font-size:15px"><b>★★★★</b>★</span>
+            <span class="badge" style="color:var(--warning)">JAVDB 4.36</span>
+          </div>
+          <div class="kv"><span class="k">演员</span><span class="v">三上悠亜</span></div>
+          <div class="kv"><span class="k">大小</span><span class="v">6.82 GB</span></div>
+          <div class="kv"><span class="k">时长</span><span class="v">2:28:41</span></div>
+          <div class="kv"><span class="k">分辨率</span><span class="v">1920×1080 · 59.94fps</span></div>
+          <div class="kv"><span class="k">设备</span><span class="v">本地磁盘</span></div>
+          <div class="kv"><span class="k">创建时间</span><span class="v">2026-06-30 14:22</span></div>
+          <div class="kv"><span class="k">路径</span><span class="v mono">/Users/firewell/Movies/SSIS/SSIS-698.mp4</span></div>
+          <div class="sec-title">标签 <a style="color:var(--accent);cursor:pointer">编辑</a></div>
+          <div><span class="mtag hot">高清</span><span class="mtag">中文字幕</span><span class="mtag">收藏</span></div>
+          <div class="sec-title">JAVDB 标签</div>
+          <div><span class="mtag">單體作品</span><span class="mtag">中文字幕</span><span class="mtag">高清</span></div>
+          <div class="actions">
+            <button class="btn primary">▶ 播放</button>
+            <button class="btn">打开目录</button>
+            <button class="btn icon">⋯</button>
+          </div>
+        </div>
+      </aside>
+    </div>
+
+    <!-- 底部状态栏 -->
+    <div class="statusbar">
+      <span>共 48,888 条 · 匹配 12,306 条</span>
+      <span>已加载 200 条（虚拟滚动）</span>
+      <span class="perf">列表渲染 3ms · 搜索 8ms</span>
+      <div class="spacer"></div>
+      <span>行高：紧凑 ▾</span>
+      <span>18 列 · 已显示 9 列</span>
+    </div>
+  </div>
+</div>
+
+<!-- 设计稿画板导航 -->
+<div class="artboard-tag">方向 A · 深色影院风 · 主界面</div>
+<nav class="artboard-nav">
+  <a href="index.html">索引</a>
+  <a href="main-dark.html" class="here">A·主界面</a>
+  <a href="main-light.html">B·主界面</a>
+  <a href="cover-wall.html">封面墙</a>
+  <a href="actor-detail.html">演员详情</a>
+  <a href="tag-manager.html">标签管理</a>
+  <a href="scan-progress.html">扫描进度</a>
+</nav>
+
+</body>
+</html>
