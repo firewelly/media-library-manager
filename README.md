@@ -17,7 +17,6 @@
 
 > ⚠️ **关于其他版本**：
 > - `media_library_pyside.py`（PySide6 v1）：v2 的前身，单文件桥接版，已被 v2 取代，**不再维护**。
-> - `media_library_v4.py`（PySide6 v4）：早期并行实验版本，**已废弃、不可用**，勿使用。
 >
 > **可用的主要是 Tk 版和 v2 两个入口。**
 
@@ -686,7 +685,6 @@ media-library/
 │   ├── workers/                  # 异步查询线程
 │   └── windows/                  # 主窗口
 ├── media_library_pyside.py       # [已废弃] PySide6 v1，被 v2 取代
-├── media_library_v4.py           # [已废弃] PySide6 v4，不可用
 ├── gui_adapter.py                # Tk→PySide 桥接层（v2 用）
 ├── ui_design/                    # v2 设计稿（HTML/CSS 原型）
 ├── javsp_*.py                    # JavSP多源爬虫系统
