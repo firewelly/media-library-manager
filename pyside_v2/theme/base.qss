@@ -325,19 +325,28 @@ QProgressBar::chunk {
 }
 
 /* ==================== 复选/单选 ==================== */
+/* checkbox 选中态用 SVG 对勾，确保状态清晰可见（不用实心方块）*/
 QCheckBox, QRadioButton { spacing: 8px; background: transparent; color: @@text_1@@; }
-QCheckBox::indicator, QRadioButton::indicator { width: 15px; height: 15px; }
+QCheckBox::indicator, QRadioButton::indicator { width: 16px; height: 16px; }
 QCheckBox::indicator {
     border: 1.5px solid @@border_strong@@;
     border-radius: 4px;
     background: @@bg_input@@;
 }
-QCheckBox::indicator:checked { background: @@accent@@; border-color: @@accent@@; }
+QCheckBox::indicator:hover { border-color: @@accent@@; }
+QCheckBox::indicator:checked {
+    background: @@accent@@;
+    border-color: @@accent@@;
+    /* 白色对勾 SVG（文件路径，跨主题复用，背景由 QSS 提供）*/
+    image: url(@@checkbox_svg@@);
+}
+QCheckBox::indicator:disabled { border-color: @@border@@; background: @@bg_app@@; }
 QRadioButton::indicator {
     border: 1.5px solid @@border_strong@@;
     border-radius: 8px;
     background: @@bg_input@@;
 }
+QRadioButton::indicator:hover { border-color: @@accent@@; }
 QRadioButton::indicator:checked {
     border-color: @@accent@@;
     background: qradialgradient(cx:0.5, cy:0.5, radius:0.5,

@@ -1397,6 +1397,152 @@ class MediaLibraryCore:
         except Exception as e:
             return False, f"生成缩略图异常: {str(e)}"
 
+    # ---- 导入视频所需的本地实现（避免 gui_adapter 桥接参数注入 bug）----
+    # 这些方法原在 Tk MediaLibrary 类里，通过桥接调用会因 adapted_method(*args)
+    # 多注入 temp_self 导致 TypeError，因此在此提供本地实现。
+
+    def can_play_video(self, file_path):
+        """检查视频文件是否可播放（含 seek 完整性测试）。本地实现，不走桥接。"""
+        try:
+            if not os.path.exists(file_path):
+                return False
+            import cv2
+            cap = cv2.VideoCapture(file_path)
+            if not cap.isOpened():
+                return False
+            frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+            if frame_count <= 0:
+                cap.release()
+                return False
+            # seek 测试（检测损坏视频）
+            has_issue = self._test_video_seeking(cap, frame_count)
+            cap.release()
+            if has_issue:
+                return False
+            return True
+        except Exception as e:
+            print(f"can_play_video 检查出错 {os.path.basename(file_path)}: {e}")
+            return False
+
+    def _test_video_seeking(self, cap, frame_count, test_points=5):
+        """测试视频跳转，返回 True 表示有问题。"""
+        try:
+            import cv2
+            test_frames = [int(frame_count * p) for p in (0.1, 0.3, 0.5, 0.7, 0.9)]
+            for frame_num in test_frames:
+                cap.set(cv2.CAP_PROP_POS_FRAMES, frame_num)
+                ret, frame = cap.read()
+                if not ret or frame is None:
+                    return True
+                actual = int(cap.get(cv2.CAP_PROP_POS_FRAMES))
+                if abs(actual - frame_num) > frame_count * 0.05:
+                    return True
+            return False
+        except Exception:
+            return False
+
+    def check_duplicate_by_hash(self, md5_hash, file_size=None):
+        """检查 MD5+大小 是否已在数据库（双重判定）。本地实现。"""
+        try:
+            if file_size is not None:
+                self.cursor.execute(
+                    "SELECT COUNT(*) FROM videos WHERE md5_hash = ? AND file_size = ?",
+                    (md5_hash, file_size)
+                )
+            else:
+                self.cursor.execute(
+                    "SELECT COUNT(*) FROM videos WHERE md5_hash = ?", (md5_hash,)
+                )
+            return self.cursor.fetchone()[0] > 0
+        except Exception:
+            return False
+
+    def process_filename(self, filename):
+        """清理文件名（大写化、去垃圾字符）。本地实现，对齐 Tk process_filename。"""
+        import re
+        filename_no_ext, ext = os.path.splitext(filename)
+        filename_no_ext = filename_no_ext.strip('.')
+        new_filename = filename_no_ext.upper() + ext.lower()
+        if " " in new_filename:
+            new_filename = new_filename.replace(" ", "")
+        garbage = [
+            "CHINESEHOMEMADEVIDEO", "_CHINESE_HOMEMADE_VIDEO",
+            "HHD800.COM@", "WOXAV.COM@",
+            r"\[.*?\]", r"\(.*?\)", r"\{.*?\}", r"【.*?】",
+        ]
+        for pattern in garbage:
+            if pattern.startswith("r"):
+                p = pattern[1:]
+                new_filename = re.sub(p, "", new_filename)
+            else:
+                new_filename = new_filename.replace(pattern, "")
+        new_filename = re.sub(r"_+", "_", new_filename)
+        new_filename = re.sub(r"-+", "-", new_filename)
+        return new_filename
+
+    def resolve_filename_conflict(self, target_path):
+        """文件名冲突时加序号。本地实现。"""
+        if not os.path.exists(target_path):
+            return target_path
+        base, ext = os.path.splitext(target_path)
+        n = 1
+        new_path = f"{base}_{n}{ext}"
+        while os.path.exists(new_path):
+            n += 1
+            new_path = f"{base}_{n}{ext}"
+        return new_path
+
+    def add_video_to_db_optimized(self, file_path, folder_type):
+        """添加视频到数据库（优化版，含移动检测）。本地实现，对齐 Tk。"""
+        try:
+            self.cursor.execute("SELECT id FROM videos WHERE file_path = ?", (file_path,))
+            if self.cursor.fetchone():
+                return 'skipped'
+            file_name = os.path.basename(file_path)
+            file_size = os.path.getsize(file_path) if os.path.exists(file_path) else 0
+            # 移动检测
+            self.cursor.execute(
+                "SELECT id, file_path FROM videos WHERE file_name = ? AND file_size = ? AND file_path != ?",
+                (file_name, file_size, file_path)
+            )
+            moved = self.cursor.fetchone()
+            if moved:
+                old_id, old_path = moved
+                if not os.path.exists(old_path):
+                    self.cursor.execute(
+                        "UPDATE videos SET file_path = ?, source_folder = ? WHERE id = ?",
+                        (file_path, os.path.dirname(file_path), old_id)
+                    )
+                    return 'updated'
+            file_created_time = None
+            if os.path.exists(file_path):
+                try:
+                    stat = os.stat(file_path)
+                    file_created_time = datetime.fromtimestamp(
+                        stat.st_birthtime if hasattr(stat, 'st_birthtime') else stat.st_ctime
+                    )
+                except Exception:
+                    pass
+            source_folder = os.path.dirname(file_path)
+            md5_hash = self.calculate_md5_hash(file_path)
+            stars = self.parse_stars_from_filename(file_name)
+            title = self.parse_title_from_filename(file_name)
+            duration, resolution = self.get_video_info(file_path)
+            nas_path = file_path if folder_type == "nas" else None
+            is_nas_online = os.path.exists(file_path) and os.path.isfile(file_path)
+            self.cursor.execute(
+                """INSERT INTO videos
+                   (file_path, file_name, file_size, md5_hash, title, stars,
+                    nas_path, is_nas_online, duration, resolution, file_created_time, source_folder)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (file_path, file_name, file_size, md5_hash, title, stars,
+                 nas_path, is_nas_online, duration, resolution, file_created_time, source_folder)
+            )
+            return 'added'
+        except Exception as e:
+            print(f"add_video_to_db_optimized 失败 {file_path}: {e}")
+            return 'error'
+
 
 class GenericWorker(QThread):
     """通用的后台工作线程（原样移入）。

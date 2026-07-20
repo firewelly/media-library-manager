@@ -42,6 +42,22 @@ class ImportVideosDialog(QDialog):
         self._setup_ui()
         self._load_target_folders()
 
+    def closeEvent(self, event):
+        """关闭前等待导入线程结束，避免销毁运行中 QThread 崩溃。"""
+        if self._import_worker and self._import_worker.isRunning():
+            self._import_worker.cancel()
+            self._import_worker.quit()
+            self._import_worker.wait(3000)
+        event.accept()
+
+    def reject(self):
+        """点"关闭"按钮/ESC 时也触发清理。"""
+        if self._import_worker and self._import_worker.isRunning():
+            self._import_worker.cancel()
+            self._import_worker.quit()
+            self._import_worker.wait(3000)
+        super().reject()
+
     def _setup_ui(self):
         self.setWindowTitle("导入视频文件")
         self.resize(720, 640)
@@ -95,22 +111,10 @@ class ImportVideosDialog(QDialog):
         self.chk_duplicate.setChecked(True)
         self.chk_rename = QCheckBox("自动清理文件名")
         self.chk_rename.setChecked(True)
-        # 移动 vs 复制
-        mode_row = QHBoxLayout()
-        mode_row.addWidget(QLabel("操作方式："))
-        self.mode_group = QButtonGroup(self)
-        self.rb_copy = QRadioButton("复制（保留源文件）")
-        self.rb_move = QRadioButton("移动（删除源文件）")
-        self.rb_copy.setChecked(True)
-        self.mode_group.addButton(self.rb_copy)
-        self.mode_group.addButton(self.rb_move)
-        mode_row.addWidget(self.rb_copy)
-        mode_row.addWidget(self.rb_move)
-        mode_row.addStretch()
+        # 导入统一为移动（对齐 v1：shutil.move）
         opt_lay.addWidget(self.chk_invalid)
         opt_lay.addWidget(self.chk_duplicate)
         opt_lay.addWidget(self.chk_rename)
-        opt_lay.addLayout(mode_row)
         lay.addWidget(opt_box)
 
         # ---- 操作按钮 ----
@@ -214,12 +218,12 @@ class ImportVideosDialog(QDialog):
             'delete_invalid': self.chk_invalid.isChecked(),
             'delete_duplicate': self.chk_duplicate.isChecked(),
             'rename': self.chk_rename.isChecked(),
-            'move': self.rb_move.isChecked(),
+            # 导入统一为移动（对齐 v1：shutil.move），无复制模式
         }
 
         self.btn_import.setEnabled(False)
         self.progress.setValue(0)
-        self._log(f"开始导入到 {target}（{'移动' if options['move'] else '复制'}）")
+        self._log(f"开始导入到 {target}（移动）")
 
         self._import_worker = ImportWorker(self.core, self.mw, sources, target, options)
         self._import_worker.progress_signal.connect(self._on_progress)
@@ -287,6 +291,22 @@ class ImportWorker(QThread):
             except Exception as e2:
                 return False, f"{e1}; {e2}"
 
+    def _collect_videos(self, folder):
+        """递归收集文件夹下的视频文件（本地实现，对齐 v1 collect_video_files_from_folder）。
+
+        不走桥接，避免 gui_adapter 把参数多注入导致报错。
+        """
+        files = []
+        if not os.path.isdir(folder):
+            return files
+        for root, _dirs, fnames in os.walk(folder):
+            for f in fnames:
+                if any(f.lower().endswith(ext) for ext in VIDEO_EXTS):
+                    fp = os.path.join(root, f)
+                    if os.path.isfile(fp):
+                        files.append(fp)
+        return files
+
     def run(self):
         try:
             # ============================================================
@@ -300,7 +320,8 @@ class ImportWorker(QThread):
                 if src.startswith("[文件夹] "):
                     folder = src[len("[文件夹] "):].strip()
                     try:
-                        files = self.mw.collect_video_files_from_folder(folder)
+                        # 本地递归收集（不走桥接，避免 gui_adapter 参数注入问题）
+                        files = self._collect_videos(folder)
                         all_files.extend(files)
                         self.log(f"文件夹 {os.path.basename(folder)}: {len(files)} 个视频", "success")
                     except Exception as e:
@@ -330,7 +351,7 @@ class ImportWorker(QThread):
 
                 try:
                     # 可播放性校验
-                    if not self.mw.can_play_video(file_path):
+                    if not self.core.can_play_video(file_path):
                         self.log(f"无法播放，标记无效: {fname}", "warning")
                         file_info_map[file_path] = {'valid': False}
                         continue
@@ -372,7 +393,7 @@ class ImportWorker(QThread):
                 file_size = int(file_size_str)
 
                 # 库内已存在 → 整组跳过
-                if self.mw.check_duplicate_by_hash(md5_hash, file_size):
+                if self.core.check_duplicate_by_hash(md5_hash, file_size):
                     self.log(f"库内已存在 MD5 {md5_hash[:8]}… ({file_size//1024//1024}MB)，跳过 {len(file_paths)} 个", "warning")
                     if self.options['delete_duplicate']:
                         files_to_delete.extend(file_paths)
@@ -443,7 +464,7 @@ class ImportWorker(QThread):
                     # 清理文件名
                     if self.options['rename']:
                         try:
-                            new_filename = self.mw.process_filename(fname)
+                            new_filename = self.core.process_filename(fname)
                         except Exception:
                             new_filename = fname
                     else:
@@ -453,7 +474,7 @@ class ImportWorker(QThread):
 
                     # 冲突解决
                     try:
-                        target_path = self.mw.resolve_filename_conflict(target_path)
+                        target_path = self.core.resolve_filename_conflict(target_path)
                     except Exception:
                         base, ext = os.path.splitext(target_path)
                         n = 1
@@ -461,16 +482,13 @@ class ImportWorker(QThread):
                             target_path = f"{base}_{n}{ext}"
                             n += 1
 
-                    # 复制 / 移动
+                    # 移动文件（导入统一为移动，对齐 v1）
                     if os.path.abspath(file_path) == os.path.abspath(target_path):
                         pass  # 同路径
                     else:
-                        if self.options['move']:
-                            ok, final, err = FileUtils.move_file_smart(file_path, target_path)
-                        else:
-                            ok, final, err = FileUtils.copy_file_smart(file_path, target_path)
+                        ok, final, err = FileUtils.move_file_smart(file_path, target_path)
                         if not ok:
-                            self.log(f"文件操作失败 {fname}: {err}", "error")
+                            self.log(f"移动失败 {fname}: {err}", "error")
                             failed_count += 1
                             continue
                         target_path = final
@@ -489,7 +507,7 @@ class ImportWorker(QThread):
 
                     # 入库
                     try:
-                        self.mw.add_video_to_db_optimized(target_path, folder_type)
+                        self.core.add_video_to_db_optimized(target_path, folder_type)
                         success_count += 1
                         self.log(f"成功导入: {os.path.basename(target_path)}", "success")
                     except Exception as e:

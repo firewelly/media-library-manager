@@ -13,7 +13,7 @@ import platform
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QStatusBar,
     QSplitter, QScrollArea, QMenu, QMessageBox, QPushButton, QLineEdit,
-    QApplication,
+    QApplication, QComboBox,
 )
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QAction, QKeySequence, QShortcut, QPixmap
@@ -29,6 +29,10 @@ class MainWindow(QMainWindow):
 
     def __init__(self):
         super().__init__()
+
+        # 所有后台 QThread 引用（closeEvent 时统一等待，避免销毁运行中线程崩溃）
+        self._workers = []
+        self._query_worker = None
 
         # 1. 后端 facade
         self.core = MediaLibraryCore()
@@ -47,6 +51,7 @@ class MainWindow(QMainWindow):
         self._current_video_id = None
         self._nav_filter = 'all'          # 当前侧栏导航筛选
         self._search_text = ''            # 顶部搜索文本
+        self._star_filter = 0             # 星级筛选（0=全部，>0=该星级及以上）
 
         # 3. UI
         self.setup_ui()
@@ -87,6 +92,38 @@ class MainWindow(QMainWindow):
         except Exception as e:
             print(f"⚠️ 重建数据库连接失败: {e}")
 
+    def _track_worker(self, worker):
+        """登记一个后台 QThread，closeEvent 时统一等待它结束。"""
+        if worker is not None:
+            self._workers.append(worker)
+
+    def closeEvent(self, event):
+        """关闭窗口前：等待所有后台线程结束，避免销毁运行中的 QThread 致 Qt fatal abort。"""
+        # 清理所有登记的 worker（最多等 3 秒）
+        for w in self._workers:
+            try:
+                if w and w.isRunning():
+                    w.quit()
+                    w.wait(3000)
+            except Exception:
+                pass
+        # 额外兜底：扫描子对象里的 QThread（防止有遗漏未登记的）
+        from PySide6.QtCore import QThread
+        for child in self.findChildren(QThread):
+            try:
+                if child.isRunning():
+                    child.quit()
+                    child.wait(3000)
+            except Exception:
+                pass
+        # 保存列布局
+        try:
+            if hasattr(self, 'video_table'):
+                self.core.save_column_config()
+        except Exception:
+            pass
+        event.accept()
+
     # ==================================================================
     # UI 骨架（对齐 ui_design：侧栏 + topbar + 列表 + 右详情卡片）
     # ==================================================================
@@ -126,6 +163,13 @@ class MainWindow(QMainWindow):
         self.search_input.setPlaceholderText("搜索标题 / 番号 / 演员 / 标签…")
         self.search_input.setFixedWidth(340)
         self.search_input.returnPressed.connect(self._on_search)
+        # 实时搜索（300ms 防抖，对齐 Tk on_search_key_press）
+        from PySide6.QtCore import QTimer
+        self._search_timer = QTimer(self)
+        self._search_timer.setSingleShot(True)
+        self._search_timer.setInterval(300)
+        self._search_timer.timeout.connect(self._on_search)
+        self.search_input.textChanged.connect(lambda: self._search_timer.start())
         tbar_lay.addWidget(self.search_input)
 
         # 仅在线按钮
@@ -136,6 +180,14 @@ class MainWindow(QMainWindow):
         self.btn_online.setCursor(Qt.PointingHandCursor)
         self.btn_online.clicked.connect(self._toggle_online_only)
         tbar_lay.addWidget(self.btn_online)
+
+        # 星级筛选（对齐 Tk star_filter 0-5）
+        tbar_lay.addWidget(QLabel("星级："))
+        self.star_filter_combo = QComboBox()
+        self.star_filter_combo.addItems(["全部", "★1+", "★2+", "★3+", "★4+", "★5"])
+        self.star_filter_combo.setFixedWidth(80)
+        self.star_filter_combo.currentIndexChanged.connect(self._on_star_filter_change)
+        tbar_lay.addWidget(self.star_filter_combo)
 
         tbar_lay.addStretch()
 
@@ -175,6 +227,7 @@ class MainWindow(QMainWindow):
         self.video_table.selection_changed.connect(self.on_video_selected)
         self.video_table.double_clicked.connect(self.on_video_double_clicked)
         self.video_table.header_clicked.connect(self.on_header_clicked)
+        self.video_table.star_clicked.connect(self._on_star_clicked_in_list)
         self.video_table.setContextMenuPolicy(Qt.CustomContextMenu)
         self.video_table.customContextMenuRequested.connect(self.show_context_menu)
         list_lay.addWidget(self.video_table, 1)
@@ -396,7 +449,6 @@ class MainWindow(QMainWindow):
         tools_menu.addSeparator()
         tools_menu.addAction("清理演员信息", self.on_clean_actor_data)
         tools_menu.addAction("重新导入元数据", self.on_reimport_metadata)
-        tools_menu.addAction("完全重置数据库", self.on_full_database_reset)
         tools_menu.addSeparator()
         tools_menu.addAction("批量生成封面", self.on_batch_generate_thumbnails)
         tools_menu.addAction("批量自动更新所有标签", self.on_batch_auto_tag_all)
@@ -505,6 +557,12 @@ class MainWindow(QMainWindow):
         self.video_model._current_page_no = 0
         self.load_videos()
 
+    def _on_star_filter_change(self, idx):
+        """星级筛选变化（0=全部，1-5=该星级及以上）。"""
+        self._star_filter = idx  # idx 直接对应星级（0=全部，1=★1+...5=★5）
+        self.video_model._current_page_no = 0
+        self.load_videos()
+
     def _on_search(self):
         self._search_text = self.search_input.text().strip()
         self.is_filtering = bool(self._search_text)
@@ -586,9 +644,12 @@ class MainWindow(QMainWindow):
         # 移动到...
         move_menu = menu.addMenu("移动到…")
         self._fill_move_menu(move_menu, lambda f: self._move_single(video_id, f))
-        # 清理文件名 / 自动标签
+        # 清理文件名 / 自动标签 / 更新 JAVDB / 更新元数据 / 导入NFO
         menu.addAction("清理文件名", lambda: self._clean_filename_single(video_id))
         menu.addAction("自动标签", lambda: self._auto_tag_single(video_id))
+        menu.addAction("🔎 更新 JAVDB 信息", lambda: self._fetch_javdb_for_videos([video_id]))
+        menu.addAction("更新元数据", lambda: self._update_metadata([video_id]))
+        menu.addAction("导入 NFO…", lambda: self._import_nfo_single(video_id))
         menu.addSeparator()
         # 快速设置星级
         star_menu = menu.addMenu("快速设置星级")
@@ -633,8 +694,13 @@ class MainWindow(QMainWindow):
         cp_menu = menu.addMenu(f"批量复制 JavSP 到… ({count})")
         self._fill_move_menu(cp_menu, lambda f: self._migrate_javsp(ids, f, is_copy=True))
         menu.addSeparator()
-        # 批量清理文件名 / 删除
+        # 批量清理文件名 / 自动标签 / 更新 JAVDB / 更新元数据 / 生成封面
         menu.addAction(f"批量清理文件名 ({count})", lambda: self._batch_clean_filename(ids))
+        menu.addAction(f"🏷 批量自动标签 ({count})", lambda: self._auto_tag_batch(ids))
+        menu.addAction(f"🔎 批量更新 JAVDB ({count})", lambda: self._fetch_javdb_for_videos(ids))
+        menu.addAction(f"批量更新元数据 ({count})", lambda: self._update_metadata(ids))
+        menu.addAction(f"🖼 批量生成封面 ({count})", lambda: self._generate_thumbnails_batch(ids))
+        menu.addSeparator()
         del_action = menu.addAction(f"批量删除 ({count})")
         del_action.triggered.connect(lambda: self._delete_videos(ids))
 
@@ -724,17 +790,43 @@ class MainWindow(QMainWindow):
 
     def _auto_tag_single(self, video_id):
         """自动标签单个视频（调用桥接的 auto_tag 逻辑）。"""
-        self.status_bar.showMessage("自动标签中…（可能较慢）")
-        try:
-            self.core.cursor.execute("SELECT file_path FROM videos WHERE id = ?", (video_id,))
-            r = self.core.cursor.fetchone()
-            if r and r[0]:
+        self._auto_tag_batch([video_id])
+
+    def _auto_tag_batch(self, video_ids):
+        """批量自动标签（支持单选/多选；成功后刷新主列表 + 详情）。"""
+        if not video_ids:
+            return
+        n = len(video_ids)
+        self.status_bar.showMessage(f"自动标签中…（{n} 个视频，可能较慢）")
+        QApplication.processEvents()
+        ok_count = 0
+        fail_count = 0
+        for i, vid in enumerate(video_ids):
+            try:
+                self.core.cursor.execute("SELECT file_path FROM videos WHERE id = ?", (vid,))
+                r = self.core.cursor.fetchone()
+                if not r or not r[0]:
+                    fail_count += 1
+                    continue
+                self.status_bar.showMessage(
+                    f"自动标签 {i+1}/{n}: {os.path.basename(r[0])}", 3000
+                )
+                QApplication.processEvents()
                 ok, msg = self.core.auto_tag_video(r[0], use_retry=False)
-                self.status_bar.showMessage(msg, 4000)
                 if ok:
-                    self.load_detail(video_id)
-        except Exception as e:
-            self.status_bar.showMessage(f"自动标签失败: {e}", 4000)
+                    ok_count += 1
+                else:
+                    fail_count += 1
+            except Exception as e:
+                fail_count += 1
+                self.status_bar.showMessage(f"自动标签失败 {vid}: {e}", 3000)
+        self.status_bar.showMessage(
+            f"自动标签完成：成功 {ok_count}，失败 {fail_count}", 5000
+        )
+        # 关键：刷新主列表（标签列才会更新）+ 当前详情
+        self.load_videos()
+        if self._current_video_id in video_ids:
+            self.load_detail(self._current_video_id)
 
     def _refresh_thumbnail(self, video_id):
         """刷新封面（生成缩略图）。"""
@@ -760,6 +852,109 @@ class MainWindow(QMainWindow):
                     self.status_bar.showMessage(out or "生成失败", 3000)
         except Exception as e:
             self.status_bar.showMessage(f"生成封面失败: {e}", 3000)
+
+    def _generate_thumbnails_batch(self, ids):
+        """批量生成封面（对齐 Tk batch_generate_thumbnails_from_context）。"""
+        if not ids:
+            return
+        reply = QMessageBox.question(
+            self, "确认批量生成封面",
+            f"确定要为 {len(ids)} 个视频生成封面吗？\n（仅在线文件可处理，可能较慢）",
+            QMessageBox.Yes | QMessageBox.No, QMessageBox.No
+        )
+        if reply != QMessageBox.Yes:
+            return
+        ok_count = 0
+        for i, vid in enumerate(ids):
+            try:
+                self.core.cursor.execute("SELECT file_path FROM videos WHERE id=?", (vid,))
+                r = self.core.cursor.fetchone()
+                if not r or not r[0] or not os.path.exists(r[0]):
+                    continue
+                self.status_bar.showMessage(
+                    f"生成封面 {i+1}/{len(ids)}: {os.path.basename(r[0])}", 3000
+                )
+                QApplication.processEvents()
+                success, out = self.core.generate_thumbnail_for_video(r[0])
+                if success and out:
+                    with open(out, 'rb') as f:
+                        data = f.read()
+                    self.core.cursor.execute(
+                        "UPDATE videos SET thumbnail_data=?, thumbnail_path=? WHERE id=?",
+                        (data, out, vid)
+                    )
+                    self.core.conn.commit()
+                    ok_count += 1
+            except Exception:
+                pass
+        self.status_bar.showMessage(f"批量生成封面完成：{ok_count}/{len(ids)}", 5000)
+        if self._current_video_id in ids:
+            self._load_cover(self._current_video_id)
+
+    def _update_metadata(self, ids):
+        """更新元数据（单/批通用，对齐 Tk update_single_file_metadata）。
+
+        重新获取文件大小/时长/分辨率/创建时间并写库。
+        """
+        if not ids:
+            return
+        n = len(ids)
+        self.status_bar.showMessage(f"更新元数据中…（{n} 个，可能较慢）")
+        QApplication.processEvents()
+        ok_count = 0
+        from datetime import datetime as _dt
+        for i, vid in enumerate(ids):
+            try:
+                self.core.cursor.execute("SELECT file_path FROM videos WHERE id=?", (vid,))
+                r = self.core.cursor.fetchone()
+                if not r or not r[0] or not os.path.exists(r[0]):
+                    continue
+                file_path = r[0]
+                self.status_bar.showMessage(
+                    f"更新元数据 {i+1}/{n}: {os.path.basename(file_path)}", 3000
+                )
+                QApplication.processEvents()
+                file_size = os.path.getsize(file_path)
+                try:
+                    stat = os.stat(file_path)
+                    fctime = _dt.fromtimestamp(
+                        stat.st_birthtime if hasattr(stat, 'st_birthtime') else stat.st_ctime
+                    )
+                except Exception:
+                    fctime = None
+                duration, resolution = self.core.get_video_info(file_path)
+                updates = {"file_size": file_size}
+                if duration is not None:
+                    updates["duration"] = duration
+                if resolution:
+                    updates["resolution"] = resolution
+                if fctime:
+                    updates["file_created_time"] = fctime
+                if self.core.update_video(vid, **updates):
+                    ok_count += 1
+            except Exception:
+                pass
+        self.status_bar.showMessage(f"元数据更新完成：{ok_count}/{n}", 5000)
+        self.load_videos()
+        if self._current_video_id in ids:
+            self.load_detail(self._current_video_id)
+
+    def _import_nfo_single(self, video_id):
+        """导入单个视频的 NFO（对齐 Tk import_nfo_from_context）。"""
+        from PySide6.QtWidgets import QFileDialog
+        nfo_path, _ = QFileDialog.getOpenFileName(
+            self, "选择 NFO 文件", "", "NFO 文件 (*.nfo);;所有文件 (*)"
+        )
+        if not nfo_path:
+            return
+        try:
+            ok, msg = self.core.import_nfo_file(nfo_path, video_id=video_id)
+            self.status_bar.showMessage(msg, 4000)
+            if ok:
+                self.load_detail(video_id)
+                self.load_videos()
+        except Exception as e:
+            self.show_error("导入 NFO 失败", str(e))
 
     def _delete_videos(self, ids):
         """删除视频（回收站 + 删库记录）。"""
@@ -820,6 +1015,8 @@ class MainWindow(QMainWindow):
                 return {'success': success, 'msg': msg}
 
             worker = GenericWorker(worker_func)
+            self._rotate_worker = worker    # 保存引用 + 登记等待
+            self._track_worker(worker)
             def on_finished(result):
                 success = result.get('success')
                 msg = result.get('msg', '')
@@ -911,15 +1108,19 @@ class MainWindow(QMainWindow):
 
         from pyside_v2.workers import QueryWorker
         self._query_worker = QueryWorker(do_query, page_no, self)
+        self._track_worker(self._query_worker)
         self._query_worker.finished_signal.connect(self._on_query_finished)
         self._query_worker.error_signal.connect(self._on_query_error)
         self._query_worker.start()
 
     def _build_query(self):
         """构建查询 SQL 各部分（同步，不执行）。"""
-        fields = ('id, file_path, file_name, title, stars, tags, file_size, '
-                  'is_nas_online, duration, resolution, file_created_time, '
-                  'source_folder, md5_hash')
+        fields = ('v.id, v.file_path, v.file_name, v.title, v.stars, v.tags, v.file_size, '
+                  'v.is_nas_online, v.duration, v.resolution, v.file_created_time, '
+                  'v.source_folder, v.md5_hash, '
+                  # 演员子查询（索引13，对齐 FIELD_INDEX['actors']=13）
+                  '(SELECT GROUP_CONCAT(a.name, ", ") FROM video_actors va '
+                  'JOIN actors a ON va.actor_id=a.id WHERE va.video_id=v.id) AS actors_display')
 
         conditions = []
         params = []
@@ -1020,6 +1221,11 @@ class MainWindow(QMainWindow):
 
     def _apply_nav_filter(self, conditions, params):
         """侧栏导航 → 筛选条件。"""
+        # 星级筛选（独立维度，可与导航叠加）
+        if self._star_filter > 0:
+            conditions.append("v.stars >= ?")
+            params.append(self._star_filter)
+
         key = self._nav_filter
         if key == 'all':
             return
@@ -1047,13 +1253,14 @@ class MainWindow(QMainWindow):
             self.load_detail(video_id)
 
     def load_detail(self, video_id):
-        """填充右侧详情卡片（按 video_id 子查询完整信息 + 演员）。"""
+        """填充右侧详情卡片（按 video_id 子查询完整信息 + 演员 + JAVDB + 磁力链接）。"""
         try:
-            # 主信息 + JAVDB
+            # 主信息 + JAVDB（扩展：studio, magnet_links）
             self.core.cursor.execute(
                 "SELECT v.title, v.file_name, v.file_size, v.duration, v.resolution, "
                 "v.file_created_time, v.file_path, v.source_folder, v.stars, v.tags, "
-                "j.javdb_code, j.javdb_title, j.score, j.release_date "
+                "v.year, v.genre, "
+                "j.javdb_code, j.javdb_title, j.score, j.release_date, j.studio, j.magnet_links "
                 "FROM videos v LEFT JOIN javdb_info j ON v.id = j.video_id "
                 "WHERE v.id = ?", (video_id,)
             )
@@ -1061,14 +1268,27 @@ class MainWindow(QMainWindow):
             if not row:
                 return
             (title, file_name, fsize, dur, res, fctime, fpath, sfolder,
-             stars, tags, jcode, jtitle, jscore, jrelease) = row
+             stars, tags, vyear, vgenre,
+             jcode, jtitle, jscore, jrelease, jstudio, magnet_links) = row
 
-            # 演员（子查询，按索引快）
+            # 演员（子查询，取列表，用于可点击链接）
             self.core.cursor.execute(
-                "SELECT GROUP_CONCAT(a.name, ', ') FROM video_actors va "
-                "JOIN actors a ON va.actor_id=a.id WHERE va.video_id=?", (video_id,)
+                "SELECT a.name FROM video_actors va JOIN actors a ON va.actor_id=a.id "
+                "WHERE va.video_id=?", (video_id,)
             )
-            actors = self.core.cursor.fetchone()[0] or "—"
+            actor_names = [r[0] for r in self.core.cursor.fetchall() if r[0]]
+
+            # JAVDB 标签（子查询）
+            javdb_tags = ""
+            if jcode:
+                self.core.cursor.execute(
+                    "SELECT GROUP_CONCAT(jt.tag_name, ', ') FROM javdb_info_tags jit "
+                    "JOIN javdb_tags jt ON jit.tag_id=jt.id "
+                    "JOIN javdb_info j ON jit.javdb_info_id=j.id "
+                    "WHERE j.video_id=?", (video_id,)
+                )
+                jt_row = self.core.cursor.fetchone()
+                javdb_tags = jt_row[0] if jt_row and jt_row[0] else ""
 
             # 查 description 字段
             self.core.cursor.execute("SELECT description FROM videos WHERE id=?", (video_id,))
@@ -1099,26 +1319,150 @@ class MainWindow(QMainWindow):
                 row_w = QWidget(); row_w.setStyleSheet("background:transparent;")
                 rl = QHBoxLayout(row_w); rl.setContentsMargins(0,0,0,0); rl.setSpacing(0)
                 kl = QLabel(k); kl.setObjectName("detailKey"); kl.setFixedWidth(76)
-                vlbl = QLabel(str(v));
+                vlbl = QLabel(str(v))
                 vlbl.setObjectName("detailValueMono" if mono else "detailValue")
                 vlbl.setWordWrap(not mono)
                 rl.addWidget(kl); rl.addWidget(vlbl, 1)
                 self.detail_kv_container.addWidget(row_w)
+                return vlbl
 
             import os
-            _kv("演员", actors)
+            # 演员（可点击链接，多个）
+            self._render_actor_links(actor_names)
             _kv("大小", self._fmt_size(fsize))
             _kv("时长", self._fmt_duration(dur))
             _kv("分辨率", res or "—")
             _kv("创建时间", self._fmt_dt(fctime))
+            if vyear:
+                _kv("年份", vyear)
+            # JAVDB 信息独立字段
+            if jcode:
+                _kv("番号", jcode)
+            if jtitle:
+                _kv("JAVDB标题", jtitle)
+            if jrelease:
+                _kv("发行日期", jrelease)
             if jscore:
                 _kv("JAVDB评分", str(jscore))
+            if jstudio:
+                _kv("厂商", jstudio)
+            if javdb_tags:
+                _kv("JAVDB标签", javdb_tags)
             _kv("路径", fpath or "—", mono=True)
+
+            # 磁力链接
+            self._render_magnet_links(magnet_links)
 
             # 封面缩略图（数据库里的 thumbnail_data BLOB）
             self._load_cover(video_id)
         except Exception as e:
             print(f"加载详情失败: {e}")
+
+    def _render_actor_links(self, actor_names):
+        """渲染演员为可点击链接（点击进演员详情）。"""
+        if not actor_names:
+            row_w = QWidget(); row_w.setStyleSheet("background:transparent;")
+            rl = QHBoxLayout(row_w); rl.setContentsMargins(0,0,0,0); rl.setSpacing(0)
+            kl = QLabel("演员"); kl.setObjectName("detailKey"); kl.setFixedWidth(76)
+            vlbl = QLabel("—"); vlbl.setObjectName("detailValue")
+            rl.addWidget(kl); rl.addWidget(vlbl, 1)
+            self.detail_kv_container.addWidget(row_w)
+            return
+        row_w = QWidget(); row_w.setStyleSheet("background:transparent;")
+        rl = QHBoxLayout(row_w); rl.setContentsMargins(0,0,0,0); rl.setSpacing(0)
+        kl = QLabel("演员"); kl.setObjectName("detailKey"); kl.setFixedWidth(76)
+        rl.addWidget(kl)
+        links_w = QWidget(); links_w.setStyleSheet("background:transparent;")
+        links_lay = QHBoxLayout(links_w); links_lay.setContentsMargins(0,0,0,0); links_lay.setSpacing(6)
+        links_lay.setAlignment(Qt.AlignLeft | Qt.AlignTop)
+        links_w.setMinimumHeight(20)
+        # 限制最多显示 5 个演员链接（避免过长）
+        shown = actor_names[:5]
+        for i, name in enumerate(shown):
+            link = QLabel(name)
+            link.setObjectName("actorLink")
+            link.setStyleSheet(
+                "color: #0f6fde; background:transparent; text-decoration: underline;"
+            )
+            link.setCursor(Qt.PointingHandCursor)
+            link.mousePressEvent = lambda e, n=name: self._open_actor_detail(n)
+            links_lay.addWidget(link)
+            if i < len(shown) - 1:
+                sep = QLabel("·"); sep.setStyleSheet("color: palette(mid); background:transparent;")
+                links_lay.addWidget(sep)
+        if len(actor_names) > 5:
+            more = QLabel(f"等 {len(actor_names)} 人"); more.setStyleSheet("color: palette(mid); background:transparent;")
+            links_lay.addWidget(more)
+        links_lay.addStretch()
+        rl.addWidget(links_w, 1)
+        self.detail_kv_container.addWidget(row_w)
+
+    def _open_actor_detail(self, actor_name):
+        """从详情面板演员链接打开演员详情窗口。"""
+        try:
+            from pyside_v2.dialogs import ActorDetailWindow
+            ActorDetailWindow(self, actor_name=actor_name, parent=self).exec()
+        except Exception as e:
+            self.status_bar.showMessage(f"打开演员详情失败: {e}", 3000)
+
+    def _render_magnet_links(self, magnet_links_raw):
+        """渲染磁力链接区（带复制全部按钮）。"""
+        # 解析 magnet_links（数据库里可能是 JSON 数组或换行分隔文本）
+        import json
+        links = []
+        if magnet_links_raw:
+            try:
+                parsed = json.loads(magnet_links_raw)
+                if isinstance(parsed, list):
+                    links = [str(x) for x in parsed if x]
+                else:
+                    links = [str(parsed)]
+            except (json.JSONDecodeError, TypeError):
+                links = [l.strip() for l in str(magnet_links_raw).split('\n') if l.strip()]
+
+        # 清空旧的磁力区
+        if hasattr(self, 'magnet_container'):
+            self._clear_layout(self.magnet_container)
+        else:
+            self.magnet_container = QVBoxLayout()
+            self.magnet_container.setSpacing(2)
+            self.detail_kv_container.addLayout(self.magnet_container)
+
+        if not links:
+            return
+        # 标题行 + 复制全部按钮
+        header_w = QWidget(); header_w.setStyleSheet("background:transparent;")
+        hl = QHBoxLayout(header_w); hl.setContentsMargins(0,4,0,0); hl.setSpacing(4)
+        title_lbl = QLabel("磁力链接"); title_lbl.setObjectName("detailSectionTitle")
+        hl.addWidget(title_lbl)
+        hl.addStretch()
+        btn_copy_all = QPushButton(f"复制全部 ({len(links)})")
+        btn_copy_all.setCursor(Qt.PointingHandCursor)
+        btn_copy_all.setStyleSheet("font-size: 11px;")
+        btn_copy_all.clicked.connect(lambda: self._copy_magnet_all(links))
+        hl.addWidget(btn_copy_all)
+        self.magnet_container.addWidget(header_w)
+        # 每条链接
+        for lk in links[:20]:  # 最多 20 条，避免过长
+            row_w = QWidget(); row_w.setStyleSheet("background:transparent;")
+            rl = QHBoxLayout(row_w); rl.setContentsMargins(0,0,0,0); rl.setSpacing(4)
+            short = lk if len(lk) <= 50 else lk[:47] + "…"
+            lbl = QLabel(short); lbl.setObjectName("detailValueMono")
+            lbl.setToolTip(lk)
+            rl.addWidget(lbl, 1)
+            btn = QPushButton("复制"); btn.setCursor(Qt.PointingHandCursor)
+            btn.setStyleSheet("font-size: 10px;")
+            btn.clicked.connect(lambda checked=False, x=lk: self._copy_text(x))
+            rl.addWidget(btn)
+            self.magnet_container.addWidget(row_w)
+
+    def _copy_magnet_all(self, links):
+        QApplication.clipboard().setText("\n".join(links))
+        self.status_bar.showMessage(f"已复制 {len(links)} 条磁力链接", 2000)
+
+    def _copy_text(self, text):
+        QApplication.clipboard().setText(text)
+        self.status_bar.showMessage("已复制", 1500)
 
     def _load_cover(self, video_id):
         """加载封面缩略图（thumbnail_data BLOB 或 JAVDB 封面）。"""
@@ -1232,33 +1576,57 @@ class MainWindow(QMainWindow):
 
     def _fetch_javdb_info(self):
         """抓取当前视频的 JAVDB 信息并入库（对接 utils.jav）。"""
-        if self._current_video_id is None:
+        if self._current_video_id is not None:
+            self._fetch_javdb_for_videos([self._current_video_id])
+
+    def _fetch_javdb_for_videos(self, video_ids):
+        """批量抓取 JAVDB 信息并入库（单选/多选通用）。
+
+        对接 utils.jav.search_movie_info / save_movie_info_to_db。
+        成功后刷新主列表 + 当前详情。
+        """
+        if not video_ids:
             return
-        try:
-            self.core.cursor.execute("SELECT file_name FROM videos WHERE id=?", (self._current_video_id,))
-            r = self.core.cursor.fetchone()
-            if not r or not r[0]:
-                return
-            from utils import jav as utils_jav
-            code = utils_jav.extract_code(r[0])
-            if not code:
-                self.status_bar.showMessage("无法从文件名提取番号", 3000)
-                return
-            self.status_bar.showMessage(f"正在获取 JAVDB 信息：{code}…（可能较慢）")
-            QApplication.processEvents()
-            info = utils_jav.search_movie_info(code)
-            if not info:
-                self.status_bar.showMessage("未获取到 JAVDB 信息", 3000)
-                return
-            ok = utils_jav.save_movie_info_to_db(self.core.conn, self._current_video_id, info)
-            if ok:
-                self.status_bar.showMessage("JAVDB 信息已保存", 3000)
-                self.load_detail(self._current_video_id)
-                self.load_videos()
-            else:
-                self.status_bar.showMessage("保存 JAVDB 信息失败", 3000)
-        except Exception as e:
-            self.status_bar.showMessage(f"获取 JAVDB 失败: {e}", 4000)
+        from utils import jav as utils_jav
+        n = len(video_ids)
+        ok_count = 0
+        fail_count = 0
+        for i, vid in enumerate(video_ids):
+            try:
+                self.core.cursor.execute("SELECT file_name FROM videos WHERE id=?", (vid,))
+                r = self.core.cursor.fetchone()
+                if not r or not r[0]:
+                    fail_count += 1
+                    continue
+                code = utils_jav.extract_code(r[0])
+                if not code:
+                    self.status_bar.showMessage(
+                        f"[{i+1}/{n}] 无法提取番号: {r[0]}", 3000
+                    )
+                    fail_count += 1
+                    continue
+                self.status_bar.showMessage(
+                    f"[{i+1}/{n}] 获取 JAVDB: {code}…", 3000
+                )
+                QApplication.processEvents()
+                info = utils_jav.search_movie_info(code)
+                if not info:
+                    fail_count += 1
+                    continue
+                if utils_jav.save_movie_info_to_db(self.core.conn, vid, info):
+                    ok_count += 1
+                else:
+                    fail_count += 1
+            except Exception as e:
+                fail_count += 1
+                self.status_bar.showMessage(f"获取 JAVDB 失败 {vid}: {e}", 3000)
+        self.status_bar.showMessage(
+            f"JAVDB 更新完成：成功 {ok_count}，失败 {fail_count}", 5000
+        )
+        # 刷新主列表 + 当前详情
+        self.load_videos()
+        if self._current_video_id in video_ids:
+            self.load_detail(self._current_video_id)
 
     @staticmethod
     def _fmt_size(size):
@@ -1293,6 +1661,18 @@ class MainWindow(QMainWindow):
             self.core.sort_reverse = False
         self.load_videos()
 
+    def _on_star_clicked_in_list(self, video_id, star):
+        """列表内点击星级列直接打分（对齐 Tk on_star_click）。"""
+        # 再点同一星 = 降一级（0=清除）
+        try:
+            self.core.cursor.execute("SELECT stars FROM videos WHERE id=?", (video_id,))
+            r = self.core.cursor.fetchone()
+            cur = (r[0] if r and r[0] else 0)
+        except Exception:
+            cur = 0
+        new_star = star - 1 if star == cur else star
+        self._set_stars([video_id], new_star)
+
     # 暴露给右键菜单（Phase 6）的信号占位
     context_menu_requested = Signal(object)
 
@@ -1309,11 +1689,13 @@ class MainWindow(QMainWindow):
         self.is_filtering = False
         self._search_text = ""
         self._nav_filter = 'all'
+        self._star_filter = 0
         self.core.sort_column_name = None
         self.core.sort_reverse = False
         self.video_model._current_page_no = 0
-        # 清空搜索框 + 重置侧栏选中
+        # 清空搜索框 + 重置侧栏选中 + 星级筛选
         self.search_input.clear()
+        self.star_filter_combo.setCurrentIndex(0)
         self.sidebar.select_all()
         self.load_videos()
 
@@ -1347,17 +1729,67 @@ class MainWindow(QMainWindow):
         self.status_bar.showMessage(f"⚠️ {method_name} 暂未实现（见 Phase 4/5/6）", 4000)
 
     # 文件菜单
-    def on_scan_media(self): self._bridged_bg("scan_media", "扫描媒体文件")
-    def on_comprehensive_media_update(self): self._bridged("comprehensive_media_update")
-    def on_import_nfo(self): self._bridged("import_nfo")
+    def on_scan_media(self):
+        """扫描媒体文件（原生，调 batch_tasks.scan_media）。"""
+        from pyside_v2.actions import batch_tasks
+        batch_tasks.scan_media(self)
+
+    def on_comprehensive_media_update(self):
+        """智能媒体库更新（原生）。"""
+        from pyside_v2.actions import batch_tasks
+        batch_tasks.comprehensive_update(self)
+
+    def on_import_nfo(self):
+        """导入 NFO 文件（原生）。"""
+        from PySide6.QtWidgets import QFileDialog, QMessageBox
+        from PySide6.QtCore import Qt
+        nfo_paths, _ = QFileDialog.getOpenFileNames(
+            self, "选择 NFO 文件", "", "NFO 文件 (*.nfo);;所有文件 (*)"
+        )
+        if not nfo_paths:
+            return
+        ok = 0
+        for nfo in nfo_paths:
+            # 找同目录的视频
+            base = os.path.splitext(nfo)[0]
+            self.core.cursor.execute(
+                "SELECT id FROM videos WHERE file_path LIKE ?", (base + '%',)
+            )
+            row = self.core.cursor.fetchone()
+            vid = row[0] if row else None
+            success, msg = self.core.import_nfo_file(nfo, video_id=vid)
+            if success:
+                ok += 1
+        QMessageBox.information(self, "导入完成", f"成功导入 {ok}/{len(nfo_paths)} 个 NFO 文件")
+        self.load_videos()
+
     def on_import_videos(self):
-        """打开导入视频文件对话框（原生 PySide6，替代桥接失败的 import_videos）。"""
+        """打开导入视频文件对话框（原生 PySide6）。"""
         from pyside_v2.dialogs import ImportVideosDialog
         dlg = ImportVideosDialog(self)
         dlg.exec()
-    def on_batch_import_nfo_for_no_actors(self): self._bridged("batch_import_nfo_for_no_actors")
-    def on_batch_import_javdb_for_no_title(self): self._bridged("batch_import_javdb_for_no_title")
-    def on_remove_duplicates(self): self._bridged("remove_duplicates")
+
+    def on_batch_import_nfo_for_no_actors(self):
+        """批量导入 NFO（为无演员的视频）（原生）。"""
+        from pyside_v2.actions import batch_tasks
+        batch_tasks.batch_import_nfo(self)
+
+    def on_batch_import_javdb_for_no_title(self):
+        """批量导入 JAVDB（为无标题的视频）（原生）。"""
+        from pyside_v2.actions import batch_tasks
+        batch_tasks.batch_import_javdb(self)
+
+    def on_remove_duplicates(self):
+        """去重复（原生，调 MaintenanceManager）。"""
+        from PySide6.QtWidgets import QMessageBox
+        reply = QMessageBox.question(
+            self, "确认", "确定要查找并删除重复视频吗？\n（基于 MD5，重复文件移至回收站）",
+            QMessageBox.Yes | QMessageBox.No, QMessageBox.No
+        )
+        if reply != QMessageBox.Yes:
+            return
+        from pyside_v2.actions import batch_tasks
+        batch_tasks.smart_remove_duplicates(self)
 
     # 工具菜单
     def on_manage_tags(self):
@@ -1366,26 +1798,73 @@ class MainWindow(QMainWindow):
     def on_manage_folders(self):
         from pyside_v2.dialogs.folder_manager import FolderManagerDialog
         FolderManagerDialog(self).exec()
-    def on_sync_stars_to_filename(self): self._bridged("sync_stars_to_filename")
-    def on_batch_calculate_md5(self): self._bridged_bg("batch_calculate_md5", "批量计算 MD5")
-    def on_smart_remove_duplicates(self): self._bridged("smart_remove_duplicates")
-    def on_file_move_manager(self): self._bridged("file_move_manager")
-    def on_clean_actor_data(self): self._bridged_confirm("clean_actor_data", "清理演员信息", "确定要清理无效的演员信息吗？")
-    def on_reimport_metadata(self): self._bridged_bg("reimport_incomplete_metadata", "重新导入元数据")
-    def on_full_database_reset(self):
-        reply = QMessageBox.critical(
-            self, "⚠️ 危险操作",
-            "完全重置数据库将清空所有视频记录并重新扫描！\n\n确定继续吗？此操作不可撤销。",
+
+    def on_sync_stars_to_filename(self):
+        """同步打分到文件名（原生）。"""
+        from pyside_v2.actions import batch_tasks
+        batch_tasks.sync_stars_to_filename(self)
+
+    def on_batch_calculate_md5(self):
+        """批量计算 MD5（原生）。"""
+        from pyside_v2.actions import batch_tasks
+        batch_tasks.batch_calculate_md5(self)
+
+    def on_smart_remove_duplicates(self):
+        """智能去重（原生）。"""
+        from pyside_v2.actions import batch_tasks
+        batch_tasks.smart_remove_duplicates(self)
+
+    def on_file_move_manager(self):
+        """文件移动管理（暂用提示，可通过右键菜单移动文件）。"""
+        from PySide6.QtWidgets import QMessageBox
+        QMessageBox.information(self, "文件移动管理",
+            "可通过以下方式移动文件：\n"
+            "• 右键视频 → 移动到…（单个）\n"
+            "• 多选视频 → 右键 → 批量移动到…\n"
+            "• 工具菜单 → 文件夹管理")
+
+    def on_clean_actor_data(self):
+        """清理演员信息（原生）。"""
+        from PySide6.QtWidgets import QMessageBox
+        reply = QMessageBox.question(
+            self, "确认", "确定要清理无效的演员信息吗？",
             QMessageBox.Yes | QMessageBox.No, QMessageBox.No
         )
-        if reply == QMessageBox.Yes:
-            self._bridged_bg("full_database_reset", "重置数据库")
-    def on_batch_generate_thumbnails(self): self._bridged_bg("batch_generate_thumbnails", "批量生成封面")
-    def on_batch_auto_tag_all(self): self._bridged_bg("batch_auto_tag_all", "批量自动标签")
-    def on_batch_auto_tag_no_tags(self): self._bridged_bg("batch_auto_tag_no_tags", "批量标注无标签文件")
-    def on_batch_clean_filenames(self): self._bridged("batch_clean_filenames")
-    def on_fix_javdb_error_titles(self): self._bridged_bg("fix_javdb_error_titles", "修正 JAVDB 错误信息")
-    def on_quick_smart_media_update(self): self._bridged_bg("quick_smart_media_update", "快速智能更新")
+        if reply != QMessageBox.Yes:
+            return
+        from pyside_v2.actions import batch_tasks
+        batch_tasks.clean_actor_data(self)
+
+    def on_reimport_metadata(self):
+        """重新导入元数据（调 AdvancedToolsManager，无 Tk 依赖）。"""
+        self._bridged_bg("reimport_incomplete_metadata", "重新导入元数据")
+
+    def on_batch_generate_thumbnails(self):
+        """批量生成封面（原生）。"""
+        from pyside_v2.actions import batch_tasks
+        batch_tasks.batch_generate_thumbnails(self)
+
+    def on_batch_auto_tag_all(self):
+        """批量自动更新所有标签（调 AdvancedToolsManager，无 Tk 依赖）。"""
+        self._bridged_bg("batch_auto_tag_all", "批量自动标签")
+
+    def on_batch_auto_tag_no_tags(self):
+        """批量标注没有标签的文件（调 AdvancedToolsManager，无 Tk 依赖）。"""
+        self._bridged_bg("batch_auto_tag_no_tags", "批量标注无标签文件")
+
+    def on_batch_clean_filenames(self):
+        """批量清理文件名（调 BatchOperationManager，无 Tk 依赖）。"""
+        self._bridged_bg("batch_clean_filenames", "批量清理文件名")
+
+    def on_fix_javdb_error_titles(self):
+        """修正 JAVDB 错误信息（原生）。"""
+        from pyside_v2.actions import batch_tasks
+        batch_tasks.fix_javdb_error_titles(self)
+
+    def on_quick_smart_media_update(self):
+        """快速智能媒体库更新（原生对话框）。"""
+        from pyside_v2.dialogs import SmartUpdateDialog
+        SmartUpdateDialog(self).exec()
     def open_jav_info_dialog(self):
         from pyside_v2.dialogs.jav_info_dialog import JavInfoDialog
         JavInfoDialog(self).exec()

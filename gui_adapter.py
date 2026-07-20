@@ -100,6 +100,19 @@ class TkinterToQtAdapter:
         )
         return reply == QMessageBox.Retry
 
+    def askyesnocancel(self, title, message):
+        """适配tkinter的askyesnocancel（三选一：是/否/取消）。返回 True/False/None。"""
+        reply = QMessageBox.question(
+            self.qt_window, title, str(message),
+            QMessageBox.Yes | QMessageBox.No | QMessageBox.Cancel,
+            QMessageBox.Yes
+        )
+        if reply == QMessageBox.Yes:
+            return True
+        if reply == QMessageBox.No:
+            return False
+        return None  # Cancel
+
     # 输入对话框适配
     def askstring(self, title, prompt, initialvalue=None):
         """适配tkinter的askstring"""
@@ -278,19 +291,67 @@ class MediaLibraryIntegration:
             # 创建适配版本的方法
             def create_adapted_method(original_method, method_name):
                 def adapted_method(*args, **kwargs):
-                    # 创建一个临时的self对象，指向我们的核心
-                    temp_self = type('TempSelf', (), {})()
-                    temp_self.conn = self.core.conn
-                    temp_self.cursor = self.core.cursor
-                    temp_self.root = DummyTkinterRoot(self.qt_window)
+                    # 创建一个临时的self对象，动态回退到 core/qt_window/MediaLibrary 默认值。
+                    # 用 __getattr__ 解决 Tk 方法依赖大量 self.xxx 属性的问题。
+                    core = self.core
+                    qt_window = self.qt_window
+                    ml_class = media_library.MediaLibrary
+
+                    class TempSelf:
+                        """动态属性回退的临时 self。
+
+                        访问属性顺序：显式设置 > core > qt_window > MediaLibrary 默认值。
+                        Tk 的 GUI 控件（video_tree 等）返回 None 占位（不崩）。
+                        """
+                        def __getattr__(self, attr):
+                            # 1. core 上有
+                            if hasattr(core, attr):
+                                return getattr(core, attr)
+                            # 2. qt_window 上有
+                            if hasattr(qt_window, attr):
+                                return getattr(qt_window, attr)
+                            # 3. Tk 类属性（方法/类变量）
+                            if hasattr(ml_class, attr):
+                                return getattr(ml_class, attr)
+                            # 4. 已知的 Tk 实例属性默认值（避免 AttributeError）
+                            _defaults = {
+                                'db_path': getattr(core, 'db_path', ''),
+                                'folder_online_cache': {},
+                                'folder_cache_lock': __import__('threading').Lock(),
+                                'cache_update_interval': 5,
+                                'current_sort_column': None,
+                                'current_sort_reverse': False,
+                                'progress_window': None,
+                                'import_window': None,
+                                'cancel_import': False,
+                                'cancel_sync': False,
+                                'cancel_reset': False,
+                                'cancel_thumbnail': False,
+                                'generate_missing_only': False,
+                                'status_var': None,
+                                'progress_var': None,
+                            }
+                            if attr in _defaults:
+                                return _defaults[attr]
+                            # 5. Tk GUI 控件占位（video_tree/folder_listbox 等）
+                            #    返回 None，让 Tk 方法自然失败而非 AttributeError
+                            return None
+
+                        def __setattr__(self, attr, value):
+                            object.__setattr__(self, attr, value)
+
+                    temp_self = TempSelf()
+                    temp_self.conn = core.conn
+                    temp_self.cursor = core.cursor
+                    temp_self.root = DummyTkinterRoot(qt_window)
 
                     # 确保临时对象不会关闭数据库连接
                     temp_self._shared_connection = True
-                    temp_self.column_config = self.core.column_config
-                    temp_self.current_video = self.core.current_video
-                    temp_self.sort_column_name = self.core.sort_column_name
-                    temp_self.sort_reverse = self.core.sort_reverse
-                    temp_self.gpu_acceleration = self.core.gpu_acceleration
+                    temp_self.column_config = core.column_config
+                    temp_self.current_video = core.current_video
+                    temp_self.sort_column_name = core.sort_column_name
+                    temp_self.sort_reverse = core.sort_reverse
+                    temp_self.gpu_acceleration = core.gpu_acceleration
 
                     # 注入适配器
                     temp_self.messagebox = self.adapter.messagebox
@@ -299,16 +360,19 @@ class MediaLibraryIntegration:
 
                     # 适配GUI更新方法
                     def gui_updater(log_message):
-                        self.qt_window.status_bar.showMessage(log_message)
+                        qt_window.status_bar.showMessage(log_message)
 
                     temp_self.log_info = lambda msg: media_library.log_info(msg, gui_updater)
                     temp_self.log_error = lambda msg: media_library.log_error(msg, gui_updater)
                     temp_self.log_warning = lambda msg: media_library.log_warning(msg, gui_updater)
 
                     # 如果方法需要更新视频列表，我们在调用后刷新
+                    # 注：original_method 是绑定方法（getattr(temp_instance, name)），
+                    # 其 __self__ 已是 temp_instance，所以这里用 __func__ 取未绑定函数，
+                    # 让 temp_self 正确作为 self 参数（否则双 self 注入导致 TypeError）。
                     if method_name in ['scan_media', 'import_videos', 'import_nfo', 'remove_duplicates']:
                         try:
-                            result = original_method(temp_self, *args, **kwargs)
+                            result = original_method.__func__(temp_self, *args, **kwargs)
                             self.qt_window.refresh_data()
                             return result
                         except Exception as e:
@@ -316,7 +380,7 @@ class MediaLibraryIntegration:
                             return None
                     else:
                         # 对于其他方法，直接调用
-                        return original_method(temp_self, *args, **kwargs)
+                        return original_method.__func__(temp_self, *args, **kwargs)
 
                 return adapted_method
 

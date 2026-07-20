@@ -21,30 +21,60 @@ fi
 
 cd "$PROJECT_DIR" || exit 1
 
-# 检查 Python（完全按 PATH 顺序，不主动探测绝对路径）
+# ---------------------------------------------------------------------------
+# 选择 Python：Spotlight 启动 .app 时不会加载用户 shell 配置（.zshrc），
+# PATH 里的 python3 可能解析到 Xcode 自带的残缺 Python（缺 PySide6/numpy，
+# 或架构不匹配导致崩溃）。
+#
+# 策略：按优先级探测多个 Python 路径，找到第一个同时能 import
+# PySide6 + numpy + cv2 的（这三个是 v2 启动必需的）。
+# 顺序：anaconda（用户主装了依赖的）→ homebrew → 系统 → Xcode（兜底）
+# ---------------------------------------------------------------------------
 PYTHON_CMD=""
-if command -v python3 &> /dev/null; then
-    PYTHON_CMD="python3"
-elif command -v python &> /dev/null; then
-    PYTHON_CMD="python"
-else
-    echo "错误: 未找到 python3 或 python" >> "$LOG_FILE"
-    osascript -e 'display alert "启动错误" message "未找到 Python，请先安装 Python 3.9+。"' 2>/dev/null
-    exit 1
+PYTHON_CANDIDATES=(
+    "$HOME/anaconda3/bin/python3"
+    "$HOME/miniconda3/bin/python3"
+    "/opt/homebrew/bin/python3"
+    "/usr/local/bin/python3"
+    "/usr/bin/python3"
+    "python3"
+    "python"
+)
+
+for py in "${PYTHON_CANDIDATES[@]}"; do
+    if [ -x "$py" ] || command -v "$py" &> /dev/null; then
+        # 验证：能 import 三个核心依赖
+        if "$py" -c "import PySide6, numpy, cv2" 2>/dev/null; then
+            PYTHON_CMD="$py"
+            echo "选中 Python: $PYTHON_CMD ($($py --version 2>&1))" >> "$LOG_FILE"
+            break
+        else
+            echo "跳过 $py（缺依赖）" >> "$LOG_FILE"
+        fi
+    fi
+done
+
+# 没找到完整环境的 python：用 PATH 第一个，并尝试装依赖
+if [ -z "$PYTHON_CMD" ]; then
+    if command -v python3 &> /dev/null; then
+        PYTHON_CMD="python3"
+    elif command -v python &> /dev/null; then
+        PYTHON_CMD="python"
+    else
+        echo "错误: 未找到任何 python" >> "$LOG_FILE"
+        osascript -e 'display alert "启动错误" message "未找到 Python，请先安装 Python 3.9+ 并配置 PySide6/numpy/opencv-python。"' 2>/dev/null
+        exit 1
+    fi
+    echo "未找到完整环境，用 $PYTHON_CMD 并尝试安装依赖..." >> "$LOG_FILE"
+    "$PYTHON_CMD" -m pip install --user PySide6 numpy opencv-python \
+        -i https://pypi.tuna.tsinghua.edu.cn/simple >> "$LOG_FILE" 2>&1
 fi
-echo "Python: $PYTHON_CMD ($($PYTHON_CMD --version 2>&1))" >> "$LOG_FILE"
 
 # 检查主程序文件
 if [ ! -f "media_library_v2.py" ]; then
     echo "错误: 未找到 media_library_v2.py" >> "$LOG_FILE"
     osascript -e 'display alert "启动错误" message "未找到 media_library_v2.py 文件。"' 2>/dev/null
     exit 1
-fi
-
-# 检查 PySide6，缺失则安装
-if ! "$PYTHON_CMD" -c "import PySide6" 2>/dev/null; then
-    echo "PySide6 缺失，正在安装..." >> "$LOG_FILE"
-    "$PYTHON_CMD" -m pip install PySide6 -i https://pypi.tuna.tsinghua.edu.cn/simple >> "$LOG_FILE" 2>&1
 fi
 
 # 后台静默启动（nohup + disown，不弹 Terminal，应用退出后启动器自动退出）

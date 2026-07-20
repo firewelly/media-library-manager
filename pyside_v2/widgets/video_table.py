@@ -29,6 +29,7 @@ class VideoTableView(QTableView):
     double_clicked = Signal(object)      # video_id or None
     header_clicked = Signal(str)         # 列标识
     context_menu_requested = Signal(object)  # QPoint（viewport 相对）
+    star_clicked = Signal(object, int)   # video_id, star_rating(0-5)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -86,6 +87,26 @@ class VideoTableView(QTableView):
             self.double_clicked.emit(vid)
         else:
             super().mouseDoubleClickEvent(event)
+
+    def mousePressEvent(self, event):
+        """点击星级列直接打分（按 X 位置算第几星）。"""
+        if event.button() == Qt.LeftButton:
+            idx = self.indexAt(event.pos())
+            if idx.isValid():
+                model = self.model()
+                if isinstance(model, VideoTableModel):
+                    col_key = model.column_keys[idx.column()] if idx.column() < len(model.column_keys) else None
+                    if col_key == 'stars':
+                        # 算第几星：列宽分 5 等分
+                        col_x = event.position().x() - self.columnViewportPosition(idx.column())
+                        col_w = self.columnWidth(idx.column())
+                        if col_w > 0:
+                            star = int((col_x / col_w) * 5) + 1
+                            star = max(1, min(5, star))
+                            vid = idx.data(Qt.UserRole)
+                            self.star_clicked.emit(vid, star)
+                            return  # 不进入选择（避免误选）
+        super().mousePressEvent(event)
 
     def _on_header_clicked(self, section):
         model = self.model()
