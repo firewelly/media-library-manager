@@ -71,12 +71,12 @@ def scan_media(main_window):
             except Exception:
                 skipped += 1
 
-            if i % 50 == 0 or i == total - 1:
+            if (i + 1) % 200 == 0 or i == total - 1:
                 pct = int((i + 1) / total * 100)
                 progress_cb(pct, f"扫描 {i+1}/{total}: 新增{added} 跳过{skipped}")
-                if i % 200 == 0:
-                    core.conn.commit()
-                    log_cb(f"[{i+1}/{total}] 新增:{added} 更新:{updated} 跳过:{skipped}")
+                core.conn.commit()
+                # 日志降频：每 200 条记一次汇总，不逐条记
+                log_cb(f"  [{i+1}/{total}] 新增:{added} 跳过:{skipped}")
 
         core.conn.commit()
         return f"扫描完成：新增 {added}，更新 {updated}，跳过 {skipped}（共 {total}）"
@@ -121,43 +121,133 @@ def comprehensive_update(main_window):
 
 
 # =====================================================================
-# 同步打分到文件名
+# 同步打分到文件名（优化版）
 # =====================================================================
 def sync_stars_to_filename(main_window):
-    """把星级（!数量）同步写入文件名。"""
+    """把星级（!数量）同步写入文件名。
+
+    优化点（vs Tk 版）：
+    1. 先查在线文件夹，只处理这些文件夹下的视频（不浪费在离线文件上）
+    2. 只查 stars>0 的视频（无星级的不需要同步）
+    3. 批量 commit（每 200 条一次，而非每条一次）
+    4. 日志精简：只记录实际重命名的 + 错误；跳过的不逐条记录
+    5. 进度更新降频（每 200 条更新一次 UI，避免重绘开销）
+    6. 演员规则：有演员信息的不加叹号（对齐 Tk 业务逻辑）
+    """
     core = main_window.core
 
     def task(progress_cb, log_cb, cancel_cb):
-        core.cursor.execute("SELECT id, file_path, file_name, stars FROM videos WHERE is_nas_online = 1")
-        videos = core.cursor.fetchall()
+        # ---- 第 1 步：确定在线文件夹 ----
+        log_cb("检查在线文件夹…")
+        cur = core.conn.cursor()
+        cur.execute("SELECT folder_path FROM folders WHERE is_active = 1")
+        all_folders = [r[0] for r in cur.fetchall()]
+        online_folders = [f for f in all_folders if f and os.path.exists(f)]
+        log_cb(f"在线文件夹：{len(online_folders)} / {len(all_folders)}")
+        if not online_folders:
+            return "没有在线文件夹"
+
+        # ---- 第 2 步：查询有星级评分的在线视频（带演员信息）----
+        log_cb("查询有星级评分的视频…")
+        # 用 source_folder LIKE 筛选在线文件夹下的视频 + stars>0
+        # 只查需要的字段，避免取回全行
+        folder_conds = " OR ".join(["source_folder LIKE ?"] * len(online_folders))
+        folder_params = [f"{f}%{os.sep if not f.endswith(os.sep) else ''}" for f in online_folders]
+
+        cur.execute(
+            f"""SELECT v.id, v.file_path, v.file_name, v.stars,
+                       (SELECT GROUP_CONCAT(a.name, ', ') FROM video_actors va
+                        JOIN actors a ON va.actor_id = a.id
+                        WHERE va.video_id = v.id) AS actors
+                FROM videos v
+                WHERE v.stars > 0 AND ({folder_conds})""",
+            folder_params
+        )
+        videos = cur.fetchall()
         total = len(videos)
-        log_cb(f"共 {total} 个在线视频")
-        ok = fail = 0
-        for i, (vid, fpath, fname, stars) in enumerate(videos):
+        log_cb(f"有星级评分的在线视频：{total} 个")
+        if total == 0:
+            return "没有需要同步的视频（无星级评分）"
+
+        # ---- 第 3 步：逐个处理 ----
+        renamed = skipped_no_change = skipped_offline = skipped_has_actor = error = 0
+        batch_size = 200
+
+        for i, (vid, fpath, fname, stars, actors) in enumerate(videos):
             if cancel_cb():
+                log_cb("用户取消")
                 break
+
             try:
-                stars = stars or 0
-                # 去掉开头的 ! 再加回
-                clean = fname.lstrip('!')
-                prefix = '!' * stars if stars > 0 else ''
-                new_name = prefix + clean
-                if new_name != fname:
-                    new_path = os.path.join(os.path.dirname(fpath), new_name)
-                    if not os.path.exists(new_path):
-                        os.rename(fpath, new_path)
-                        core.cursor.execute(
-                            "UPDATE videos SET file_path=?, file_name=? WHERE id=?",
-                            (new_path, new_name, vid))
-                        ok += 1
-                if i % 100 == 0:
-                    progress_cb(int(i/total*100), f"同步 {i+1}/{total}")
-                    core.conn.commit()
-                    log_cb(f"[{i+1}/{total}] 已同步 {ok}")
+                # 检查文件是否在线（快速判断）
+                if not os.path.exists(fpath):
+                    skipped_offline += 1
+                    continue
+
+                # 演员规则：有演员信息的不加叹号（对齐 Tk）
+                has_actors = actors is not None and actors.strip() != ''
+                if has_actors:
+                    required_bangs = 0  # 有演员 → 不加叹号
+                else:
+                    required_bangs = max(0, stars - 1)  # stars-1 个叹号（1星=0, 2星=1...）
+
+                # 计算当前叹号数
+                name, ext = os.path.splitext(fname)
+                current_bangs = 0
+                clean_name = name
+                while clean_name.startswith('!'):
+                    current_bangs += 1
+                    clean_name = clean_name[1:]
+
+                # 叹号数已正确 → 跳过（不记日志，减少噪音）
+                if current_bangs == required_bangs:
+                    skipped_no_change += 1
+                    continue
+
+                # 生成新文件名
+                new_fname = ('!' * required_bangs) + clean_name + ext
+                new_path = os.path.join(os.path.dirname(fpath), new_fname)
+
+                # 冲突处理（加序号）
+                if os.path.exists(new_path) and new_path != fpath:
+                    base, e = os.path.splitext(new_path)
+                    n = 1
+                    while os.path.exists(new_path):
+                        new_path = f"{base}_{n}{e}"
+                        n += 1
+                    new_fname = os.path.basename(new_path)
+
+                if new_path == fpath:
+                    skipped_no_change += 1
+                    continue
+
+                # 重命名
+                os.rename(fpath, new_path)
+                cur.execute(
+                    "UPDATE videos SET file_path=?, file_name=? WHERE id=?",
+                    (new_path, new_fname, vid)
+                )
+                renamed += 1
+                # 只记录实际重命名的（精简日志）
+                log_cb(f"  重命名: {fname} → {new_fname}")
+
             except Exception as e:
-                fail += 1
+                error += 1
+                log_cb(f"  ⚠️ 错误: {fname} - {e}")
+
+            # 批量 commit + 进度更新（降频）
+            if (i + 1) % batch_size == 0 or i == total - 1:
+                pct = int((i + 1) / total * 100)
+                progress_cb(pct, f"处理 {i+1}/{total}（重命名 {renamed}）")
+                core.conn.commit()
+
         core.conn.commit()
-        return f"打分同步完成：成功 {ok}，失败 {fail}"
+        cur.close()
+
+        # 汇总（精简，只有关键数字）
+        return (f"同步完成：重命名 {renamed}，跳过 {skipped_no_change + skipped_offline + skipped_has_actor}"
+                f"（其中文件不存在 {skipped_offline}，叹号已正确 {skipped_no_change}），"
+                f"错误 {error}（共 {total}）")
 
     TaskRunnerDialog.run(main_window, "同步打分到文件名", task,
                          on_done=main_window.load_videos)
@@ -190,10 +280,13 @@ def batch_calculate_md5(main_window):
                     ok += 1
                 else:
                     fail += 1
-                if i % 20 == 0:
-                    progress_cb(int(i/total*100), f"计算 {i+1}/{total}")
+                if (i + 1) % 20 == 0 or i == total - 1:
+                    pct = int((i + 1) / total * 100)
+                    progress_cb(pct, f"计算 {i+1}/{total}（成功 {ok}）")
                     core.conn.commit()
-                    log_cb(f"[{i+1}/{total}] {os.path.basename(fpath)[:30]}: {md5[:8] if md5 else '失败'}")
+                    # 日志降频：每 20 条记一次进度，不逐条记
+                    if (i + 1) % 100 == 0:
+                        log_cb(f"  [{i+1}/{total}] 已计算 {ok} 个，失败 {fail}")
             except Exception:
                 fail += 1
         core.conn.commit()
@@ -346,10 +439,13 @@ def batch_generate_thumbnails(main_window):
                     ok += 1
                 else:
                     fail += 1
-                if i % 10 == 0:
-                    progress_cb(int(i/total*100), f"生成 {i+1}/{total}")
+                if (i + 1) % 10 == 0 or i == total - 1:
+                    pct = int((i + 1) / total * 100)
+                    progress_cb(pct, f"生成 {i+1}/{total}（成功 {ok}）")
                     core.conn.commit()
-                    log_cb(f"[{i+1}/{total}] {os.path.basename(fpath)[:30]}: {'OK' if success else '失败'}")
+                    # 日志降频：每 50 条记一次进度
+                    if (i + 1) % 50 == 0:
+                        log_cb(f"  [{i+1}/{total}] 已生成 {ok} 个，失败 {fail}")
             except Exception:
                 fail += 1
         core.conn.commit()
@@ -413,13 +509,15 @@ def batch_import_nfo(main_window):
                     success, msg = core.import_nfo_file(nfo, video_id=vid)
                     if success:
                         ok += 1
-                        log_cb(f"[{i+1}/{total}] 导入成功: {os.path.basename(nfo)}")
                     else:
                         fail += 1
                 else:
                     fail += 1
-                if i % 20 == 0:
-                    progress_cb(int(i/total*100), f"导入 {i+1}/{total}")
+                # 进度+日志降频
+                if (i + 1) % 50 == 0 or i == total - 1:
+                    pct = int((i + 1) / total * 100)
+                    progress_cb(pct, f"导入 {i+1}/{total}（成功 {ok}）")
+                    log_cb(f"  [{i+1}/{total}] 成功 {ok}，失败 {fail}")
             except Exception:
                 fail += 1
         core.conn.commit()

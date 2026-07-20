@@ -6092,88 +6092,98 @@ class MediaLibrary:
             cancel_button.config(command=cancel_sync)
             
             def sync_thread():
-                """同步线程"""
+                """同步线程（优化版：先查在线文件夹，只处理在线+有星级的视频）"""
                 try:
-                    # 获取所有有星级评分的视频，同时查询演员信息
                     cursor = self.conn.cursor()
-                    cursor.execute("""
-                         SELECT v.id, v.file_path, v.stars, v.title,
-                                GROUP_CONCAT(a.name) as actors
-                         FROM videos v
-                         LEFT JOIN video_actors va ON v.id = va.video_id
-                         LEFT JOIN actors a ON va.actor_id = a.id
-                         WHERE v.stars > 0 AND v.file_path IS NOT NULL AND v.file_path != ''
-                         GROUP BY v.id, v.file_path, v.stars, v.title
-                         ORDER BY v.stars DESC, v.title
-                     """)
-                    videos = cursor.fetchall()
-                    
-                    if not videos:
-                        log_message("没有找到需要同步的视频文件")
+
+                    # ---- 优化 1：先检查在线文件夹 ----
+                    cursor.execute("SELECT folder_path FROM folders WHERE is_active = 1")
+                    all_folders = [r[0] for r in cursor.fetchall()]
+                    online_folders = [f for f in all_folders if f and os.path.exists(f)]
+                    log_message(f"在线文件夹：{len(online_folders)} / {len(all_folders)}")
+
+                    if not online_folders:
+                        log_message("没有在线文件夹，无法同步")
                         cancel_button.config(text="关闭", command=progress_window.destroy)
                         return
-                    
+
+                    # ---- 优化 2：只查在线文件夹下 stars>0 的视频 ----
+                    folder_conds = " OR ".join(["v.source_folder LIKE ?"] * len(online_folders))
+                    folder_params = [f"{f}%" for f in online_folders]
+                    cursor.execute(f"""
+                         SELECT v.id, v.file_path, v.stars, v.title,
+                                (SELECT GROUP_CONCAT(a.name, ', ') FROM video_actors va
+                                 JOIN actors a ON va.actor_id = a.id
+                                 WHERE va.video_id = v.id) AS actors
+                         FROM videos v
+                         WHERE v.stars > 0 AND v.file_path IS NOT NULL AND v.file_path != ''
+                               AND ({folder_conds})
+                         ORDER BY v.stars DESC, v.title
+                     """, folder_params)
+                    videos = cursor.fetchall()
+
+                    if not videos:
+                        log_message("没有需要同步的视频（在线文件夹中无星级评分的视频）")
+                        cancel_button.config(text="关闭", command=progress_window.destroy)
+                        return
+
                     total_videos = len(videos)
                     progress_bar.config(maximum=total_videos)
-                    
-                    log_message(f"找到 {total_videos} 个有星级评分的视频文件")
-                    
+
+                    log_message(f"有星级评分的在线视频：{total_videos} 个")
+
                     # 统计变量
                     processed = 0
                     renamed_count = 0
                     skipped_count = 0
+                    skipped_offline = 0
                     error_count = 0
                     
                     for video_id, file_path, stars, title, actors in videos:
                         if self.cancel_sync:
                             break
-                            
+
                         processed += 1
-                        progress_bar.config(value=processed)
-                        progress_label.config(text=f"处理中: {os.path.basename(file_path)} ({processed}/{total_videos})")
-                        
+
                         try:
-                            # 检查文件是否存在
+                            # 检查文件是否存在（不逐条记日志）
                             if not os.path.exists(file_path):
-                                log_message(f"跳过: 文件不存在 - {file_path}")
-                                skipped_count += 1
+                                skipped_offline += 1
                                 continue
-                            
+
                             # 解析当前文件名
                             file_dir = os.path.dirname(file_path)
                             filename = os.path.basename(file_path)
                             name, ext = os.path.splitext(filename)
-                            
+
                             # 检查演员字段是否为空
                             has_actors = actors is not None and actors.strip() != ''
-                            
+
                             # 如果有演员信息，则不添加叹号（required_exclamations = 0）
                             # 如果没有演员信息，则按原逻辑添加叹号
                             if has_actors:
                                 required_exclamations = 0
-                                log_message(f"检测到演员信息，不添加叹号: {filename} (演员: {actors})")
                             else:
                                 # 计算需要的叹号数量 (stars - 1，因为1星不加叹号)
                                 required_exclamations = max(0, stars - 1)
-                            
+
                             # 检查当前文件名的叹号数量
                             current_exclamations = 0
                             clean_name = name
                             while clean_name.startswith('!'):
                                 current_exclamations += 1
                                 clean_name = clean_name[1:]
-                            
-                            # 如果叹号数量已经正确，跳过
+
+                            # 如果叹号数量已经正确，跳过（不记日志）
                             if current_exclamations == required_exclamations:
-                                log_message(f"跳过: 叹号数量已正确 - {filename}")
                                 skipped_count += 1
                                 continue
-                            
+
                             # 生成新文件名
                             new_exclamations = '!' * required_exclamations
                             new_filename = f"{new_exclamations}{clean_name}{ext}"
                             new_full_path = os.path.join(file_dir, new_filename)
-                            
+
                             # 处理重名冲突
                             counter = 1
                             original_new_path = new_full_path
@@ -6181,38 +6191,42 @@ class MediaLibrary:
                                 name_part, ext_part = os.path.splitext(original_new_path)
                                 new_full_path = f"{name_part}_{counter}{ext_part}"
                                 counter += 1
-                            
+
                             # 如果路径没有变化，跳过
                             if new_full_path == file_path:
-                                log_message(f"跳过: 路径未变化 - {filename}")
                                 skipped_count += 1
                                 continue
-                            
+
                             # 重命名文件
                             os.rename(file_path, new_full_path)
-                            
+
                             # 更新数据库
                             cursor.execute("""
-                                UPDATE videos 
-                                SET file_path = ? 
+                                UPDATE videos
+                                SET file_path = ?
                                 WHERE id = ?
                             """, (new_full_path, video_id))
-                            
+
+                            # 只记录实际重命名的（精简日志）
                             log_message(f"重命名: {filename} -> {os.path.basename(new_full_path)}")
                             renamed_count += 1
-                            
+
                         except Exception as e:
                             log_message(f"错误: {filename} - {str(e)}")
                             error_count += 1
-                        
-                        # 更新统计信息
-                        stats_text.delete(1.0, tk.END)
-                        stats_text.insert(tk.END, 
-                            f"处理进度: {processed}/{total_videos}\n" +
-                            f"重命名: {renamed_count}\n" +
-                            f"跳过: {skipped_count}\n" +
-                            f"错误: {error_count}"
-                        )
+
+                        # 优化：进度+统计降频更新（每 100 个更新一次 UI，避免重绘开销）
+                        if processed % 100 == 0 or processed == total_videos:
+                            progress_bar.config(value=processed)
+                            progress_label.config(text=f"处理中: {processed}/{total_videos}（重命名 {renamed_count}）")
+                            stats_text.delete(1.0, tk.END)
+                            stats_text.insert(tk.END,
+                                f"处理进度: {processed}/{total_videos}\n" +
+                                f"重命名: {renamed_count} | 跳过: {skipped_count} | 离线: {skipped_offline}\n" +
+                                f"错误: {error_count}"
+                            )
+                            # 批量提交（每 100 个 commit 一次）
+                            self.conn.commit()
                     
                     # 提交数据库更改
                     self.conn.commit()
@@ -6221,17 +6235,19 @@ class MediaLibrary:
                         log_message("\n=== 同步完成 ===")
                         log_message(f"总计处理: {processed} 个文件")
                         log_message(f"成功重命名: {renamed_count} 个文件")
-                        log_message(f"跳过: {skipped_count} 个文件")
+                        log_message(f"跳过: {skipped_count} 个文件（叹号已正确）")
+                        log_message(f"文件不存在: {skipped_offline} 个")
                         log_message(f"错误: {error_count} 个文件")
-                        
+
                         cancel_button.config(text="关闭", command=progress_window.destroy)
-                        
+
                         if renamed_count > 0:
                             # 先显示完成对话框，避免卡顿
-                            messagebox.showinfo("同步完成", 
+                            messagebox.showinfo("同步完成",
                                 f"同步完成！\n\n" +
                                 f"成功重命名: {renamed_count} 个文件\n" +
-                                f"跳过: {skipped_count} 个文件\n" +
+                                f"跳过: {skipped_count} 个（叹号已正确）\n" +
+                                f"文件不存在: {skipped_offline} 个\n" +
                                 f"错误: {error_count} 个文件")
                             
                             # 在对话框显示后异步刷新视频列表
