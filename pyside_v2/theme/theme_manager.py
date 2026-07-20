@@ -67,13 +67,15 @@ class ThemeManager:
         self.apply("dark" if self._theme_name == "light" else "light")
 
     def _render(self, template: str, c: ThemeColors) -> str:
-        """把 base.qss 的占位符替换为实际颜色。"""
+        """把 base.qss 的占位符替换为实际颜色/资源路径。"""
         def rgba(q: QColor) -> str:
             return f"rgba({q.red()}, {q.green()}, {q.blue()}, {q.alpha()})"
 
         mapping = {
             "@@font_ui@@": Tokens.FONT_UI,
             "@@font_mono@@": Tokens.FONT_MONO,
+            # checkbox 对勾 SVG 绝对路径（QSS url() 需要绝对路径）
+            "@@checkbox_svg@@": str((_QSS_DIR / "checkbox_check.svg").resolve().as_posix()),
             "@@bg_app@@": rgba(c.bg_app),
             "@@bg_sidebar@@": rgba(c.bg_sidebar),
             "@@bg_panel@@": rgba(c.bg_panel),

@@ -134,3 +134,4 @@ release/
 # 临时测试文件 / Temporary test files
 _theme_showcase.py
 test_v4_*.py
+md5_cache.json
