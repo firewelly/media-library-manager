@@ -1118,9 +1118,13 @@ class MainWindow(QMainWindow):
         fields = ('v.id, v.file_path, v.file_name, v.title, v.stars, v.tags, v.file_size, '
                   'v.is_nas_online, v.duration, v.resolution, v.file_created_time, '
                   'v.source_folder, v.md5_hash, '
-                  # 演员子查询（索引13，对齐 FIELD_INDEX['actors']=13）
+                  # 演员子查询（索引13）
                   '(SELECT GROUP_CONCAT(a.name, ", ") FROM video_actors va '
-                  'JOIN actors a ON va.actor_id=a.id WHERE va.video_id=v.id) AS actors_display')
+                  'JOIN actors a ON va.actor_id=a.id WHERE va.video_id=v.id) AS actors_display, '
+                  # JAVDB 番号子查询（索引14）
+                  '(SELECT j.javdb_code FROM javdb_info j WHERE j.video_id=v.id) AS javdb_code, '
+                  # JAVDB 评分子查询（索引15）
+                  '(SELECT j.score FROM javdb_info j WHERE j.video_id=v.id) AS javdb_rating')
 
         conditions = []
         params = []

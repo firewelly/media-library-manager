@@ -21,30 +21,34 @@ from PySide6.QtCore import Qt, QAbstractTableModel, QModelIndex
 # 0:id 1:file_path 2:file_name 3:title 4:stars 5:tags 6:file_size
 # 7:is_nas_online 8:duration 9:resolution 10:file_created_time 11:source_folder 12:md5_hash
 # 13:actors(子查询 GROUP_CONCAT)
+# 14:javdb_code(子查询) 15:javdb_rating(子查询)
 FIELD_INDEX = {
     'id': 0, 'file_path': 1, 'file_name': 2, 'title': 3, 'stars': 4,
     'tags': 5, 'file_size': 6, 'is_nas_online': 7, 'duration': 8,
     'resolution': 9, 'file_created_time': 10, 'source_folder': 11, 'md5_hash': 12,
-    'actors': 13,
+    'actors': 13, 'javdb_code': 14, 'javdb_rating': 15,
 }
 
 # 显示列：列标识 → (显示名, 数据源字段名, 默认宽度, 对齐方式)
 # 只含列表实际展示的列（详情面板另有完整字段）
 DISPLAY_COLUMNS = [
-    ('title',              '标题',      320, 'left'),
-    ('actors',             '演员',      140, 'left'),
+    ('javdb_code',         '番号',      100, 'center'),
+    ('title',              '标题',      280, 'left'),
+    ('actors',             '演员',      130, 'left'),
     ('stars',              '星级',      80, 'center'),
-    ('tags',               '标签',      140, 'left'),
+    ('tags',               '标签',      130, 'left'),
     ('size',               '大小',      85, 'center'),
     ('status',             '状态',      60, 'center'),
     ('duration',           '时长',      80, 'center'),
-    ('resolution',         '分辨率',    110, 'center'),
+    ('resolution',         '分辨率',    100, 'center'),
+    ('javdb_rating',       '评分',      60, 'center'),
     ('file_created_time',  '创建时间',  140, 'left'),
-    ('source_folder',      '所在文件夹', 180, 'left'),
+    ('source_folder',      '所在文件夹', 160, 'left'),
 ]
 
 # 排序字段映射（列标识 → SQL 列名，确保走索引）
 SORT_MAPPING = {
+    'javdb_code': 'javdb_code',
     'title': 'title',
     'stars': 'stars',
     'tags': 'tags',
@@ -52,6 +56,7 @@ SORT_MAPPING = {
     'status': 'is_nas_online',
     'duration': 'duration',
     'resolution': 'resolution',
+    'javdb_rating': 'javdb_rating',
     'file_created_time': 'file_created_time',
     'source_folder': 'source_folder',
 }
