@@ -15,7 +15,7 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QPixmap, QFont
 
-from pyside_v2.theme import Tokens
+from pyside_v2.theme import Tokens, color_hex
 
 
 class ActorDetailWindow(QDialog):
@@ -162,10 +162,9 @@ class ActorDetailWindow(QDialog):
             mid, fname, fpath, jtitle, jcode, jrelease, cover_url, sfolder, is_online = m
             star = ""
             try:
-                self.core.cursor.execute("SELECT stars FROM videos WHERE id=?", (mid,))
-                sr = self.core.cursor.fetchone()
-                if sr and sr[0]:
-                    star = " " + "★" * sr[0]
+                star_count = self.core.get_video_stars(mid)
+                if star_count:
+                    star = " " + "★" * star_count
             except Exception:
                 pass
             status = "●在线" if is_online else "○离线"
@@ -182,7 +181,7 @@ class ActorDetailWindow(QDialog):
             fav = False
         if fav:
             self.btn_fav.setText("★ 已收藏")
-            self.btn_fav.setStyleSheet("color: #e8a009;")
+            self.btn_fav.setStyleSheet(f"color: {color_hex('star_on')};")
         else:
             self.btn_fav.setText("☆ 收藏")
             self.btn_fav.setStyleSheet("")
@@ -198,11 +197,10 @@ class ActorDetailWindow(QDialog):
                     )
                     return
             # 尝试 avatar_data 字段
-            self.core.cursor.execute("SELECT avatar_data FROM actors WHERE id=?", (actor_id,))
-            r = self.core.cursor.fetchone()
-            if r and r[0]:
+            avatar = self.core.get_actor_avatar(actor_id)
+            if avatar:
                 pix = QPixmap()
-                pix.loadFromData(r[0])
+                pix.loadFromData(avatar)
                 if not pix.isNull():
                     self.avatar_label.setPixmap(
                         pix.scaled(220, 290, Qt.KeepAspectRatioByExpanding, Qt.SmoothTransformation)
@@ -216,9 +214,7 @@ class ActorDetailWindow(QDialog):
         if not getattr(self, '_actor_id', None):
             return
         try:
-            self.core.cursor.execute("SELECT is_favorite FROM actors WHERE id=?", (self._actor_id,))
-            r = self.core.cursor.fetchone()
-            cur = bool(r and r[0])
+            cur = self.core.get_actor_favorite(self._actor_id)
             self.core.set_actor_favorite(self._actor_id, not cur)
             self._update_fav_button(not cur, 1 if not cur else 0)
         except Exception as e:

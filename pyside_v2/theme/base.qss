@@ -192,8 +192,8 @@ QHeaderView::section:hover { color: @@text_1@@; }
     color: @@text_3@@; font-size: 12px; font-weight: 500;
 }
 #detailResBadge {
-    background: rgba(0,0,0,180);
-    color: #ffffff;
+    background: @@bg_active@@;
+    color: @@text_1@@;
     border-radius: 4px;
     font-family: @@font_mono@@;
     font-size: 11px;

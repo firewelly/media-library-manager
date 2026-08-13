@@ -174,10 +174,7 @@ class ImportVideosDialog(QDialog):
     def _load_target_folders(self):
         """从 folders 表加载可用目标文件夹。"""
         try:
-            self.core.cursor.execute(
-                "SELECT DISTINCT folder_path FROM folders WHERE is_active=1 ORDER BY folder_path"
-            )
-            folders = [r[0] for r in self.core.cursor.fetchall()]
+            folders = self.core.get_active_folder_paths()
         except Exception:
             folders = []
         self.target_combo.clear()
@@ -193,9 +190,11 @@ class ImportVideosDialog(QDialog):
     # ---- 日志 ----
     def _log(self, msg, level="info"):
         from datetime import datetime
+        from pyside_v2.theme import color_hex
         ts = datetime.now().strftime("%H:%M:%S")
-        color = {"info": "", "success": "#1a7f37", "warning": "#9a6700",
-                 "error": "#cf222e"}.get(level, "")
+        color = {"info": "", "success": color_hex('success'),
+                 "warning": color_hex('warning'),
+                 "error": color_hex('danger')}.get(level, "")
         prefix = f'<span style="color:{color}">' if color else '<span>'
         self.log_view.appendHtml(f'{prefix}[{ts}] {msg}</span>')
 
@@ -496,12 +495,9 @@ class ImportWorker(QThread):
                     # folder_type：从 folders 表查目标文件夹类型
                     folder_type = "local"
                     try:
-                        cur = self.core.conn.cursor()
-                        cur.execute("SELECT folder_type FROM folders WHERE folder_path = ?", (self.target,))
-                        r = cur.fetchone()
-                        if r:
-                            folder_type = r[0]
-                        cur.close()
+                        ft = self.core.get_folder_type(self.target)
+                        if ft:
+                            folder_type = ft
                     except Exception:
                         pass
 

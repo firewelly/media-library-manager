@@ -316,7 +316,15 @@ class MediaLibrary:
     def __init__(self):
         self.root = tk.Tk()
         self.root.title("视频媒体库管理器")
-        self.root.geometry("1200x800")
+        # 根据屏幕分辨率自适应窗口尺寸（宽度≈屏幕宽度）并自动居中
+        screen_w = self.root.winfo_screenwidth()
+        screen_h = self.root.winfo_screenheight()
+        win_w = int(screen_w * 0.96)                       # 宽度约为屏幕的 96%
+        win_h = int(screen_h * 0.86)                       # 高度约为屏幕的 86%，留出菜单栏/任务栏/Dock
+        pos_x = max(0, (screen_w - win_w) // 2)
+        pos_y = max(0, (screen_h - win_h) // 2)
+        self.root.geometry(f"{win_w}x{win_h}+{pos_x}+{pos_y}")
+        self.root.minsize(1000, 600)                       # 保证列宽与可用性的最小尺寸
         
         # 配置文件路径
         self.config_path = ensure_file_in_runtime('gui_config.json')
@@ -8990,12 +8998,17 @@ class MediaLibrary:
                         videos = [(vid, path, title, tags) for vid, path, title, tags in all_videos 
                                 if os.path.exists(path) and os.path.isfile(path)]
                     elif mode == "no_tags_update":
-                        # 获取没有标签的视频
-                        self.cursor.execute("SELECT id, file_path, title, tags FROM videos WHERE (tags IS NULL OR tags = '')")
+                        # 获取没有标签的视频（与界面"无标签"分类一致：空值 + <无标签> 标记）
+                        self.cursor.execute("SELECT id, file_path, title, tags FROM videos WHERE (tags IS NULL OR tags = '' OR tags = '<无标签>')")
                         all_videos = self.cursor.fetchall()
-                        # 过滤出文件存在的视频
-                        videos = [(vid, path, title, tags) for vid, path, title, tags in all_videos 
-                                if os.path.exists(path) and os.path.isfile(path)]
+                        # 过滤出文件存在的视频；同时统计不可达数量，用于失败诊断
+                        videos = []
+                        unreachable = 0
+                        for vid, path, title, tags in all_videos:
+                            if os.path.exists(path) and os.path.isfile(path):
+                                videos.append((vid, path, title, tags))
+                            else:
+                                unreachable += 1
                     else:
                         videos = []
                     
@@ -9004,7 +9017,15 @@ class MediaLibrary:
                         def close_then_info():
                             try:
                                 progress_window.close()
-                                messagebox.showinfo("信息", "没有找到需要处理的视频")
+                                if not all_videos:
+                                    messagebox.showinfo("信息", "没有找到需要处理的视频（当前无标签视频为 0 个）")
+                                else:
+                                    messagebox.showwarning("无法处理",
+                                        f"共找到 {len(all_videos)} 个无标签视频，但 {unreachable} 个文件路径当前全部不可达。\n\n"
+                                        "可能原因：\n"
+                                        "1. NAS 卷未挂载（无标签视频多为 /Volumes/Video、/Volumes/国产_DX4600 等路径）\n"
+                                        "2. 本地目录被重命名或移动（例如 影视/国产mac 已改名为 影视/!国产mac）\n\n"
+                                        "请先挂载 NAS 或修正文件路径后重试。")
                             except Exception:
                                 pass
                         self.root.after(0, close_then_info)

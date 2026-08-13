@@ -159,108 +159,230 @@ class VideoAnalyzerLocalModelAdult:
             ok = check_video_integrity(video_path, seek_test=seek_test)
             if not ok:
                 raise ValueError(f"视频完整性检查未通过: {video_path}")
-        
+
+        # === 先试 OpenCV 提取 ===
+        frames_base64 = self._extract_frames_opencv(
+            video_path, num_frames,
+            timeout=getattr(video_config, 'FRAME_EXTRACT_TIMEOUT', 30),
+            max_failures=getattr(video_config, 'FRAME_READ_MAX_FAILS', 8),
+        )
+        if frames_base64:
+            return frames_base64
+
+        # === OpenCV 失败 → 回退到 ffmpeg ===
+        if self.verbose:
+            print("OpenCV 无法提取帧，回退到 ffmpeg...")
+        frames_base64 = self._extract_frames_ffmpeg(video_path, num_frames)
+        if frames_base64:
+            return frames_base64
+
+        raise ValueError(f"无法提取任何帧: {video_path}")
+
+    def _extract_frames_opencv(self, video_path: str, num_frames: int = None,
+                                timeout: int = 30, max_failures: int = 8) -> List[str]:
+        """使用 OpenCV 提取帧。失败返回空列表，由调用方回退到 ffmpeg。"""
         cap = cv2.VideoCapture(video_path)
         if not cap.isOpened():
-            raise ValueError(f"无法打开视频文件: {video_path}")
-        
+            return []
+
         try:
             total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
             fps = cap.get(cv2.CAP_PROP_FPS)
             duration = total_frames / fps if fps > 0 else 0
-            
+
             if self.verbose:
                 print(f"视频信息: 总帧数={total_frames}, FPS={fps:.2f}, 时长={duration:.2f}秒")
-            
+
             if num_frames is None:
                 if duration > self.long_video_threshold:
                     num_frames = min(max(1, int(duration / 60)), self.max_frames)
                 else:
                     num_frames = min(8, self.max_frames)
-            else:
-                num_frames = min(num_frames, self.max_frames)
-            
+            num_frames = min(num_frames, self.max_frames)
+
             if self.verbose:
                 print(f"计划提取 {num_frames} 帧 (最大限制: {self.max_frames})")
-            
-            overall_deadline = time.time() + getattr(video_config, 'FRAME_EXTRACT_TIMEOUT', 30)
-            max_failures = getattr(video_config, 'FRAME_READ_MAX_FAILS', 8)
-            consecutive_failures = 0
 
-            frames_base64 = []
+            deadline = time.time() + timeout
+            failures = 0
+            frames = []
 
-            use_sequential_read = (total_frames <= 0) or (fps is None) or (fps <= 0)
-            if use_sequential_read and self.verbose:
-                print("检测到视频元信息异常，启用顺序读取回退模式")
+            use_seq = (total_frames <= 0) or (fps is None) or (fps <= 0)
 
-            if not use_sequential_read:
+            if not use_seq:
                 if total_frames <= 1 or duration <= 1.0:
-                    frame_indices = [total_frames // 2]
-                    if self.verbose:
-                        print("视频过短，仅提取中间帧")
+                    indices = [total_frames // 2]
+                elif num_frames >= total_frames:
+                    indices = range(0, total_frames, max(1, total_frames // num_frames))
                 else:
-                    if num_frames >= total_frames:
-                        frame_indices = list(range(0, total_frames, max(1, total_frames // num_frames)))
-                    else:
-                        step = total_frames / num_frames
-                        frame_indices = [int(i * step) for i in range(num_frames)]
+                    step = total_frames / num_frames
+                    indices = [int(i * step) for i in range(num_frames)]
+                indices = list(indices)[:self.max_frames]
 
-                frame_indices = frame_indices[:self.max_frames]
-
-                for frame_idx in frame_indices:
-                    if time.time() >= overall_deadline:
-                        if self.verbose:
-                            print("帧提取达到超时，提前结束")
+                for idx in indices:
+                    if time.time() >= deadline:
                         break
-
-                    cap.set(cv2.CAP_PROP_POS_FRAMES, frame_idx)
+                    cap.set(cv2.CAP_PROP_POS_FRAMES, idx)
                     ret, frame = cap.read()
-                    
                     if ret:
-                        consecutive_failures = 0
-                        _, buffer = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 85])
-                        compressed_data = self._compress_image(buffer.tobytes())
-                        frame_base64 = base64.b64encode(compressed_data).decode('utf-8')
-                        frames_base64.append(frame_base64)
-                        time_point = frame_idx / fps if fps and fps > 0 else 0
-                        if self.verbose:
-                            compressed_size = len(compressed_data) / (1024 * 1024)
-                            print(f"提取第 {frame_idx} 帧 (时间: {time_point:.2f}s, 压缩后: {compressed_size:.2f}MB)")
+                        failures = 0
+                        _, buf = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 85])
+                        comp = self._compress_image(buf.tobytes())
+                        frames.append(base64.b64encode(comp).decode('utf-8'))
                     else:
-                        consecutive_failures += 1
-                        if self.verbose:
-                            print(f"警告: 无法读取第 {frame_idx} 帧 (连续失败 {consecutive_failures}/{max_failures})")
-                        if consecutive_failures >= max_failures:
-                            if self.verbose:
-                                print("连续读取失败过多，提前结束")
+                        failures += 1
+                        if failures >= max_failures:
                             break
             else:
-                while (len(frames_base64) < num_frames) and (time.time() < overall_deadline):
+                while len(frames) < num_frames and time.time() < deadline:
                     ret, frame = cap.read()
                     if not ret:
-                        consecutive_failures += 1
-                        if self.verbose:
-                            print(f"警告: 顺序读取失败 (连续失败 {consecutive_failures}/{max_failures})")
-                        if consecutive_failures >= max_failures:
-                            if self.verbose:
-                                print("顺序读取失败过多，结束提取")
+                        failures += 1
+                        if failures >= max_failures:
                             break
                         continue
-                    consecutive_failures = 0
-                    _, buffer = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 85])
-                    compressed_data = self._compress_image(buffer.tobytes())
-                    frame_base64 = base64.b64encode(compressed_data).decode('utf-8')
-                    frames_base64.append(frame_base64)
-                
-                if time.time() >= overall_deadline and self.verbose:
-                    print("顺序读取模式达到超时，提前结束提取")
-            
+                    failures = 0
+                    _, buf = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 85])
+                    comp = self._compress_image(buf.tobytes())
+                    frames.append(base64.b64encode(comp).decode('utf-8'))
+
             if self.verbose:
-                print(f"成功提取 {len(frames_base64)} 帧")
-            return frames_base64
-            
+                print(f"OpenCV 帧提取: 成功 {len(frames)} 帧")
+            return frames
         finally:
             cap.release()
+
+    def _extract_frames_random_opencv(self, video_path: str, num_frames: int = 30) -> List[str]:
+        """使用 OpenCV 随机提取帧（提取失败时返回空列表，由调用方回退到 ffmpeg）。"""
+        import random
+
+        cap = cv2.VideoCapture(video_path)
+        if not cap.isOpened():
+            return []
+
+        try:
+            total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+            fps = cap.get(cv2.CAP_PROP_FPS)
+            duration = total_frames / fps if fps > 0 else 0
+
+            if self.verbose:
+                print(f"随机帧提取(OpenCV): 总帧数={total_frames}, FPS={fps:.2f}, 时长={duration:.2f}s")
+
+            if total_frames <= 1 or duration <= 1.0:
+                frame_indices = [total_frames // 2]
+            elif num_frames >= total_frames:
+                frame_indices = sorted(random.sample(range(total_frames), min(num_frames, total_frames)))
+            else:
+                margin = total_frames * 0.05
+                usable_range = total_frames - 2 * int(margin)
+                if usable_range <= num_frames:
+                    frame_indices = sorted(random.sample(range(int(margin), total_frames - int(margin)), min(num_frames, usable_range)))
+                else:
+                    frame_indices = sorted(random.sample(range(int(margin), total_frames - int(margin)), num_frames))
+
+            deadline = time.time() + 60
+            max_failures = 8
+            failures = 0
+            frames = []
+
+            for idx in frame_indices:
+                if time.time() >= deadline:
+                    break
+                cap.set(cv2.CAP_PROP_POS_FRAMES, idx)
+                ret, frame = cap.read()
+                if ret:
+                    failures = 0
+                    _, buffer = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 85])
+                    compressed = self._compress_image(buffer.tobytes())
+                    frames.append(base64.b64encode(compressed).decode('utf-8'))
+                else:
+                    failures += 1
+                    if failures >= max_failures:
+                        break
+
+            if self.verbose:
+                print(f"随机帧提取(OpenCV): 成功 {len(frames)}/{len(frame_indices)} 帧")
+            return frames
+        finally:
+            cap.release()
+
+    def _extract_frames_ffmpeg(self, video_path: str, num_frames: int = None,
+                                timeout: int = 120) -> List[str]:
+        """使用 ffmpeg 提取帧（OpenCV 失败时的回退方案）。
+        
+        适用于 WMV/AVI/MKV 等 OpenCV 无法解码的格式。
+        """
+        import subprocess
+        import tempfile
+
+        if num_frames is None:
+            num_frames = self.max_frames
+        num_frames = min(num_frames, self.max_frames)
+
+        if self.verbose:
+            print(f"ffmpeg: 提取 {num_frames} 帧 (超时 {timeout}s)")
+
+        # 用 ffprobe 获取时长
+        try:
+            dur_result = subprocess.run(
+                ['ffprobe', '-v', 'error', '-show_entries', 'format=duration',
+                 '-of', 'default=noprint_wrappers=1:nokey=1', video_path],
+                capture_output=True, text=True, timeout=15,
+            )
+            duration = float(dur_result.stdout.strip()) if dur_result.returncode == 0 else 300
+        except Exception:
+            duration = 300
+
+        if num_frames is None:
+            if duration > self.long_video_threshold:
+                num_frames = min(max(1, int(duration / 60)), self.max_frames)
+            else:
+                num_frames = min(8, self.max_frames)
+
+        # 计算等间隔时间点
+        if num_frames <= 1:
+            timestamps = [duration / 2]
+        else:
+            step = duration / (num_frames + 1)
+            timestamps = [step * (i + 1) for i in range(num_frames)]
+
+        frames_base64 = []
+        deadline = time.time() + timeout
+
+        # 用临时目录保存帧截图
+        with tempfile.TemporaryDirectory() as tmpdir:
+            for i, ts in enumerate(timestamps):
+                if time.time() >= deadline:
+                    if self.verbose:
+                        print("ffmpeg 帧提取超时，提前结束")
+                    break
+
+                out_path = os.path.join(tmpdir, f'frame_{i:03d}.jpg')
+                cmd = [
+                    'ffmpeg', '-y', '-ss', str(ts),
+                    '-i', video_path,
+                    '-vframes', '1',
+                    '-q:v', '3',
+                    '-vf', 'scale=640:-1',
+                    out_path,
+                ]
+                try:
+                    subprocess.run(cmd, capture_output=True, timeout=60)
+                    if os.path.exists(out_path) and os.path.getsize(out_path) > 0:
+                        with open(out_path, 'rb') as f:
+                            img_data = f.read()
+                        compressed = self._compress_image(img_data)
+                        frames_base64.append(base64.b64encode(compressed).decode('utf-8'))
+                        if self.verbose:
+                            print(f"ffmpeg: 提取帧 {i+1}/{num_frames} @ {ts:.1f}s")
+                except Exception as e:
+                    if self.verbose:
+                        print(f"ffmpeg: 帧 {i} 提取失败: {e}")
+                    continue
+
+        if self.verbose:
+            print(f"ffmpeg: 成功提取 {len(frames_base64)} 帧")
+        return frames_base64
 
     def extract_frames_random(self, video_path: str, num_frames: int = 30) -> List[str]:
         """
@@ -287,68 +409,15 @@ class VideoAnalyzerLocalModelAdult:
             if not ok:
                 raise ValueError(f"视频完整性检查未通过: {video_path}")
 
-        cap = cv2.VideoCapture(video_path)
-        if not cap.isOpened():
-            raise ValueError(f"无法打开视频文件: {video_path}")
-
-        try:
-            total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-            fps = cap.get(cv2.CAP_PROP_FPS)
-            duration = total_frames / fps if fps > 0 else 0
-
-            if self.verbose:
-                print(f"随机帧提取: 总帧数={total_frames}, FPS={fps:.2f}, 时长={duration:.2f}秒, 目标帧数={num_frames}")
-
-            if total_frames <= 1 or duration <= 1.0:
-                frame_indices = [total_frames // 2]
-            elif num_frames >= total_frames:
-                frame_indices = sorted(random.sample(range(total_frames), min(num_frames, total_frames)))
-            else:
-                margin = total_frames * 0.05
-                start = int(margin)
-                end = int(total_frames - margin)
-                usable_range = end - start
-                if usable_range <= num_frames:
-                    frame_indices = sorted(random.sample(range(start, end), min(num_frames, usable_range)))
-                else:
-                    frame_indices = sorted(random.sample(range(start, end), num_frames))
-
-            overall_deadline = time.time() + 60
-            max_failures = 8
-            consecutive_failures = 0
-            frames_base64 = []
-
-            for frame_idx in frame_indices:
-                if time.time() >= overall_deadline:
-                    if self.verbose:
-                        print("随机帧提取达到超时，提前结束")
-                    break
-
-                cap.set(cv2.CAP_PROP_POS_FRAMES, frame_idx)
-                ret, frame = cap.read()
-
-                if ret:
-                    consecutive_failures = 0
-                    _, buffer = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 85])
-                    compressed_data = self._compress_image(buffer.tobytes())
-                    frame_base64 = base64.b64encode(compressed_data).decode('utf-8')
-                    frames_base64.append(frame_base64)
-                    if self.verbose:
-                        time_point = frame_idx / fps if fps and fps > 0 else 0
-                        print(f"随机提取第 {frame_idx} 帧 (时间: {time_point:.2f}s)")
-                else:
-                    consecutive_failures += 1
-                    if self.verbose:
-                        print(f"警告: 无法读取第 {frame_idx} 帧 (连续失败 {consecutive_failures}/{max_failures})")
-                    if consecutive_failures >= max_failures:
-                        break
-
-            if self.verbose:
-                print(f"随机帧提取完成: 成功 {len(frames_base64)}/{len(frame_indices)} 帧")
+        # 先试 OpenCV
+        frames_base64 = self._extract_frames_random_opencv(video_path, num_frames)
+        if frames_base64:
             return frames_base64
 
-        finally:
-            cap.release()
+        # OpenCV 失败 → ffmpeg 回退
+        if self.verbose:
+            print("随机帧提取: OpenCV 失败，回退到 ffmpeg...")
+        return self._extract_frames_ffmpeg(video_path, num_frames)
 
     def _generate_analysis_prompt_adult(self, video_path: Optional[str] = None) -> str:
         """

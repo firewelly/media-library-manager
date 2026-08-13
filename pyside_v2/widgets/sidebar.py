@@ -19,6 +19,7 @@ from PySide6.QtCore import Qt, Signal, QSize
 from PySide6.QtGui import QFont
 
 from pyside_v2.theme import Tokens
+from pyside_v2.widgets.nav_row import NavRow
 
 
 class Sidebar(QWidget):
@@ -122,64 +123,26 @@ class Sidebar(QWidget):
         return lay_wrap
 
     def _nav_button(self, icon, text, key, count=None):
-        w = QWidget()
-        w.setObjectName("navRow")
-        lay = QHBoxLayout(w)
-        lay.setContentsMargins(12, 0, 8, 0)
-        lay.setSpacing(12)
-        ico = QLabel(icon)
-        ico.setFixedWidth(18)
-        ico.setAlignment(Qt.AlignCenter)
-        ico.setStyleSheet("background:transparent;")
-        name = QPushButton(text)
-        name.setObjectName("navBtn")
-        name.setProperty("role", "nav")
-        name.setCheckable(True)
-        name.setCursor(Qt.PointingHandCursor)
-        name.setFlat(True)
-        name.setStyleSheet("text-align:left;")
-        name.clicked.connect(lambda checked=False, k=key: self._on_nav_clicked(k))
-        cnt = QLabel(str(count) if count else "")
-        cnt.setStyleSheet("color: palette(mid); font-size:11px; background:transparent;")
-        lay.addWidget(ico)
-        lay.addWidget(name, 1)
-        lay.addWidget(cnt)
-        # 整行可点击
-        w.mousePressEvent = lambda e, k=key: self._on_nav_clicked(k)
-        w._btn = name
-        self._nav_buttons.append(name)   # 记录用于互斥
-        return w
+        row = NavRow(icon, text, key, checkable=True, count=count)
+        row.clicked.connect(self._on_nav_clicked)
+        self._nav_buttons.append(row.button)   # 记录用于互斥
+        return row
 
     def _action_button(self, icon, text, handler):
         """管理类条目：不可勾选，点击即触发动作。"""
-        w = QWidget()
-        w.setObjectName("navRow")
-        lay = QHBoxLayout(w)
-        lay.setContentsMargins(12, 0, 8, 0)
-        lay.setSpacing(12)
-        ico = QLabel(icon)
-        ico.setFixedWidth(18)
-        ico.setAlignment(Qt.AlignCenter)
-        ico.setStyleSheet("background:transparent;")
-        name = QPushButton(text)
-        name.setProperty("role", "nav")
-        name.setCursor(Qt.PointingHandCursor)
-        name.setFlat(True)
-        name.setStyleSheet("text-align:left;")
-        name.clicked.connect(lambda checked=False, h=handler: self.nav_changed.emit(h))
-        lay.addWidget(ico)
-        lay.addWidget(name, 1)
-        w.mousePressEvent = lambda e, h=handler: self.nav_changed.emit(h)
-        return w
+        row = NavRow(icon, text, handler, checkable=False)
+        row.clicked.connect(self.nav_changed.emit)
+        return row
 
     def _on_nav_clicked(self, key):
-        # 互斥：取消其他按钮选中态
+        # 互斥：取消其他按钮选中态，点亮当前
         sender = self.sender()
+        sender_btn = sender.button if isinstance(sender, NavRow) else sender
         for btn in self._nav_buttons:
-            if btn is not sender:
+            if btn is not sender_btn:
                 btn.setChecked(False)
-        if isinstance(sender, QPushButton):
-            sender.setChecked(True)
+        if isinstance(sender_btn, QPushButton):
+            sender_btn.setChecked(True)
         self.nav_changed.emit(key)
 
     # ---- 动态加载存储位置 ----
@@ -192,8 +155,7 @@ class Sidebar(QWidget):
                 item.widget().deleteLater()
 
         try:
-            core.cursor.execute("SELECT folder_path, folder_type, device_name FROM folders WHERE is_active = 1 ORDER BY folder_path")
-            folders = core.cursor.fetchall()
+            folders = core.get_active_folders()
         except Exception:
             folders = []
 

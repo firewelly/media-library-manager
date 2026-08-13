@@ -135,3 +135,13 @@ release/
 _theme_showcase.py
 test_v4_*.py
 md5_cache.json
+
+# 敏感凭证 / Secrets & credentials（显式声明，绝不提交）
+.env
+.env.local
+.env.*.local
+*.pem
+*.key
+secrets.json
+credentials.json
+token.json

@@ -15,7 +15,7 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QColor
 
-from pyside_v2.theme import Tokens
+from pyside_v2.theme import Tokens, color_hex
 
 
 class FolderManagerDialog(QDialog):
@@ -58,7 +58,7 @@ class FolderManagerDialog(QDialog):
         self.btn_toggle.setCursor(Qt.PointingHandCursor)
         self.btn_toggle.clicked.connect(self._toggle_active)
         self.btn_del = QPushButton("删除")
-        self.btn_del.setStyleSheet("color: #cf222e;")
+        self.btn_del.setStyleSheet(f"color: {color_hex('danger')};")
         self.btn_del.setCursor(Qt.PointingHandCursor)
         self.btn_del.clicked.connect(self._delete_folder)
         self.btn_refresh = QPushButton("⟳ 刷新")
@@ -79,10 +79,7 @@ class FolderManagerDialog(QDialog):
 
     def load_folders(self):
         try:
-            self.core.cursor.execute(
-                "SELECT id, folder_path, folder_type, is_active, device_name FROM folders ORDER BY folder_path"
-            )
-            rows = self.core.cursor.fetchall()
+            rows = self.core.get_all_folders()
         except Exception:
             rows = []
         self.table.setRowCount(len(rows))
@@ -92,7 +89,13 @@ class FolderManagerDialog(QDialog):
             self.table.setItem(r, 2, QTableWidgetItem(device or "—"))
             status_item = QTableWidgetItem("启用" if active else "停用")
             online = os.path.exists(path) if path else False
-            status_item.setForeground(QColor("#1a7f37" if active and online else ("#9a6700" if active else "#8a91a1")))
+            if active and online:
+                status_color = color_hex('success')
+            elif active:
+                status_color = color_hex('warning')
+            else:
+                status_color = color_hex('text_3')
+            status_item.setForeground(QColor(status_color))
             self.table.setItem(r, 3, status_item)
             self.table.setItem(r, 4, QTableWidgetItem(""))
             # 存 id 到第0列的 UserRole
@@ -115,12 +118,7 @@ class FolderManagerDialog(QDialog):
             ftype = "local"
         try:
             device = self.core.get_current_device_name()
-            self.core.cursor.execute(
-                "INSERT OR IGNORE INTO folders (folder_path, folder_type, is_active, device_name, created_at) "
-                "VALUES (?, ?, 1, ?, CURRENT_TIMESTAMP)",
-                (folder, ftype, device)
-            )
-            self.core.conn.commit()
+            self.core.add_folder(folder, ftype, device)
             self.load_folders()
             self.mw.sidebar.load_storage_locations(self.core)
             self.mw.status_bar.showMessage(f"已添加: {folder}", 2000)
@@ -132,11 +130,7 @@ class FolderManagerDialog(QDialog):
         if fid is None:
             return
         try:
-            self.core.cursor.execute("SELECT is_active FROM folders WHERE id=?", (fid,))
-            r = self.core.cursor.fetchone()
-            new = 0 if (r and r[0]) else 1
-            self.core.cursor.execute("UPDATE folders SET is_active=? WHERE id=?", (new, fid))
-            self.core.conn.commit()
+            self.core.toggle_folder_active(fid)
             self.load_folders()
             self.mw.sidebar.load_storage_locations(self.core)
         except Exception as e:
@@ -153,8 +147,7 @@ class FolderManagerDialog(QDialog):
         if reply != QMessageBox.Yes:
             return
         try:
-            self.core.cursor.execute("DELETE FROM folders WHERE id=?", (fid,))
-            self.core.conn.commit()
+            self.core.delete_folder(fid)
             self.load_folders()
             self.mw.sidebar.load_storage_locations(self.core)
         except Exception as e:

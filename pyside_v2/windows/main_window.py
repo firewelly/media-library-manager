@@ -15,12 +15,12 @@ from PySide6.QtWidgets import (
     QSplitter, QScrollArea, QMenu, QMessageBox, QPushButton, QLineEdit,
     QApplication, QComboBox,
 )
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import Qt, Signal, QPoint
 from PySide6.QtGui import QAction, QKeySequence, QShortcut, QPixmap
 
 from pyside_v2.core import MediaLibraryCore, qt_log_handler
-from pyside_v2.theme import Tokens, init_theme, current
-from pyside_v2.widgets import VideoTableModel, VideoTableView, Sidebar
+from pyside_v2.theme import Tokens, init_theme, current, color_hex
+from pyside_v2.widgets import VideoTableModel, VideoTableView, Sidebar, ClickableLabel
 from gui_adapter import setup_full_integration
 
 
@@ -163,11 +163,11 @@ class MainWindow(QMainWindow):
         self.search_input.setPlaceholderText("搜索标题 / 番号 / 演员 / 标签…")
         self.search_input.setFixedWidth(340)
         self.search_input.returnPressed.connect(self._on_search)
-        # 实时搜索（300ms 防抖，对齐 Tk on_search_key_press）
+        # 实时搜索（500ms 防抖，大库查询较重，避免快速打字触发无效查询）
         from PySide6.QtCore import QTimer
         self._search_timer = QTimer(self)
         self._search_timer.setSingleShot(True)
-        self._search_timer.setInterval(300)
+        self._search_timer.setInterval(500)
         self._search_timer.timeout.connect(self._on_search)
         self.search_input.textChanged.connect(lambda: self._search_timer.start())
         tbar_lay.addWidget(self.search_input)
@@ -318,11 +318,13 @@ class MainWindow(QMainWindow):
         star_row = QHBoxLayout()
         star_row.setSpacing(6)
         star_row.addWidget(QLabel("星级"))
-        self.detail_stars_label = QLabel("☆☆☆☆☆")
-        self.detail_stars_label.setStyleSheet("font-size:16px; color: #e8a009;")
+        self.detail_stars_label = ClickableLabel("☆☆☆☆☆")
+        self.detail_stars_label.setStyleSheet(
+            f"font-size:16px; color: {color_hex('star_on')};"
+        )
         self.detail_stars_label.setCursor(Qt.PointingHandCursor)
         self.detail_stars_label.setToolTip("点击设置星级（点同一星降级）")
-        self.detail_stars_label.mousePressEvent = self._detail_star_clicked
+        self.detail_stars_label.clicked.connect(self._detail_star_clicked)
         star_row.addWidget(self.detail_stars_label)
         star_row.addStretch()
         body_lay.addLayout(star_row)
@@ -350,7 +352,7 @@ class MainWindow(QMainWindow):
 
         body_lay.addStretch()
 
-        # 操作按钮组（对齐 v1：播放/保存/星级/标签/JAVDB/封面/删除）
+        # 操作按钮组：主操作（播放/保存）+ 更多菜单（星级/标签/JAVDB/封面/目录/删除）
         actions = QHBoxLayout()
         actions.setSpacing(6)
         self.btn_play = QPushButton("▶ 播放")
@@ -358,51 +360,33 @@ class MainWindow(QMainWindow):
         self.btn_play.setCursor(Qt.PointingHandCursor)
         self.btn_play.clicked.connect(lambda: self._play_video(self._current_video_id))
         self.btn_save = QPushButton("💾 保存")
+        self.btn_save.setProperty("role", "primary")
         self.btn_save.setCursor(Qt.PointingHandCursor)
         self.btn_save.clicked.connect(self._save_video_info)
+        self.btn_more = QPushButton("⋯ 更多")
+        self.btn_more.setCursor(Qt.PointingHandCursor)
+        self.btn_more.clicked.connect(self._show_more_menu)
         actions.addWidget(self.btn_play)
         actions.addWidget(self.btn_save)
+        actions.addWidget(self.btn_more)
         body_lay.addLayout(actions)
-
-        actions2 = QHBoxLayout()
-        actions2.setSpacing(6)
-        self.btn_star = QPushButton("★ 星级")
-        self.btn_star.setCursor(Qt.PointingHandCursor)
-        self.btn_star.clicked.connect(self._show_star_dialog)
-        self.btn_addtag = QPushButton("# 标签")
-        self.btn_addtag.setCursor(Qt.PointingHandCursor)
-        self.btn_addtag.clicked.connect(self._add_tag_to_video)
-        actions2.addWidget(self.btn_star)
-        actions2.addWidget(self.btn_addtag)
-        body_lay.addLayout(actions2)
-
-        actions3 = QHBoxLayout()
-        actions3.setSpacing(6)
-        self.btn_javdb = QPushButton("🔎 JAVDB")
-        self.btn_javdb.setCursor(Qt.PointingHandCursor)
-        self.btn_javdb.clicked.connect(self._fetch_javdb_info)
-        self.btn_thumb = QPushButton("🖼 封面")
-        self.btn_thumb.setCursor(Qt.PointingHandCursor)
-        self.btn_thumb.clicked.connect(lambda: self._refresh_thumbnail(self._current_video_id))
-        actions3.addWidget(self.btn_javdb)
-        actions3.addWidget(self.btn_thumb)
-        body_lay.addLayout(actions3)
-
-        actions4 = QHBoxLayout()
-        actions4.setSpacing(6)
-        self.btn_open_dir = QPushButton("📂 目录")
-        self.btn_open_dir.setCursor(Qt.PointingHandCursor)
-        self.btn_open_dir.clicked.connect(self._open_current_dir)
-        self.btn_delete = QPushButton("🗑 删除")
-        self.btn_delete.setCursor(Qt.PointingHandCursor)
-        self.btn_delete.setStyleSheet("color: #cf222e;")
-        self.btn_delete.clicked.connect(lambda: self._delete_videos([self._current_video_id]))
-        actions4.addWidget(self.btn_open_dir)
-        actions4.addWidget(self.btn_delete)
-        body_lay.addLayout(actions4)
 
         lay.addWidget(body, 1)
         return panel
+
+    def _show_more_menu(self):
+        """详情面板「⋯ 更多」按钮：弹出二级操作菜单。"""
+        menu = QMenu(self.detail_panel)
+        menu.addAction("★ 设置星级", self._show_star_dialog)
+        menu.addAction("# 添加标签", self._add_tag_to_video)
+        menu.addSeparator()
+        menu.addAction("🔎 更新 JAVDB", self._fetch_javdb_info)
+        menu.addAction("🖼 刷新封面", lambda: self._refresh_thumbnail(self._current_video_id))
+        menu.addAction("📂 打开目录", self._open_current_dir)
+        menu.addSeparator()
+        del_act = menu.addAction("🗑 删除视频")
+        del_act.triggered.connect(lambda: self._delete_videos([self._current_video_id]))
+        menu.exec(self.btn_more.mapToGlobal(QPoint(0, self.btn_more.height())))
 
     def _clear_layout(self, layout):
         while layout.count():
@@ -548,9 +532,26 @@ class MainWindow(QMainWindow):
     def _toggle_theme(self):
         self.theme_mgr.toggle()
         self._update_theme_button()
+        self._refresh_inline_colors()
 
     def _update_theme_button(self):
         self.btn_theme.setText("☀" if self.theme_mgr.theme_name == "dark" else "☾")
+
+    def _refresh_inline_colors(self):
+        """主题切换后刷新内联 setStyleSheet 的颜色（QSS 占位符不作用于内联样式）。
+
+        base.qss 的 @@token@@ 只在 ThemeManager.apply() 时插值一次，而各组件
+        的 setStyleSheet(f"color: {color_hex(...)}") 内联样式不会自动跟随。
+        需要在这里重建常驻组件的内联样式。
+        """
+        # 详情面板星级标签
+        if hasattr(self, 'detail_stars_label'):
+            self.detail_stars_label.setStyleSheet(
+                f"font-size:16px; color: {color_hex('star_on')};"
+            )
+        # 重新加载详情面板的演员链接区（颜色在内联 stylesheet 中）
+        if self._current_video_id is not None:
+            self.load_detail(self._current_video_id)
 
     def _toggle_online_only(self):
         self.show_online_only = self.btn_online.isChecked()
@@ -591,12 +592,11 @@ class MainWindow(QMainWindow):
         if self._current_video_id is None:
             return
         try:
-            self.core.cursor.execute("SELECT file_path FROM videos WHERE id = ?", (self._current_video_id,))
-            result = self.core.cursor.fetchone()
-            if not result or not result[0]:
+            file_path = self.core.get_video_path(self._current_video_id)
+            if not file_path:
                 return
             import os, subprocess
-            folder = os.path.dirname(result[0])
+            folder = os.path.dirname(file_path)
             if platform.system() == 'Darwin':
                 subprocess.Popen(['open', folder])
             elif platform.system() == 'Windows':
@@ -717,12 +717,10 @@ class MainWindow(QMainWindow):
     # ---- 右键菜单调用的操作 ----
     def _show_in_finder(self, video_id):
         try:
-            self.core.cursor.execute("SELECT file_path FROM videos WHERE id = ?", (video_id,))
-            r = self.core.cursor.fetchone()
-            if not r or not r[0]:
+            fp = self.core.get_video_path(video_id)
+            if not fp:
                 return
             import subprocess
-            fp = r[0]
             if platform.system() == 'Darwin':
                 subprocess.Popen(['open', '-R', fp])
             elif platform.system() == 'Windows':
@@ -734,10 +732,9 @@ class MainWindow(QMainWindow):
 
     def _copy_path(self, video_id):
         try:
-            self.core.cursor.execute("SELECT file_path FROM videos WHERE id = ?", (video_id,))
-            r = self.core.cursor.fetchone()
-            if r and r[0]:
-                QApplication.clipboard().setText(r[0])
+            fp = self.core.get_video_path(video_id)
+            if fp:
+                QApplication.clipboard().setText(fp)
                 self.status_bar.showMessage("文件路径已复制", 2000)
         except Exception as e:
             self.show_error("复制失败", str(e))
@@ -745,11 +742,9 @@ class MainWindow(QMainWindow):
     def _move_single(self, video_id, target_folder):
         """移动单个文件到目标文件夹。"""
         try:
-            self.core.cursor.execute("SELECT file_path FROM videos WHERE id = ?", (video_id,))
-            r = self.core.cursor.fetchone()
-            if not r or not r[0]:
+            old_path = self.core.get_video_path(video_id)
+            if not old_path:
                 return
-            old_path = r[0]
             self.core.move_file(video_id, old_path, target_folder)
             self.status_bar.showMessage(f"已移动到 {os.path.basename(target_folder)}", 3000)
             self.load_videos()
@@ -763,10 +758,9 @@ class MainWindow(QMainWindow):
         ok = 0
         for vid in ids:
             try:
-                self.core.cursor.execute("SELECT file_path FROM videos WHERE id = ?", (vid,))
-                r = self.core.cursor.fetchone()
-                if r and r[0]:
-                    self.core.move_file(vid, r[0], target_folder)
+                old_path = self.core.get_video_path(vid)
+                if old_path:
+                    self.core.move_file(vid, old_path, target_folder)
                     ok += 1
             except Exception:
                 pass
@@ -1383,13 +1377,13 @@ class MainWindow(QMainWindow):
         # 限制最多显示 5 个演员链接（避免过长）
         shown = actor_names[:5]
         for i, name in enumerate(shown):
-            link = QLabel(name)
+            link = ClickableLabel(name)
             link.setObjectName("actorLink")
             link.setStyleSheet(
-                "color: #0f6fde; background:transparent; text-decoration: underline;"
+                f"color: {color_hex('accent')}; background:transparent; text-decoration: underline;"
             )
             link.setCursor(Qt.PointingHandCursor)
-            link.mousePressEvent = lambda e, n=name: self._open_actor_detail(n)
+            link.clicked.connect(lambda n=name: self._open_actor_detail(n))
             links_lay.addWidget(link)
             if i < len(shown) - 1:
                 sep = QLabel("·"); sep.setStyleSheet("color: palette(mid); background:transparent;")
