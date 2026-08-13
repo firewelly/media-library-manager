@@ -12,7 +12,7 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtCore import Qt
 
-from pyside_v2.theme import Tokens
+from pyside_v2.theme import Tokens, color_hex
 
 
 class TagManagerDialog(QDialog):
@@ -59,7 +59,7 @@ class TagManagerDialog(QDialog):
         self.btn_edit.setCursor(Qt.PointingHandCursor)
         self.btn_edit.clicked.connect(self._edit_tag)
         self.btn_del = QPushButton("删除")
-        self.btn_del.setStyleSheet("color: #cf222e;")
+        self.btn_del.setStyleSheet(f"color: {color_hex('danger')};")
         self.btn_del.setCursor(Qt.PointingHandCursor)
         self.btn_del.clicked.connect(self._delete_tag)
         self.btn_refresh = QPushButton("⟳ 刷新")
@@ -81,19 +81,7 @@ class TagManagerDialog(QDialog):
     def load_tags(self):
         """从 tags + javdb_tags 表加载。"""
         self.list.clear()
-        tags = []
-        try:
-            self.core.cursor.execute("SELECT tag_name FROM tags ORDER BY tag_name")
-            tags = [r[0] for r in self.core.cursor.fetchall()]
-        except Exception:
-            pass
-        # 合并 javdb_tags（去重）
-        try:
-            self.core.cursor.execute("SELECT tag_name FROM javdb_tags ORDER BY tag_name")
-            jtags = {r[0] for r in self.core.cursor.fetchall()}
-            tags = list(dict.fromkeys(tags + [t for t in jtags if t not in tags]))
-        except Exception:
-            pass
+        tags = self.core.get_all_tags()
         self._all_tags = tags
         self._render(tags)
 
@@ -114,11 +102,7 @@ class TagManagerDialog(QDialog):
         name, ok = QInputDialog.getText(self, "添加标签", "标签名称：")
         if ok and name.strip():
             try:
-                self.core.cursor.execute(
-                    "INSERT OR IGNORE INTO tags (tag_name, created_at) VALUES (?, CURRENT_TIMESTAMP)",
-                    (name.strip(),)
-                )
-                self.core.conn.commit()
+                self.core.add_tag(name.strip())
                 self.load_tags()
                 self.mw.status_bar.showMessage(f"已添加标签: {name.strip()}", 2000)
             except Exception as e:
@@ -132,8 +116,7 @@ class TagManagerDialog(QDialog):
         new, ok = QInputDialog.getText(self, "编辑标签", "新名称：", text=old)
         if ok and new.strip() and new.strip() != old:
             try:
-                self.core.cursor.execute("UPDATE tags SET tag_name=? WHERE tag_name=?", (new.strip(), old))
-                self.core.conn.commit()
+                self.core.update_tag(old, new.strip())
                 self.load_tags()
             except Exception as e:
                 QMessageBox.warning(self, "失败", str(e))
@@ -151,8 +134,7 @@ class TagManagerDialog(QDialog):
             return
         for n in names:
             try:
-                self.core.cursor.execute("DELETE FROM tags WHERE tag_name=?", (n,))
+                self.core.delete_tag(n)
             except Exception:
                 pass
-        self.core.conn.commit()
         self.load_tags()

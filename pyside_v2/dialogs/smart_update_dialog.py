@@ -102,10 +102,7 @@ class SmartUpdateDialog(QDialog):
     def _load_folders(self):
         """加载活跃且在线的文件夹。"""
         try:
-            self.core.cursor.execute(
-                "SELECT folder_path FROM folders WHERE is_active = 1 ORDER BY folder_path"
-            )
-            folders = [r[0] for r in self.core.cursor.fetchall() if r[0]]
+            folders = self.core.get_active_folder_paths()
         except Exception:
             folders = []
         self.folder_list.clear()

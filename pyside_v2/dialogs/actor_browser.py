@@ -15,7 +15,7 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QPixmap, QFont, QColor
 
-from pyside_v2.theme import Tokens
+from pyside_v2.theme import Tokens, color_hex
 
 
 PAGE_SIZE = 60   # 每页展示演员数（网格 5列 x 12行）
@@ -32,16 +32,16 @@ class ActorCard(QFrame):
         self.setFrameShape(QFrame.NoFrame)
         self.setCursor(Qt.PointingHandCursor)
         self.setObjectName("actorCard")
-        self.setStyleSheet("""
-            #actorCard {
+        self.setStyleSheet(f"""
+            #actorCard {{
                 background: palette(base);
                 border: 1px solid palette(midlight);
                 border-radius: 8px;
-            }
-            #actorCard:hover {
-                border: 1px solid #0f6fde;
+            }}
+            #actorCard:hover {{
+                border: 1px solid {color_hex('accent')};
                 background: palette(light);
-            }
+            }}
         """)
 
         lay = QVBoxLayout(self)
@@ -66,7 +66,9 @@ class ActorCard(QFrame):
             self.avatar.setText("无头像")
         # 头像右上角收藏星
         self.fav_label = QLabel("★" if is_favorite else "")
-        self.fav_label.setStyleSheet("color: #e8a009; font-size: 16px; background: transparent;")
+        self.fav_label.setStyleSheet(
+            f"color: {color_hex('star_on')}; font-size: 16px; background: transparent;"
+        )
         self.fav_label.setFixedSize(20, 20)
         self.fav_label.move(110, 4)
         self.fav_label.setParent(self.avatar)
@@ -82,7 +84,7 @@ class ActorCard(QFrame):
 
         # 作品数
         cnt_text = f"{movie_count or 0} 部"
-        cnt_color = "#0f6fde" if movie_count else "#8a91a1"
+        cnt_color = color_hex('accent') if movie_count else color_hex('text_3')
         self.count_label = QLabel(cnt_text)
         self.count_label.setStyleSheet(f"color: {cnt_color}; font-size: 11px;")
         self.count_label.setAlignment(Qt.AlignCenter)
@@ -193,50 +195,16 @@ class ActorBrowserDialog(QDialog):
         lay.addLayout(row2)
 
     # ---- 数据加载 ----
-    # 注：actors.movie_count 字段在历史数据里大多为 NULL/0（爬虫未回填），
-    # 这里用子查询实时统计 video_actors 关联表的真实作品数，保证排序准确。
-    REAL_COUNT = "(SELECT COUNT(*) FROM video_actors va WHERE va.actor_id = a.id)"
-
-    def _build_query(self):
-        conditions = []
-        params = []
-        if self._search:
-            conditions.append(
-                "(a.name LIKE ? OR a.name_common LIKE ? OR a.name_traditional LIKE ? OR a.aliases LIKE ?)"
-            )
-            kw = f"%{self._search}%"
-            params.extend([kw, kw, kw, kw])
-        if self._fav_only:
-            conditions.append("a.is_favorite = 1")
-
-        where = f"WHERE {' AND '.join(conditions)}" if conditions else ""
-
-        # 排序用真实作品数（real_count），不走失效的 movie_count 字段
-        sort_map = {
-            "movie_count": f"{self.REAL_COUNT} DESC, a.name ASC",
-            "name": "a.name ASC",
-            "favorite": f"a.is_favorite DESC, {self.REAL_COUNT} DESC, a.name ASC",
-        }
-        order = sort_map.get(self._sort, sort_map["movie_count"])
-        return where, params, order
+    # 注：作品数实时统计（非靠 actors.movie_count 失效字段），逻辑已收口到
+    # core.search_actors()，这里只负责渲染。
 
     def load_actors(self):
-        where, params, order = self._build_query()
-
+        offset = self._page_no * PAGE_SIZE
         try:
-            # 总数
-            self.core.cursor.execute(f"SELECT COUNT(*) FROM actors a {where}", params)
-            self._total = self.core.cursor.fetchone()[0]
-
-            # 当前页：作品数用子查询实时统计
-            offset = self._page_no * PAGE_SIZE
-            sql = (
-                f"SELECT a.id, a.name, {self.REAL_COUNT} AS real_count, "
-                f"a.is_favorite, a.avatar_data "
-                f"FROM actors a {where} ORDER BY {order} LIMIT ? OFFSET ?"
+            self._total, rows = self.core.search_actors(
+                keyword=self._search, fav_only=self._fav_only,
+                sort=self._sort, page_size=PAGE_SIZE, offset=offset,
             )
-            self.core.cursor.execute(sql, params + [PAGE_SIZE, offset])
-            rows = self.core.cursor.fetchall()
         except Exception as e:
             QMessageBox.warning(self, "查询失败", str(e))
             return
@@ -292,11 +260,10 @@ class ActorBrowserDialog(QDialog):
     def _open_detail(self, actor_id):
         """点击卡片 → 打开演员详情。"""
         try:
-            self.core.cursor.execute("SELECT name FROM actors WHERE id=?", (actor_id,))
-            r = self.core.cursor.fetchone()
-            if r and r[0]:
+            name = self.core.get_actor_name_by_id(actor_id)
+            if name:
                 from pyside_v2.dialogs.actor_detail import ActorDetailWindow
-                dlg = ActorDetailWindow(self.mw, actor_name=r[0], parent=self)
+                dlg = ActorDetailWindow(self.mw, actor_name=name, parent=self)
                 dlg.exec()
         except Exception as e:
             QMessageBox.warning(self, "打开详情失败", str(e))

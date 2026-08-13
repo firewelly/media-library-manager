@@ -1543,6 +1543,200 @@ class MediaLibraryCore:
             print(f"add_video_to_db_optimized 失败 {file_path}: {e}")
             return 'error'
 
+    # ==================================================================
+    # 数据访问层（Data Access）—— 把 SQL 收口到 core，
+    # 让 widgets/dialogs 只调方法、不碰 cursor.execute
+    # ==================================================================
+
+    # ---- 文件夹（folders 表）----
+    def get_all_folders(self):
+        """返回全部文件夹 [(id, path, type, is_active, device_name), ...]。"""
+        self.cursor.execute(
+            "SELECT id, folder_path, folder_type, is_active, device_name "
+            "FROM folders ORDER BY folder_path"
+        )
+        return self.cursor.fetchall()
+
+    def get_active_folders(self):
+        """返回活跃文件夹 [(path, type, device_name), ...]。"""
+        self.cursor.execute(
+            "SELECT folder_path, folder_type, device_name "
+            "FROM folders WHERE is_active = 1 ORDER BY folder_path"
+        )
+        return self.cursor.fetchall()
+
+    def get_active_folder_paths(self):
+        """返回活跃文件夹路径列表 [path, ...]（去重，有序）。"""
+        self.cursor.execute(
+            "SELECT DISTINCT folder_path FROM folders WHERE is_active=1 "
+            "ORDER BY folder_path"
+        )
+        return [r[0] for r in self.cursor.fetchall()]
+
+    def get_folder_type(self, folder_path):
+        """返回指定文件夹的类型（local/nas），不存在返回 None。"""
+        cur = self.conn.cursor()
+        try:
+            cur.execute(
+                "SELECT folder_type FROM folders WHERE folder_path = ?",
+                (folder_path,)
+            )
+            r = cur.fetchone()
+            return r[0] if r else None
+        finally:
+            cur.close()
+
+    def add_folder(self, folder_path, folder_type, device_name):
+        """新增管理文件夹。"""
+        self.cursor.execute(
+            "INSERT OR IGNORE INTO folders "
+            "(folder_path, folder_type, is_active, device_name, created_at) "
+            "VALUES (?, ?, 1, ?, CURRENT_TIMESTAMP)",
+            (folder_path, folder_type, device_name)
+        )
+        self.conn.commit()
+
+    def toggle_folder_active(self, folder_id):
+        """切换文件夹启用/停用状态，返回新状态(1=启用/0=停用)。"""
+        self.cursor.execute(
+            "SELECT is_active FROM folders WHERE id=?", (folder_id,)
+        )
+        r = self.cursor.fetchone()
+        new_val = 0 if (r and r[0]) else 1
+        self.cursor.execute(
+            "UPDATE folders SET is_active=? WHERE id=?", (new_val, folder_id)
+        )
+        self.conn.commit()
+        return new_val
+
+    def delete_folder(self, folder_id):
+        """删除文件夹管理记录（仅移除管理，不删磁盘文件）。"""
+        self.cursor.execute("DELETE FROM folders WHERE id=?", (folder_id,))
+        self.conn.commit()
+
+    # ---- 标签（tags + javdb_tags 表）----
+    def get_all_tags(self):
+        """合并 tags + javdb_tags，返回去重且有序的标签名列表。"""
+        tags = []
+        try:
+            self.cursor.execute("SELECT tag_name FROM tags ORDER BY tag_name")
+            tags = [r[0] for r in self.cursor.fetchall()]
+        except Exception:
+            pass
+        try:
+            self.cursor.execute("SELECT tag_name FROM javdb_tags ORDER BY tag_name")
+            jtags = {r[0] for r in self.cursor.fetchall()}
+            tags = list(dict.fromkeys(tags + [t for t in jtags if t not in tags]))
+        except Exception:
+            pass
+        return tags
+
+    def add_tag(self, name):
+        """新增标签。"""
+        self.cursor.execute(
+            "INSERT OR IGNORE INTO tags (tag_name, created_at) "
+            "VALUES (?, CURRENT_TIMESTAMP)",
+            (name,)
+        )
+        self.conn.commit()
+
+    def update_tag(self, old_name, new_name):
+        """重命名标签。"""
+        self.cursor.execute(
+            "UPDATE tags SET tag_name=? WHERE tag_name=?",
+            (new_name, old_name)
+        )
+        self.conn.commit()
+
+    def delete_tag(self, name):
+        """删除标签。"""
+        self.cursor.execute("DELETE FROM tags WHERE tag_name=?", (name,))
+        self.conn.commit()
+
+    # ---- 演员查询 ----
+    def get_actor_name_by_id(self, actor_id):
+        """返回演员名，不存在返回 None。"""
+        self.cursor.execute("SELECT name FROM actors WHERE id=?", (actor_id,))
+        r = self.cursor.fetchone()
+        return r[0] if r else None
+
+    def get_actor_avatar(self, actor_id):
+        """返回演员头像二进制数据，不存在返回 None。"""
+        self.cursor.execute(
+            "SELECT avatar_data FROM actors WHERE id=?", (actor_id,)
+        )
+        r = self.cursor.fetchone()
+        return r[0] if r else None
+
+    def get_actor_favorite(self, actor_id):
+        """返回演员收藏状态(bool)，不存在/为空返回 False。"""
+        self.cursor.execute(
+            "SELECT is_favorite FROM actors WHERE id=?", (actor_id,)
+        )
+        r = self.cursor.fetchone()
+        return bool(r and r[0])
+
+    def search_actors(self, keyword="", fav_only=False, sort="movie_count",
+                      page_size=60, offset=0):
+        """分页搜索演员。
+
+        返回 (total, rows)：
+            total — 符合条件的演员总数
+            rows  — [(id, name, movie_count, is_favorite, avatar_data), ...]
+        movie_count 实时从 video_actors 关联表统计（非靠失效字段）。
+        """
+        real_count = (
+            "(SELECT COUNT(*) FROM video_actors va WHERE va.actor_id = a.id)"
+        )
+        conditions = []
+        params = []
+        if keyword:
+            conditions.append(
+                "(a.name LIKE ? OR a.name_common LIKE ? "
+                "OR a.name_traditional LIKE ? OR a.aliases LIKE ?)"
+            )
+            kw = f"%{keyword}%"
+            params.extend([kw, kw, kw, kw])
+        if fav_only:
+            conditions.append("a.is_favorite = 1")
+        where = f"WHERE {' AND '.join(conditions)}" if conditions else ""
+
+        sort_map = {
+            "movie_count": f"{real_count} DESC, a.name ASC",
+            "name": "a.name ASC",
+            "favorite": f"a.is_favorite DESC, {real_count} DESC, a.name ASC",
+        }
+        order = sort_map.get(sort, sort_map["movie_count"])
+
+        self.cursor.execute(f"SELECT COUNT(*) FROM actors a {where}", params)
+        total = self.cursor.fetchone()[0]
+
+        sql = (
+            f"SELECT a.id, a.name, {real_count} AS real_count, "
+            f"a.is_favorite, a.avatar_data "
+            f"FROM actors a {where} ORDER BY {order} LIMIT ? OFFSET ?"
+        )
+        self.cursor.execute(sql, params + [page_size, offset])
+        rows = self.cursor.fetchall()
+        return total, rows
+
+    # ---- 视频单字段查询（右键菜单/详情用）----
+    def get_video_path(self, video_id):
+        """返回视频文件路径，不存在返回 None。"""
+        self.cursor.execute(
+            "SELECT file_path FROM videos WHERE id = ?", (video_id,)
+        )
+        r = self.cursor.fetchone()
+        return r[0] if r else None
+
+    def get_video_stars(self, video_id):
+        """返回视频星级(int)，无记录返回 0。"""
+        self.cursor.execute(
+            "SELECT stars FROM videos WHERE id=?", (video_id,)
+        )
+        r = self.cursor.fetchone()
+        return r[0] if r and r[0] else 0
+
 
 class GenericWorker(QThread):
     """通用的后台工作线程（原样移入）。

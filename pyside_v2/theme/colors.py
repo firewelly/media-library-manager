@@ -144,6 +144,36 @@ def set_theme(name: str) -> ThemeColors:
     return _current
 
 
+def color_hex(name: str) -> str:
+    """返回当前主题某颜色的 #RRGGBB 字符串，用于内联 setStyleSheet。
+
+    PySide6 的 setStyleSheet 不解析 @@token@@ 占位符（那是 base.qss 层的
+    模板插值），内联样式需要直接写 #RRGGBB。本函数提供统一入口，避免各处
+    硬编码十六进制色值——切换主题后重新调用即可获得新主题对应色。
+
+    支持的 name：star_on / accent / danger / success / warning / text_1 /
+    text_2 / text_3 / offline / online / info
+    """
+    c = _current
+    _map = {
+        'star_on':  c.star_on,
+        'accent':   c.accent,
+        'danger':   c.danger,
+        'success':  c.success,
+        'warning':  c.warning,
+        'text_1':   c.text_1,
+        'text_2':   c.text_2,
+        'text_3':   c.text_3,
+        'offline':  c.offline,
+        'online':   c.online,
+        'info':     c.info,
+    }
+    color = _map.get(name)
+    if color is None:
+        raise KeyError(f"未知颜色名: {name}，可选: {list(_map)}")
+    return color.name()
+
+
 # ---- 设计令牌（主题无关，对齐 tokens.css）----
 class Tokens:
     """布局/字号/间距/圆角令牌（与 CSS --sp-*/--fs-*/--r-* 一致）。"""
