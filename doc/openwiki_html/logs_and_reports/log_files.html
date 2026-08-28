@@ -1,0 +1,277 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>日志文件 - 媒体库文档</title>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+<style>
+:root {
+    --primary: #0071e3;
+    --bg: #f5f5f7;
+    --bg-card: #ffffff;
+    --text: #1d1d1f;
+    --text-muted: #6e6e73;
+    --border: #d2d2d7;
+    --code-bg: rgba(76, 114, 176, 0.08);
+    --sn-blue: #4C72B0;
+    --sn-orange: #DD8452;
+    --sn-green: #55A868;
+    --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.04), 0 2px 8px rgba(0, 0, 0, 0.04);
+    --shadow-md: 0 2px 6px rgba(0, 0, 0, 0.06), 0 8px 24px rgba(0, 0, 0, 0.06);
+}
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+    font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.8;
+    max-width: 1100px;
+    margin: 0 auto;
+    padding: 2rem 2rem 4rem;
+    -webkit-font-smoothing: antialiased;
+}
+h1 {
+    color: var(--text);
+    font-size: 2.2rem;
+    font-weight: 700;
+    letter-spacing: -0.02em;
+    margin: 0 0 1.5rem;
+    border-bottom: 2px solid var(--border);
+    padding-bottom: 0.6rem;
+}
+h2 {
+    color: var(--text);
+    font-size: 1.55rem;
+    font-weight: 600;
+    letter-spacing: -0.01em;
+    margin: 2.4rem 0 1rem;
+    border-left: 4px solid var(--sn-blue);
+    padding-left: 0.8rem;
+}
+h3 {
+    color: var(--text);
+    font-size: 1.2rem;
+    font-weight: 600;
+    margin: 1.6rem 0 0.8rem;
+}
+h4, h5, h6 {
+    color: var(--text);
+    font-weight: 600;
+    margin: 1.2rem 0 0.6rem;
+}
+p { margin: 0.8rem 0; }
+a { color: var(--primary); text-decoration: none; }
+a:hover { text-decoration: underline; }
+blockquote {
+    background: rgba(76, 114, 176, 0.06);
+    border-left: 4px solid var(--sn-blue);
+    padding: 0.8rem 1.2rem;
+    margin: 1.2rem 0;
+    border-radius: 0 8px 8px 0;
+    color: var(--text-muted);
+}
+code {
+    background: var(--code-bg);
+    color: var(--sn-blue);
+    padding: 2px 6px;
+    border-radius: 5px;
+    font-family: 'SF Mono', 'Fira Code', Menlo, Consolas, monospace;
+    font-size: 0.88em;
+}
+pre {
+    background: #f6f8fa;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 1.2rem;
+    overflow-x: auto;
+    margin: 1rem 0;
+}
+pre code {
+    background: none;
+    color: var(--text);
+    padding: 0;
+    font-size: 0.85em;
+}
+table {
+    width: 100%;
+    border-collapse: separate;
+    border-spacing: 0;
+    margin: 1.2rem 0;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    overflow: hidden;
+    font-size: 0.95em;
+    box-shadow: var(--shadow-sm);
+}
+th {
+    background: rgba(76, 114, 176, 0.08);
+    color: var(--sn-blue);
+    padding: 10px 14px;
+    text-align: left;
+    font-weight: 600;
+    white-space: nowrap;
+}
+td {
+    padding: 10px 14px;
+    border-top: 1px solid var(--border);
+    vertical-align: top;
+}
+tr:hover td { background: rgba(76, 114, 176, 0.04); }
+ul, ol { margin: 0.8rem 0; padding-left: 1.8rem; }
+li { margin: 0.4rem 0; }
+hr {
+    border: none;
+    border-top: 1px solid var(--border);
+    margin: 2rem 0;
+}
+/* 面包屑导航（macOS 毛玻璃） */
+.nav {
+    display: block;
+    position: sticky;
+    top: 0.8rem;
+    z-index: 100;
+    background: rgba(255, 255, 255, 0.72);
+    -webkit-backdrop-filter: saturate(180%) blur(20px);
+    backdrop-filter: saturate(180%) blur(20px);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 0.7rem 1.2rem;
+    margin-bottom: 1.5rem;
+    font-size: 0.9em;
+    color: var(--text-muted);
+    box-shadow: var(--shadow-sm);
+}
+.nav a { margin-right: 0.4rem; }
+/* 首页大卡片 */
+.hero {
+    background: linear-gradient(135deg, rgba(76, 114, 176, 0.10), rgba(100, 181, 205, 0.05) 55%, rgba(221, 132, 82, 0.06));
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    padding: 2.5rem 2rem;
+    margin-bottom: 2rem;
+    text-align: center;
+    box-shadow: var(--shadow-md);
+}
+.hero h1 { border-bottom: none; margin-bottom: 0.5rem; }
+.hero p { color: var(--text-muted); }
+/* 索引目录 */
+.idx {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+    gap: 1rem;
+    margin: 1.5rem 0;
+}
+.idx-card {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 1.2rem;
+    box-shadow: var(--shadow-sm);
+    transition: box-shadow 0.2s, transform 0.2s, border-color 0.2s;
+}
+.idx-card:hover {
+    border-color: var(--sn-blue);
+    box-shadow: var(--shadow-md);
+    transform: translateY(-2px);
+}
+.idx-card h3 { margin: 0 0 0.5rem; font-size: 1.05rem; }
+.idx-card p { color: var(--text-muted); font-size: 0.9em; margin: 0.3rem 0; }
+.badge {
+    display: inline-block;
+    padding: 1px 8px;
+    border-radius: 10px;
+    font-size: 0.75em;
+    font-weight: 600;
+    margin-right: 4px;
+}
+.footer {
+    margin-top: 3rem;
+    padding-top: 1.5rem;
+    border-top: 1px solid var(--border);
+    color: var(--text-muted);
+    font-size: 0.85em;
+    text-align: center;
+}
+@media (max-width: 768px) {
+    body { padding: 1rem; }
+    h1 { font-size: 1.6rem; }
+    h2 { font-size: 1.3rem; }
+    table { font-size: 0.85em; display: block; overflow-x: auto; }
+}
+
+.mermaid {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 1.5rem;
+    margin: 1.2rem 0;
+    overflow-x: auto;
+    text-align: center;
+}
+.mermaid svg {
+    max-width: 100%;
+    height: auto;
+}
+</style>
+</head>
+<body>
+<span class="nav"><a href="../index.html">首页</a> <a href="../logs_and_reports/index.html">logs_and_reports</a> <span>› log_files</span></span>
+<h1>日志文件</h1>
+<h1 id="_1">日志文件</h1>
+<h2 id="_2">操作日志</h2>
+<h3 id="batch_analysislog-88kb"><code>batch_analysis.log</code>（约 88KB）</h3>
+<p>在批量视频分析操作期间生成。包含带有状态指示器的逐视频进度行。</p>
+<h3 id="pipeline_runlog-62kb"><code>pipeline_run.log</code>（约 62KB）</h3>
+<p>由 <code>video_analyzer/video_analyzer_pipeline.py</code> 生成。记录内容：
+- 每个视频的帧提取时间戳
+- API 调用时长和响应代码
+- 标签提取结果</p>
+<h3 id="reprocess_failedlog-15kb"><code>reprocess_failed.log</code>（约 15KB）</h3>
+<p>记录在初始分析期间失败并正在重新处理的视频。包含错误信息和重试次数。</p>
+<h3 id="batch_updatelog-643"><code>batch_update.log</code>（约 643 字节）</h3>
+<p>来自批量元数据更新操作的小型日志。</p>
+<h2 id="_3">重新标记日志</h2>
+<p>匹配 <code>retag_run_YYYYMMDD_HHMMSS.log</code> 和 <code>retag_retry_YYYYMMDD_HHMMSS.log</code> 的文件：
+- 由 <code>retag_local_videos.py</code> 和 <code>retag_scored_videos.py</code> 生成
+- 根据媒体库大小，文件大小从约 1MB 到约 14MB 不等
+- 包含每个视频的标记决策（旧标签 -&gt; 新标签）</p>
+<h2 id="_4">导入日志</h2>
+<h3 id="quick_import_from_csvlog-37mb"><code>quick_import_from_csv.log</code>（约 37MB）</h3>
+<p>来自基于 CSV 的批量导入的超大型日志。在从预先计算的 MD5 列表导入数万个视频时生成。</p>
+<h2 id="_5">视频分析器日志</h2>
+<h3 id="video_analyzeranalysis_logtxt-14mb"><code>video_analyzer/analysis_log.txt</code>（约 14MB）</h3>
+<p>来自 AI 视频分析器的全面日志。记录整个媒体库的每一次帧提取、API 调用和标签确定。</p>
+<h2 id="_6">另请参阅</h2>
+<ul>
+<li><a href="overview.html">日志概述</a> — 所有日志和报告</li>
+<li><a href="report_files.html">报告文件</a> — CSV 导出</li>
+</ul>
+<div class="footer">
+<p>由 OpenWiki 生成 · Media Library Management System</p>
+</div>
+<script>
+mermaid.initialize({
+    startOnLoad: true,
+    theme: 'base',
+    themeVariables: {
+        primaryColor: '#dbe5f3',
+        primaryTextColor: '#1d1d1f',
+        primaryBorderColor: '#4C72B0',
+        lineColor: '#6e6e73',
+        secondaryColor: '#f8e4d5',
+        secondaryTextColor: '#1d1d1f',
+        secondaryBorderColor: '#DD8452',
+        tertiaryColor: '#e2efe5',
+        tertiaryTextColor: '#1d1d1f',
+        tertiaryBorderColor: '#55A868',
+        clusterBkg: '#f5f5f7',
+        clusterBorder: '#d2d2d7',
+        edgeLabelBackground: '#ffffff',
+        fontFamily: '-apple-system, "PingFang SC", sans-serif'
+    }
+});
+</script>
+</body>
+</html>

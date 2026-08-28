@@ -124,7 +124,7 @@ class JavdbActorRepair:
             self.base_url = _cfg.get_javdb_base_url(use_proxy)
         except Exception:
             proxy_domain = getattr(_cfg, 'JAVDB_PROXY_DOMAIN', 'javdb.com')
-            direct_domain = getattr(_cfg, 'JAVDB_DIRECT_DOMAIN', 'javdb573.com')
+            direct_domain = getattr(_cfg, 'JAVDB_DIRECT_DOMAIN', 'javdb575.com')
             self.base_url = f"https://{proxy_domain if use_proxy else direct_domain}"
         # URL规范化方法（浏览用）：将任意 javdb 域统一改为当前 base_url 域
         def _norm(url):

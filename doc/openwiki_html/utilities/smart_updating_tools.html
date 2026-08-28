@@ -1,0 +1,320 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>智能更新工具 - 媒体库文档</title>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+<style>
+:root {
+    --primary: #0071e3;
+    --bg: #f5f5f7;
+    --bg-card: #ffffff;
+    --text: #1d1d1f;
+    --text-muted: #6e6e73;
+    --border: #d2d2d7;
+    --code-bg: rgba(76, 114, 176, 0.08);
+    --sn-blue: #4C72B0;
+    --sn-orange: #DD8452;
+    --sn-green: #55A868;
+    --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.04), 0 2px 8px rgba(0, 0, 0, 0.04);
+    --shadow-md: 0 2px 6px rgba(0, 0, 0, 0.06), 0 8px 24px rgba(0, 0, 0, 0.06);
+}
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+    font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.8;
+    max-width: 1100px;
+    margin: 0 auto;
+    padding: 2rem 2rem 4rem;
+    -webkit-font-smoothing: antialiased;
+}
+h1 {
+    color: var(--text);
+    font-size: 2.2rem;
+    font-weight: 700;
+    letter-spacing: -0.02em;
+    margin: 0 0 1.5rem;
+    border-bottom: 2px solid var(--border);
+    padding-bottom: 0.6rem;
+}
+h2 {
+    color: var(--text);
+    font-size: 1.55rem;
+    font-weight: 600;
+    letter-spacing: -0.01em;
+    margin: 2.4rem 0 1rem;
+    border-left: 4px solid var(--sn-blue);
+    padding-left: 0.8rem;
+}
+h3 {
+    color: var(--text);
+    font-size: 1.2rem;
+    font-weight: 600;
+    margin: 1.6rem 0 0.8rem;
+}
+h4, h5, h6 {
+    color: var(--text);
+    font-weight: 600;
+    margin: 1.2rem 0 0.6rem;
+}
+p { margin: 0.8rem 0; }
+a { color: var(--primary); text-decoration: none; }
+a:hover { text-decoration: underline; }
+blockquote {
+    background: rgba(76, 114, 176, 0.06);
+    border-left: 4px solid var(--sn-blue);
+    padding: 0.8rem 1.2rem;
+    margin: 1.2rem 0;
+    border-radius: 0 8px 8px 0;
+    color: var(--text-muted);
+}
+code {
+    background: var(--code-bg);
+    color: var(--sn-blue);
+    padding: 2px 6px;
+    border-radius: 5px;
+    font-family: 'SF Mono', 'Fira Code', Menlo, Consolas, monospace;
+    font-size: 0.88em;
+}
+pre {
+    background: #f6f8fa;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 1.2rem;
+    overflow-x: auto;
+    margin: 1rem 0;
+}
+pre code {
+    background: none;
+    color: var(--text);
+    padding: 0;
+    font-size: 0.85em;
+}
+table {
+    width: 100%;
+    border-collapse: separate;
+    border-spacing: 0;
+    margin: 1.2rem 0;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    overflow: hidden;
+    font-size: 0.95em;
+    box-shadow: var(--shadow-sm);
+}
+th {
+    background: rgba(76, 114, 176, 0.08);
+    color: var(--sn-blue);
+    padding: 10px 14px;
+    text-align: left;
+    font-weight: 600;
+    white-space: nowrap;
+}
+td {
+    padding: 10px 14px;
+    border-top: 1px solid var(--border);
+    vertical-align: top;
+}
+tr:hover td { background: rgba(76, 114, 176, 0.04); }
+ul, ol { margin: 0.8rem 0; padding-left: 1.8rem; }
+li { margin: 0.4rem 0; }
+hr {
+    border: none;
+    border-top: 1px solid var(--border);
+    margin: 2rem 0;
+}
+/* 面包屑导航（macOS 毛玻璃） */
+.nav {
+    display: block;
+    position: sticky;
+    top: 0.8rem;
+    z-index: 100;
+    background: rgba(255, 255, 255, 0.72);
+    -webkit-backdrop-filter: saturate(180%) blur(20px);
+    backdrop-filter: saturate(180%) blur(20px);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 0.7rem 1.2rem;
+    margin-bottom: 1.5rem;
+    font-size: 0.9em;
+    color: var(--text-muted);
+    box-shadow: var(--shadow-sm);
+}
+.nav a { margin-right: 0.4rem; }
+/* 首页大卡片 */
+.hero {
+    background: linear-gradient(135deg, rgba(76, 114, 176, 0.10), rgba(100, 181, 205, 0.05) 55%, rgba(221, 132, 82, 0.06));
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    padding: 2.5rem 2rem;
+    margin-bottom: 2rem;
+    text-align: center;
+    box-shadow: var(--shadow-md);
+}
+.hero h1 { border-bottom: none; margin-bottom: 0.5rem; }
+.hero p { color: var(--text-muted); }
+/* 索引目录 */
+.idx {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+    gap: 1rem;
+    margin: 1.5rem 0;
+}
+.idx-card {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 1.2rem;
+    box-shadow: var(--shadow-sm);
+    transition: box-shadow 0.2s, transform 0.2s, border-color 0.2s;
+}
+.idx-card:hover {
+    border-color: var(--sn-blue);
+    box-shadow: var(--shadow-md);
+    transform: translateY(-2px);
+}
+.idx-card h3 { margin: 0 0 0.5rem; font-size: 1.05rem; }
+.idx-card p { color: var(--text-muted); font-size: 0.9em; margin: 0.3rem 0; }
+.badge {
+    display: inline-block;
+    padding: 1px 8px;
+    border-radius: 10px;
+    font-size: 0.75em;
+    font-weight: 600;
+    margin-right: 4px;
+}
+.footer {
+    margin-top: 3rem;
+    padding-top: 1.5rem;
+    border-top: 1px solid var(--border);
+    color: var(--text-muted);
+    font-size: 0.85em;
+    text-align: center;
+}
+@media (max-width: 768px) {
+    body { padding: 1rem; }
+    h1 { font-size: 1.6rem; }
+    h2 { font-size: 1.3rem; }
+    table { font-size: 0.85em; display: block; overflow-x: auto; }
+}
+
+.mermaid {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 1.5rem;
+    margin: 1.2rem 0;
+    overflow-x: auto;
+    text-align: center;
+}
+.mermaid svg {
+    max-width: 100%;
+    height: auto;
+}
+</style>
+</head>
+<body>
+<span class="nav"><a href="../index.html">首页</a> <a href="../utilities/index.html">utilities</a> <span>› smart_updating_tools</span></span>
+<h1>智能更新工具</h1>
+<h1 id="_1">智能更新工具</h1>
+<p>用于增量视频导入和元数据同步的脚本。它们能够检测新增、移动和删除的文件，并相应地更新数据库，而无需进行全量重新扫描。</p>
+<h2 id="_2">可恢复智能导入器</h2>
+<h3 id="resumable_smart_importerpy"><code>resumable_smart_importer.py</code></h3>
+<p>功能最强大的导入器。特性包括：
+- <strong>基于检查点的可恢复性</strong>：将进度保存到 <code>import_cache.json</code>；中断后可恢复
+- <strong>MD5 缓存</strong>：避免对未更改的文件重新计算哈希值
+- <strong>智能移动检测</strong>：如果数据库中已存在该 MD5 但路径不同，则更新路径而不是插入重复记录
+- <strong>视频扩展名过滤</strong>：支持 <code>.mp4</code>、<code>.avi</code>、<code>.mkv</code>、<code>.mov</code>、<code>.wmv</code>、<code>.flv</code>、<code>.webm</code>、<code>.m4v</code>、<code>.3gp</code>、<code>.ts</code>、<code>.mts</code>、<code>.m2ts</code>
+- <strong>数据库 Schema 设置</strong>：<code>ensure_tables_exist()</code> 会在缺失时创建所需的表</p>
+<p>类：<code>ResumableSmartImporter(db_path, cache_file)</code></p>
+<h2 id="_3">智能视频更新器</h2>
+<h3 id="smart_video_updaterpy"><code>smart_video_updater.py</code></h3>
+<p>支持 NAS 的更新器，利用预计算的 MD5 CSV 文件：
+- 通过 <code>MD5CSVIndex</code> 读取 <code>video_md5.csv</code>（路径 -&gt; MD5 映射）
+- 执行自动路径前缀映射：本地 <code>/Volumes/Video/</code> &lt;-&gt; NAS <code>/volume1/Video/</code>
+- 对于 NAS 文件，使用 CSV 中的 MD5 而不是在本地计算（大幅提升速度）
+- 对于非 NAS 文件，回退到本地 MD5 计算（带缓存）
+- 复用 <code>ResumableSmartImporter</code> 的逻辑进行导入/移动检测</p>
+<p><strong>用法：</strong></p>
+<div class="codehilite"><pre><span></span><code><span class="c1"># Update all active folders using pre-computed MD5</span>
+python<span class="w"> </span>smart_video_updater.py<span class="w"> </span>--db<span class="w"> </span>media_library.db<span class="w"> </span>--md5-csv<span class="w"> </span>video_md5.csv<span class="w"> </span>--use-active-folders
+
+<span class="c1"># Update a specific folder</span>
+python<span class="w"> </span>smart_video_updater.py<span class="w"> </span>--db<span class="w"> </span>media_library.db<span class="w"> </span>--md5-csv<span class="w"> </span>video_md5.csv<span class="w"> </span>--folder<span class="w"> </span><span class="s2">&quot;/Volumes/Video/Movies&quot;</span>
+</code></pre></div>
+
+<h2 id="_4">快速智能媒体更新器</h2>
+<h3 id="fast_smart_media_updaterpy"><code>fast_smart_media_updater.py</code></h3>
+<p>轻量级的文件夹定向扫描器：
+- 仅处理用户指定的在线文件夹
+- 每个文件有四种处理结果：新增（插入）、未更改（跳过）、移动（更新路径）、删除（移除记录）
+- 通过 <code>source_folder</code> 查询以最小化内存占用
+- 支持基于 MD5 的移动检测</p>
+<p>由 Docker 后端（<code>docker/backend/fast_smart_media_updater.py</code>）使用，用于容器化扫描。</p>
+<h2 id="_5">统一视频更新器</h2>
+<h3 id="unified_video_updaterpy"><code>unified_video_updater.py</code></h3>
+<p>通过 MD5 或文件名匹配进行元数据同步：
+- 批量更新标签、描述和其他元数据
+- 跨不同路径或副本匹配视频
+- 在抓取或手动修正元数据后使用</p>
+<h2 id="_6">导入流水线</h2>
+<pre class="mermaid">flowchart TD
+    START[&quot;Start import&quot;]
+    CSV{&quot;MD5 CSV available?&quot;}
+    NAS{&quot;File on NAS?&quot;}
+    CSV_MD5[&quot;Read MD5 from CSV&quot;]
+    LOCAL_MD5[&quot;Compute MD5 locally with cache&quot;]
+    CHECK{&quot;MD5 exists in DB?&quot;}
+    MOVE[&quot;Update path for moved file&quot;]
+    INSERT[&quot;Insert new record&quot;]
+    SKIP[&quot;Skip unchanged&quot;]
+
+    START --&gt; CSV
+    CSV --&gt;|&quot;yes + NAS path&quot;| NAS
+    CSV --&gt;|&quot;no&quot;| LOCAL_MD5
+    NAS --&gt;|&quot;yes&quot;| CSV_MD5
+    NAS --&gt;|&quot;no&quot;| LOCAL_MD5
+    CSV_MD5 --&gt; CHECK
+    LOCAL_MD5 --&gt; CHECK
+    CHECK --&gt;|&quot;yes, different path&quot;| MOVE
+    CHECK --&gt;|&quot;yes, same path&quot;| SKIP
+    CHECK --&gt;|&quot;no&quot;| INSERT
+</pre>
+
+<p><em>smart_video_updater.py 中的导入决策流程。</em></p>
+<h2 id="_7">另请参阅</h2>
+<ul>
+<li><a href="md5_tools.html">MD5 工具</a> — MD5 计算与 NAS 批量工作流</li>
+<li><a href="../database/overview.html">数据库概览</a> — Schema 与索引</li>
+<li><a href="../database/synchronization_scripts.html">同步脚本</a> — 更高层级的同步工具</li>
+</ul>
+<div class="footer">
+<p>由 OpenWiki 生成 · Media Library Management System</p>
+</div>
+<script>
+mermaid.initialize({
+    startOnLoad: true,
+    theme: 'base',
+    themeVariables: {
+        primaryColor: '#dbe5f3',
+        primaryTextColor: '#1d1d1f',
+        primaryBorderColor: '#4C72B0',
+        lineColor: '#6e6e73',
+        secondaryColor: '#f8e4d5',
+        secondaryTextColor: '#1d1d1f',
+        secondaryBorderColor: '#DD8452',
+        tertiaryColor: '#e2efe5',
+        tertiaryTextColor: '#1d1d1f',
+        tertiaryBorderColor: '#55A868',
+        clusterBkg: '#f5f5f7',
+        clusterBorder: '#d2d2d7',
+        edgeLabelBackground: '#ffffff',
+        fontFamily: '-apple-system, "PingFang SC", sans-serif'
+    }
+});
+</script>
+</body>
+</html>

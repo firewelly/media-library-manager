@@ -682,18 +682,18 @@ def handle_login(driver):
         return False
 
 def get_attempt_configs(use_proxy_default: bool):
-    attempts = [
+    if use_proxy_default:
+        # 代理优先：避免无代理尝试遍历大量备用域名浪费时间
+        return [
+            {"use_proxy": True, "headless": False},
+            {"use_proxy": True, "headless": True},
+            {"use_proxy": False, "headless": False},
+            {"use_proxy": False, "headless": True},
+        ]
+    return [
         {"use_proxy": False, "headless": False},
         {"use_proxy": False, "headless": True},
     ]
-    if use_proxy_default:
-        attempts.extend(
-            [
-                {"use_proxy": True, "headless": False},
-                {"use_proxy": True, "headless": True},
-            ]
-        )
-    return attempts
 
 def get_browser_preferences():
     return ["msedge", "firefox"]

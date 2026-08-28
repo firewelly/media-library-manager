@@ -1,0 +1,336 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>README 摘要 - 媒体库文档</title>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+<style>
+:root {
+    --primary: #0071e3;
+    --bg: #f5f5f7;
+    --bg-card: #ffffff;
+    --text: #1d1d1f;
+    --text-muted: #6e6e73;
+    --border: #d2d2d7;
+    --code-bg: rgba(76, 114, 176, 0.08);
+    --sn-blue: #4C72B0;
+    --sn-orange: #DD8452;
+    --sn-green: #55A868;
+    --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.04), 0 2px 8px rgba(0, 0, 0, 0.04);
+    --shadow-md: 0 2px 6px rgba(0, 0, 0, 0.06), 0 8px 24px rgba(0, 0, 0, 0.06);
+}
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+    font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.8;
+    max-width: 1100px;
+    margin: 0 auto;
+    padding: 2rem 2rem 4rem;
+    -webkit-font-smoothing: antialiased;
+}
+h1 {
+    color: var(--text);
+    font-size: 2.2rem;
+    font-weight: 700;
+    letter-spacing: -0.02em;
+    margin: 0 0 1.5rem;
+    border-bottom: 2px solid var(--border);
+    padding-bottom: 0.6rem;
+}
+h2 {
+    color: var(--text);
+    font-size: 1.55rem;
+    font-weight: 600;
+    letter-spacing: -0.01em;
+    margin: 2.4rem 0 1rem;
+    border-left: 4px solid var(--sn-blue);
+    padding-left: 0.8rem;
+}
+h3 {
+    color: var(--text);
+    font-size: 1.2rem;
+    font-weight: 600;
+    margin: 1.6rem 0 0.8rem;
+}
+h4, h5, h6 {
+    color: var(--text);
+    font-weight: 600;
+    margin: 1.2rem 0 0.6rem;
+}
+p { margin: 0.8rem 0; }
+a { color: var(--primary); text-decoration: none; }
+a:hover { text-decoration: underline; }
+blockquote {
+    background: rgba(76, 114, 176, 0.06);
+    border-left: 4px solid var(--sn-blue);
+    padding: 0.8rem 1.2rem;
+    margin: 1.2rem 0;
+    border-radius: 0 8px 8px 0;
+    color: var(--text-muted);
+}
+code {
+    background: var(--code-bg);
+    color: var(--sn-blue);
+    padding: 2px 6px;
+    border-radius: 5px;
+    font-family: 'SF Mono', 'Fira Code', Menlo, Consolas, monospace;
+    font-size: 0.88em;
+}
+pre {
+    background: #f6f8fa;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 1.2rem;
+    overflow-x: auto;
+    margin: 1rem 0;
+}
+pre code {
+    background: none;
+    color: var(--text);
+    padding: 0;
+    font-size: 0.85em;
+}
+table {
+    width: 100%;
+    border-collapse: separate;
+    border-spacing: 0;
+    margin: 1.2rem 0;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    overflow: hidden;
+    font-size: 0.95em;
+    box-shadow: var(--shadow-sm);
+}
+th {
+    background: rgba(76, 114, 176, 0.08);
+    color: var(--sn-blue);
+    padding: 10px 14px;
+    text-align: left;
+    font-weight: 600;
+    white-space: nowrap;
+}
+td {
+    padding: 10px 14px;
+    border-top: 1px solid var(--border);
+    vertical-align: top;
+}
+tr:hover td { background: rgba(76, 114, 176, 0.04); }
+ul, ol { margin: 0.8rem 0; padding-left: 1.8rem; }
+li { margin: 0.4rem 0; }
+hr {
+    border: none;
+    border-top: 1px solid var(--border);
+    margin: 2rem 0;
+}
+/* 面包屑导航（macOS 毛玻璃） */
+.nav {
+    display: block;
+    position: sticky;
+    top: 0.8rem;
+    z-index: 100;
+    background: rgba(255, 255, 255, 0.72);
+    -webkit-backdrop-filter: saturate(180%) blur(20px);
+    backdrop-filter: saturate(180%) blur(20px);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 0.7rem 1.2rem;
+    margin-bottom: 1.5rem;
+    font-size: 0.9em;
+    color: var(--text-muted);
+    box-shadow: var(--shadow-sm);
+}
+.nav a { margin-right: 0.4rem; }
+/* 首页大卡片 */
+.hero {
+    background: linear-gradient(135deg, rgba(76, 114, 176, 0.10), rgba(100, 181, 205, 0.05) 55%, rgba(221, 132, 82, 0.06));
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    padding: 2.5rem 2rem;
+    margin-bottom: 2rem;
+    text-align: center;
+    box-shadow: var(--shadow-md);
+}
+.hero h1 { border-bottom: none; margin-bottom: 0.5rem; }
+.hero p { color: var(--text-muted); }
+/* 索引目录 */
+.idx {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+    gap: 1rem;
+    margin: 1.5rem 0;
+}
+.idx-card {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 1.2rem;
+    box-shadow: var(--shadow-sm);
+    transition: box-shadow 0.2s, transform 0.2s, border-color 0.2s;
+}
+.idx-card:hover {
+    border-color: var(--sn-blue);
+    box-shadow: var(--shadow-md);
+    transform: translateY(-2px);
+}
+.idx-card h3 { margin: 0 0 0.5rem; font-size: 1.05rem; }
+.idx-card p { color: var(--text-muted); font-size: 0.9em; margin: 0.3rem 0; }
+.badge {
+    display: inline-block;
+    padding: 1px 8px;
+    border-radius: 10px;
+    font-size: 0.75em;
+    font-weight: 600;
+    margin-right: 4px;
+}
+.footer {
+    margin-top: 3rem;
+    padding-top: 1.5rem;
+    border-top: 1px solid var(--border);
+    color: var(--text-muted);
+    font-size: 0.85em;
+    text-align: center;
+}
+@media (max-width: 768px) {
+    body { padding: 1rem; }
+    h1 { font-size: 1.6rem; }
+    h2 { font-size: 1.3rem; }
+    table { font-size: 0.85em; display: block; overflow-x: auto; }
+}
+
+.mermaid {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 1.5rem;
+    margin: 1.2rem 0;
+    overflow-x: auto;
+    text-align: center;
+}
+.mermaid svg {
+    max-width: 100%;
+    height: auto;
+}
+</style>
+</head>
+<body>
+<span class="nav"><a href="../index.html">首页</a> <a href="../documentation/index.html">documentation</a> <span>› README</span></span>
+<h1>README 摘要</h1>
+<h1 id="readme">README 摘要</h1>
+<p>仓库的 README.md 是主要的项目文档。它涵盖了：</p>
+<h2 id="_1">系统概述</h2>
+<p>一个跨平台的视频媒体库管理系统，支持本地和 NAS 存储，具备以下功能：
+- MD5 去重
+- 智能增量更新
+- 演员信息管理
+- 批量操作
+- 基于 AI 的视频内容分析</p>
+<h2 id="gui">两种可用的 GUI 入口</h2>
+<table>
+<thead>
+<tr>
+<th>版本</th>
+<th>入口</th>
+<th>工具包</th>
+<th>备注</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>经典版 (Tkinter)</strong></td>
+<td><code>media_library.py</code></td>
+<td>Tkinter</td>
+<td>单文件，历史最悠久，功能最多</td>
+</tr>
+<tr>
+<td><strong>PySide6 v2（推荐）</strong></td>
+<td><code>media_library_v2.py</code></td>
+<td>PySide6</td>
+<td>模块化包，双主题，高性能</td>
+</tr>
+</tbody>
+</table>
+<p><code>media_library_pyside.py</code> (PySide6 v1) 已被 v2 取代，不再维护。</p>
+<h2 id="_2">架构关系</h2>
+<p>v2 使用 <code>gui_adapter.py</code> 将 Tkinter <code>MediaLibrary</code> 类的 166 个后端方法桥接到 Qt 窗口——<strong>后端代码零更改</strong>。Tk 版本既可作为独立应用程序，也可作为 v2 的逻辑库。</p>
+<h2 id="_3">性能基准</h2>
+<table>
+<thead>
+<tr>
+<th>场景</th>
+<th>Tk 经典版</th>
+<th>PySide6 v2</th>
+<th>提升</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>首屏加载</td>
+<td>约 31 秒（全表 JOIN）</td>
+<td><strong>0.5 秒</strong>（分页 + 索引）</td>
+<td>60 倍</td>
+</tr>
+<tr>
+<td>搜索（热）</td>
+<td>阻塞</td>
+<td><strong>0.1-0.6 秒</strong></td>
+<td>—</td>
+</tr>
+<tr>
+<td>翻页</td>
+<td>全量重新查询</td>
+<td><strong>0.04 秒</strong></td>
+<td>—</td>
+</tr>
+<tr>
+<td>UI 响应</td>
+<td>查询时冻结</td>
+<td><strong>异步，不冻结</strong></td>
+<td>—</td>
+</tr>
+</tbody>
+</table>
+<p>优化：复合索引 <code>(is_nas_online, file_created_time)</code>，使用 <code>id IN (subquery)</code> 替代 <code>OR LIKE</code>，以及后台 <code>QueryWorker</code> 线程。</p>
+<h2 id="_4">组件部分</h2>
+<p>README 还记录了以下内容：
+- <strong>爬虫与登录</strong> — JavDB 登录助手、爬虫、JavSP 多源系统
+- <strong>媒体库维护</strong> — 智能更新器、快速更新器、可恢复导入器
+- <strong>辅助工具</strong> — 完整性检查器、驱动更新器
+- <strong>视频分析器</strong> — SiliconFlow API 集成、模型对比、标签优先级
+- <strong>JavDB 信息更新器</strong> — 批量元数据刷新</p>
+<h2 id="_5">另请参阅</h2>
+<ul>
+<li><a href="../main_application/overview.html">主应用程序概述</a> — 详细 GUI 文档</li>
+<li><a href="../crawlers/overview.html">爬虫概述</a> — 爬虫系统详细信息</li>
+<li><a href="../quickstart.html">快速入门</a> — 如何运行系统</li>
+</ul>
+<div class="footer">
+<p>由 OpenWiki 生成 · Media Library Management System</p>
+</div>
+<script>
+mermaid.initialize({
+    startOnLoad: true,
+    theme: 'base',
+    themeVariables: {
+        primaryColor: '#dbe5f3',
+        primaryTextColor: '#1d1d1f',
+        primaryBorderColor: '#4C72B0',
+        lineColor: '#6e6e73',
+        secondaryColor: '#f8e4d5',
+        secondaryTextColor: '#1d1d1f',
+        secondaryBorderColor: '#DD8452',
+        tertiaryColor: '#e2efe5',
+        tertiaryTextColor: '#1d1d1f',
+        tertiaryBorderColor: '#55A868',
+        clusterBkg: '#f5f5f7',
+        clusterBorder: '#d2d2d7',
+        edgeLabelBackground: '#ffffff',
+        fontFamily: '-apple-system, "PingFang SC", sans-serif'
+    }
+});
+</script>
+</body>
+</html>

@@ -25,6 +25,7 @@ echo "当前工作目录: $(pwd)" >> "$LOG_FILE"
 # 检查Python是否安装 - 尝试多个路径
 PYTHON_CMD=""
 PYTHON_PATHS=(
+    "/opt/homebrew/Caskroom/miniforge/base/bin/python3"
     "$HOME/anaconda3/bin/python3"
     "/opt/homebrew/bin/python3"
     "/usr/local/bin/python3"

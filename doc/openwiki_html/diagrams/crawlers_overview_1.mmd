@@ -1,0 +1,13 @@
+flowchart LR
+    VIDEO["Video file - code extracted"]
+    JAVDB["JavDB - javdb_crawler_single.py"]
+    JAVBUS["JavBus - javsp_javbus.py"]
+    JAVSP["JavSP Framework - javsp_crawler_manager.py"]
+    DB[("media_library.db")]
+
+    VIDEO -->|"1. try JavDB"| JAVDB
+    JAVDB -->|"success"| DB
+    JAVDB -->|"fail"| JAVBUS
+    JAVBUS -->|"success"| DB
+    JAVBUS -->|"fail"| JAVSP
+    JAVSP -->|"multi-source: JavLib + AvSox + FC2"| DB

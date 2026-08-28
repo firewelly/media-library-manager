@@ -1,0 +1,14 @@
+flowchart TB
+    V2["PySide6 v2 - pyside_v2/"]
+    TK["Tk Classic - media_library.py"]
+    ADAPTER["gui_adapter.py - TkinterToQtAdapter"]
+    CORE["pyside_v2/core/bridge.py - MediaLibraryCore"]
+    UTILS["utils/ - database, file_utils, batch_ops, maintenance"]
+    DB[("media_library.db")]
+
+    V2 -->|"owns"| CORE
+    CORE -->|"imports"| UTILS
+    V2 -->|"setup_full_integration"| ADAPTER
+    ADAPTER -->|"rebinds ~166 methods"| TK
+    TK -->|"direct calls"| UTILS
+    UTILS --> DB

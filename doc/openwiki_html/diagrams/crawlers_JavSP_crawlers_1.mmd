@@ -1,0 +1,18 @@
+flowchart TB
+    INT["JavSPIntegration - javsp_integration.py"]
+    MGR["CrawlerManager - javsp_crawler_manager.py"]
+    JB["javbus_crawler - javsp_javbus.py"]
+    JL["javlib_crawler - javsp_javlib.py"]
+    AV["avsox_crawler - javsp_avsox.py"]
+    FC2["fc2_crawler - javsp_fc2.py"]
+    CFG["config - javsp_config.py + javsp_config.yaml"]
+    DT["MovieInfo - javsp_datatype.py"]
+
+    INT --> MGR
+    MGR --> JB
+    MGR --> JL
+    MGR --> AV
+    MGR --> FC2
+    MGR --> CFG
+    MGR --> DT
+    INT -->|"write to DB"| DB[("media_library.db")]

@@ -1,0 +1,38 @@
+flowchart LR
+    subgraph GUI
+        TK["Tk Classic - media_library.py"]
+        V2["PySide6 v2 - pyside_v2/"]
+    end
+    subgraph Bridge
+        ADAPTER["gui_adapter.py"]
+        CORE["core/bridge.py - MediaLibraryCore"]
+    end
+    subgraph Backend["utils/ shared tool layer"]
+        DB["database.py"]
+        FILE["file_utils.py"]
+        BATCH["batch_ops.py"]
+        MAINT["maintenance.py"]
+    end
+    subgraph Crawlers
+        JAVDB["javdb_crawler*.py"]
+        JAVSP["javsp_*.py"]
+        ACTOR["actor_crawler*.py"]
+    end
+    subgraph Analysis
+        VA["video_analyzer/"]
+        FACE["facereco/"]
+    end
+    DBFILE[("media_library.db")]
+
+    V2 -->|"gui_adapter 166 method bindings"| ADAPTER
+    ADAPTER -->|"shared conn/cursor"| TK
+    V2 --> CORE
+    CORE --> DB
+    CORE --> FILE
+    CORE --> BATCH
+    CORE --> MAINT
+    JAVDB -->|"write metadata"| DBFILE
+    JAVSP -->|"write metadata"| DBFILE
+    ACTOR -->|"write actors"| DBFILE
+    VA -->|"write tags"| DBFILE
+    DB --> DBFILE

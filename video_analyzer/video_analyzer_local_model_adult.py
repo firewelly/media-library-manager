@@ -155,6 +155,9 @@ class VideoAnalyzerLocalModelAdult:
             seek_test = getattr(video_config, 'INTEGRITY_SEEK_TEST', True)
         except Exception:
             enable_check, seek_test = True, True
+        # NAS/网络卷跳过 seek test：SMB 上 OpenCV seek 不可靠
+        if video_path.startswith(("/Volumes/", "//", "smb://")):
+            seek_test = False
         if enable_check:
             ok = check_video_integrity(video_path, seek_test=seek_test)
             if not ok:
@@ -404,6 +407,9 @@ class VideoAnalyzerLocalModelAdult:
             seek_test = getattr(video_config, 'INTEGRITY_SEEK_TEST', True)
         except Exception:
             enable_check, seek_test = True, True
+        # NAS/网络卷跳过 seek test：SMB 上 OpenCV seek 不可靠
+        if video_path.startswith(("/Volumes/", "//", "smb://")):
+            seek_test = False
         if enable_check:
             ok = check_video_integrity(video_path, seek_test=seek_test)
             if not ok:

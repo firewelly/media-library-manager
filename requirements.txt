@@ -1,142 +1,28 @@
-# MacOS 跨平台视频媒体库管理软件依赖
-# Media Library Management Software Dependencies
+# Media Library 依赖项
+# 安装: pip install -r requirements.txt
 
-# ============ 必需的第三方库 / Required Third-party Libraries ============
-
-# GUI 框架 / GUI Framework
-# PySide6 v1/v2/v4 版本均依赖 / Required by PySide6 v1/v2/v4 versions
+# GUI
 PySide6>=6.5.0
 
-# 环境变量加载 / Environment Variables Loader
-# 用于加载 .env 文件（API 密钥等）/ For loading .env files (API keys etc.)
-python-dotenv>=1.0.0
-
-# 图像处理库 / Image Processing Library
-# 用于缩略图生成、图像显示和处理 / For thumbnail generation, image display and processing
+# 图像处理
 Pillow>=10.0.0
-opencv-python>=4.10.0.0
+opencv-python>=4.8.0
 
-# 数值计算 / Numerical Computing
-# 视频分析、特征处理依赖 / For video analysis and feature processing
+# 数据处理
 numpy>=1.24.0
-
-# 网络请求库 / HTTP Requests Library  
-# 用于网络相关功能和爬虫系统 / For network-related features and crawler system
-requests>=2.31.0
-requests[socks]>=2.31.0  # SOCKS代理支持 / SOCKS proxy support
-PySocks>=1.7.1  # SOCKS代理依赖 / SOCKS proxy dependency
-urllib3>=2.0.0
-playwright>=1.48.0
-
-# 浏览器自动化 / Browser Automation
-# 爬虫驱动 / For crawler drivers
-selenium>=4.15.0
-
-# HTML解析库 / HTML Parsing Library
-# 用于网页内容解析 / For web content parsing
-lxml>=4.9.0
-
-# 文件回收站 / Send to Trash
-# 安全删除文件到回收站 / Safely send files to trash
-Send2Trash>=1.8.2
-
-# CloudFlare绕过 / CloudFlare Bypass
-# 用于绕过CloudFlare保护 / For bypassing CloudFlare protection
-cloudscraper>=1.2.60
-
-# 日志和调试 / Logging and Debugging
-# 用于彩色日志输出 / For colored log output
-coloredlogs>=15.0
-
-# 配置文件处理 / Configuration File Processing
-# 用于YAML配置文件 / For YAML configuration files
-PyYAML>=6.0
-
-# 数据处理 / Data Processing
-# 爬虫数据导出、批量处理 / For crawler data export and batch processing
 pandas>=2.0.0
 
-# 中文分词 / Chinese Word Segmentation
-# 标签、标题处理 / For tag and title processing
+# 网络爬虫
+selenium>=4.10.0
+cloudscraper>=1.2.71
+PySocks>=1.7.1
+
+# 文本处理
 jieba>=0.42.1
+lxml>=4.9.0
+markdown>=3.4.0
 
-# 进度条 / Progress Bar
-# 批量操作进度显示 / For batch operation progress display
-tqdm>=4.66.0
-
-# 系统监控 / System Monitoring
-# 进程、资源监控 / For process and resource monitoring
-psutil>=5.9.0
-
-# ============ Python内置库 / Built-in Python Libraries ============
-# 以下库为Python标准库，无需单独安装 / The following are Python standard libraries, no separate installation required
-
-# GUI框架 / GUI Framework
-# tkinter - 图形用户界面 / Graphical User Interface
-
-# 数据库 / Database
-# sqlite3 - SQLite数据库接口 / SQLite database interface
-
-# 文件和系统操作 / File and System Operations
-# os - 操作系统接口 / Operating system interface
-# pathlib - 面向对象的文件系统路径 / Object-oriented filesystem paths
-# shutil - 高级文件操作 / High-level file operations
-# tempfile - 临时文件和目录 / Temporary files and directories
-# subprocess - 子进程管理 / Subprocess management
-# platform - 平台信息 / Platform information
-
-# 数据处理 / Data Processing
-# hashlib - 哈希算法 / Hash algorithms
-# json - JSON数据处理 / JSON data processing
-# xml.etree.ElementTree - XML处理 / XML processing
-# base64 - Base64编码解码 / Base64 encoding/decoding
-# io - 核心I/O工具 / Core I/O tools
-
-# 其他工具 / Other Utilities
-# threading - 线程支持 / Threading support
-# re - 正则表达式 / Regular expressions
-# datetime - 日期时间处理 / Date and time handling
-
-# ============ 外部工具依赖 / External Tool Dependencies ============
-
-# FFmpeg - 视频处理工具 / Video Processing Tool
-# 用于视频缩略图生成和元数据提取 / For video thumbnail generation and metadata extraction
-# 
-# 安装方法 / Installation Methods:
-# macOS: brew install ffmpeg
-# Windows: 下载FFmpeg并添加到PATH / Download FFmpeg and add to PATH
-#          https://ffmpeg.org/download.html
-# Linux: 
-#   Ubuntu/Debian: sudo apt-get install ffmpeg
-#   CentOS/RHEL: sudo yum install ffmpeg
-#   Fedora: sudo dnf install ffmpeg
-
-# ============ 开发和调试 / Development and Debugging ============
-# 以下库仅在开发时需要 / The following libraries are only needed during development
-
-# 代码格式化 / Code Formatting (Optional)
-# black>=23.0.0
-
-# 代码检查 / Code Linting (Optional)  
-# flake8>=6.0.0
-
-# 类型检查 / Type Checking (Optional)
-# mypy>=1.0.0
-
-# ============ 版本要求 / Version Requirements ============
-# Python 3.7+ 是最低要求 / Python 3.7+ is the minimum requirement
-# 推荐使用 Python 3.9+ / Python 3.9+ is recommended
-
-# ============ 可选依赖（AI 视频分析）/ Optional (AI Video Analysis) ============
-# 仅 video_analyzer/ 模块需要 / Only needed for video_analyzer/ module
-# mlx-whisper  # macOS Apple Silicon 字幕提取（MLX-Whisper → SRT）
-
-# ============ 安装说明 / Installation Instructions ============
-# 1. 确保已安装Python 3.9+ / Ensure Python 3.9+ is installed
-# 2. 运行: pip install -r requirements.txt
-# 3. 安装FFmpeg（见上述说明）/ Install FFmpeg (see instructions above)
-# 4. 运行: python init_database.py (首次使用) / Run: python init_database.py (first time)
-# 5. 启动应用 / Launch the app:
-#    python media_library_v2.py        # PySide6 v2（推荐）/ Recommended
-#    python media_library.py           # Tk 经典版 / Tk classic
-#    python media_library_v4.py        # PySide6 v4
+# 工具
+send2trash>=1.8.2
+python-dotenv>=1.0.0
+PyYAML>=6.0

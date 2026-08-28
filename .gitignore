@@ -145,3 +145,13 @@ md5_cache.json
 secrets.json
 credentials.json
 token.json
+
+# AV迁移相关（含演员映射与本地路径，禁止提交）
+migrate_av_remaining.py
+migrate_av_to_nas.py
+migrate_old_videos.py
+merge_folders5.py
+merge.conf
+.migrate_av_remaining_plan.json
+.migrate_av_remaining_progress.json
+migrate_run.log

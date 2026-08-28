@@ -1,0 +1,487 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>媒体库管理系统 / Media Library Management System</title>
+    <style>
+        :root {
+            --primary: #f0b429;
+            --bg-dark: #0f1115;
+            --bg-card: #1a1e26;
+            --text: #e4e7eb;
+            --text-muted: #9ca3af;
+            --border: #2d3748;
+        }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', sans-serif;
+            background: var(--bg-dark);
+            color: var(--text);
+            line-height: 1.8;
+            padding: 2rem;
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+        h1 {
+            color: var(--primary);
+            font-size: 2.5rem;
+            margin-bottom: 1rem;
+            border-bottom: 3px solid var(--primary);
+            padding-bottom: 0.5rem;
+        }
+        h2 {
+            color: var(--primary);
+            font-size: 1.8rem;
+            margin: 2rem 0 1rem;
+            border-left: 4px solid var(--primary);
+            padding-left: 1rem;
+        }
+        h3 {
+            color: #fff;
+            font-size: 1.3rem;
+            margin: 1.5rem 0 0.8rem;
+        }
+        p { margin: 1rem 0; }
+        strong { color: var(--primary); }
+        blockquote {
+            background: var(--bg-card);
+            border-left: 4px solid var(--primary);
+            padding: 1rem 1.5rem;
+            margin: 1.5rem 0;
+            border-radius: 0 8px 8px 0;
+        }
+        hr {
+            border: none;
+            border-top: 1px solid var(--border);
+            margin: 2rem 0;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 1.5rem 0;
+            background: var(--bg-card);
+            border-radius: 8px;
+            overflow: hidden;
+        }
+        th {
+            background: rgba(240, 180, 41, 0.15);
+            color: var(--primary);
+            padding: 12px 16px;
+            text-align: left;
+            font-weight: 600;
+        }
+        td {
+            padding: 12px 16px;
+            border-top: 1px solid var(--border);
+        }
+        tr:hover { background: rgba(240, 180, 41, 0.05); }
+        code {
+            background: rgba(240, 180, 41, 0.1);
+            color: var(--primary);
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-family: 'SF Mono', 'Fira Code', monospace;
+            font-size: 0.9em;
+        }
+        pre {
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 1.5rem;
+            overflow-x: auto;
+            margin: 1rem 0;
+        }
+        pre code {
+            background: none;
+            color: var(--text);
+            padding: 0;
+        }
+        ul, ol {
+            margin: 1rem 0;
+            padding-left: 2rem;
+        }
+        li { margin: 0.5rem 0; }
+        a {
+            color: var(--primary);
+            text-decoration: none;
+        }
+        a:hover { text-decoration: underline; }
+        .lang-en { color: var(--text-muted); font-style: italic; }
+        @media (max-width: 768px) {
+            body { padding: 1rem; }
+            h1 { font-size: 1.8rem; }
+            h2 { font-size: 1.4rem; }
+            table { font-size: 0.9rem; }
+        }
+    </style>
+</head>
+<body>
+<h1>媒体库管理系统 / Media Library Management System</h1>
+
+<blockquote>
+<p>版本 / Version: v2.1.0<br>
+最后更新 / Last Updated: 2026-08-13<br>
+适用系统 / Supported OS: Windows / macOS / Linux</p>
+</blockquote>
+
+<hr>
+
+<h2>项目概述 / Project Overview</h2>
+
+<p><strong>中文</strong><br>
+媒体库管理系统是一个功能完备的视频内容管理平台，专注于视频文件的组织、分析、去重和元数据管理。系统结合了网络爬虫、视频内容分析、数据库管理和用户界面等多个组件，提供从视频元数据获取、内容特征分析到重复文件检测与清理的全流程解决方案。</p>
+
+<p class="lang-en"><strong>English</strong><br>
+Media Library Management System is a comprehensive video content management platform focused on organizing, analyzing, deduplicating, and managing metadata for video files. The system integrates web crawlers, video content analysis, database management, and user interface components, providing a complete workflow solution from video metadata acquisition, content feature analysis, to duplicate file detection and cleanup.</p>
+
+<hr>
+
+<h2>系统架构 / System Architecture</h2>
+
+<p><strong>中文</strong><br>
+系统采用模块化设计，主要包含以下核心组件：</p>
+
+<ol>
+<li><strong>数据爬取模块</strong>：通过网络爬虫从 JAVDB 等网站获取视频元数据</li>
+<li><strong>视频分析模块</strong>：基于 SiliconFlow API 的多模态视频内容分析</li>
+<li><strong>数据库管理模块</strong>：基于 SQLite 的数据库系统（约 3.5G，49,000+ 条记录）</li>
+<li><strong>文件管理模块</strong>：负责视频文件的导入、路径管理、MD5 计算</li>
+<li><strong>去重与清理模块</strong>：检测并清理重复视频记录</li>
+<li><strong>批量处理模块</strong>：提供批量视频分析、元数据更新等功能</li>
+<li><strong>前端界面模块</strong>：PySide6 实现的现代桌面界面（pyside_v4）</li>
+</ol>
+
+<p class="lang-en"><strong>English</strong><br>
+The system adopts a modular design, mainly containing the following core components:</p>
+
+<ol class="lang-en">
+<li><strong>Data Crawling Module</strong>: Acquires video metadata from websites like JAVDB through web crawlers</li>
+<li><strong>Video Analysis Module</strong>: Multi-modal video content analysis based on SiliconFlow API</li>
+<li><strong>Database Management Module</strong>: SQLite-based database system (approximately 3.5G, 49,000+ records)</li>
+<li><strong>File Management Module</strong>: Handles video file import, path management, MD5 calculation</li>
+<li><strong>Deduplication &amp; Cleanup Module</strong>: Detects and cleans up duplicate video records</li>
+<li><strong>Batch Processing Module</strong>: Provides batch video analysis, metadata update functions</li>
+<li><strong>Frontend Interface Module</strong>: Modern desktop interface implemented with PySide6 (pyside_v4)</li>
+</ol>
+
+<hr>
+
+<h2>核心模块 / Core Modules</h2>
+
+<h3>1. 前端界面 / Frontend Interface (pyside_v4)</h3>
+
+<p><strong>中文</strong></p>
+<ul>
+<li><strong>设计风格</strong>：深色影院风（琥珀金 + 玻璃拟态）</li>
+<li><strong>技术栈</strong>：PySide6（Qt for Python）</li>
+<li><strong>核心功能</strong>：57 个功能模块，100% 完成率</li>
+<li><strong>性能优化</strong>：数据库查询从 14 秒降至 9 毫秒</li>
+<li><strong>目录结构</strong>：
+<ul>
+<li><code>core/</code>：数据库连接 + 数据访问层</li>
+<li><code>theme/</code>：主题系统（深色/浅色双主题）</li>
+<li><code>widgets/</code>：UI 组件（侧边栏、表格、详情面板等）</li>
+<li><code>windows/</code>：主窗口</li>
+<li><code>dialogs/</code>：对话框（演员库、标签管理、设置等）</li>
+<li><code>workers/</code>：后台任务</li>
+</ul>
+</li>
+</ul>
+
+<p class="lang-en"><strong>English</strong></p>
+<ul class="lang-en">
+<li><strong>Design Style</strong>: Dark cinema theme (amber gold + glassmorphism)</li>
+<li><strong>Tech Stack</strong>: PySide6 (Qt for Python)</li>
+<li><strong>Core Features</strong>: 57 functional modules, 100% completion rate</li>
+<li><strong>Performance Optimization</strong>: Database query reduced from 14 seconds to 9 milliseconds</li>
+<li><strong>Directory Structure</strong>:
+<ul>
+<li><code>core/</code>: Database connection + data access layer</li>
+<li><code>theme/</code>: Theme system (dark/light dual themes)</li>
+<li><code>widgets/</code>: UI components (sidebar, table, detail panel, etc.)</li>
+<li><code>windows/</code>: Main window</li>
+<li><code>dialogs/</code>: Dialogs (actor library, tag management, settings, etc.)</li>
+<li><code>workers/</code>: Background tasks</li>
+</ul>
+</li>
+</ul>
+
+<h3>2. 视频分析 / Video Analysis</h3>
+
+<p><strong>中文</strong></p>
+<ul>
+<li><strong>AI 模型</strong>：Qwen3-VL-30B-A3B-Instruct（视觉语言模型）</li>
+<li><strong>API 服务</strong>：SiliconFlow (https://api.siliconflow.cn)</li>
+<li><strong>功能</strong>：
+<ul>
+<li>自动抽取视频帧（最大 30 帧）</li>
+<li>内容理解与智能标签匹配</li>
+<li>标签词典：122 个预定义标签</li>
+<li>批量处理能力</li>
+</ul>
+</li>
+<li><strong>关键脚本</strong>：
+<ul>
+<li><code>retag_scored_videos.py</code>：批量打标签</li>
+<li><code>video_analyzer/adapter.py</code>：视频内容分析适配器</li>
+</ul>
+</li>
+</ul>
+
+<p class="lang-en"><strong>English</strong></p>
+<ul class="lang-en">
+<li><strong>AI Model</strong>: Qwen3-VL-30B-A3B-Instruct (Vision-Language Model)</li>
+<li><strong>API Service</strong>: SiliconFlow (https://api.siliconflow.cn)</li>
+<li><strong>Features</strong>:
+<ul>
+<li>Automatic video frame extraction (up to 30 frames)</li>
+<li>Content understanding and intelligent tag matching</li>
+<li>Tag vocabulary: 122 predefined tags</li>
+<li>Batch processing capability</li>
+</ul>
+</li>
+<li><strong>Key Scripts</strong>:
+<ul>
+<li><code>retag_scored_videos.py</code>: Batch tagging</li>
+<li><code>video_analyzer/adapter.py</code>: Video content analysis adapter</li>
+</ul>
+</li>
+</ul>
+
+<h3>3. 数据爬取 / Data Crawling</h3>
+
+<p><strong>中文</strong></p>
+<ul>
+<li><strong>JAVDB 爬虫系统</strong>：
+<ul>
+<li><code>javdb_crawler.py</code>：主爬虫脚本</li>
+<li><code>javdb_actor_all.py</code>：演员信息爬取</li>
+<li><code>javdb_information_updater.py</code>：信息更新</li>
+<li><code>javdb_login_helper.py</code>：登录助手</li>
+</ul>
+</li>
+<li><strong>JavSP 集成</strong>：
+<ul>
+<li><code>javsp_avsox.py</code>、<code>javsp_javbus.py</code>、<code>javsp_javlib.py</code></li>
+<li>多来源数据聚合</li>
+</ul>
+</li>
+</ul>
+
+<p class="lang-en"><strong>English</strong></p>
+<ul class="lang-en">
+<li><strong>JAVDB Crawler System</strong>:
+<ul>
+<li><code>javdb_crawler.py</code>: Main crawler script</li>
+<li><code>javdb_actor_all.py</code>: Actor information crawling</li>
+<li><code>javdb_information_updater.py</code>: Information update</li>
+<li><code>javdb_login_helper.py</code>: Login helper</li>
+</ul>
+</li>
+<li><strong>JavSP Integration</strong>:
+<ul>
+<li><code>javsp_avsox.py</code>, <code>javsp_javbus.py</code>, <code>javsp_javlib.py</code></li>
+<li>Multi-source data aggregation</li>
+</ul>
+</li>
+</ul>
+
+<h3>4. 数据库管理 / Database Management</h3>
+
+<p><strong>中文</strong></p>
+<ul>
+<li><strong>数据库文件</strong>：<code>media_library.db</code>（SQLite，约 3.5G）</li>
+<li><strong>主要表结构</strong>：
+<ul>
+<li><code>videos</code>：视频基本信息（tags、is_nas_online、file_path、stars 等字段）</li>
+<li><code>actors</code>：演员信息</li>
+<li><code>tags</code>：标签信息</li>
+<li><code>video_actors</code>：视频-演员关联</li>
+<li><code>video_tags</code>：视频-标签关联</li>
+<li><code>javdb_info</code>：JAVDB 元数据</li>
+<li><code>folders</code>：文件夹信息</li>
+</ul>
+</li>
+</ul>
+
+<p class="lang-en"><strong>English</strong></p>
+<ul class="lang-en">
+<li><strong>Database File</strong>: <code>media_library.db</code> (SQLite, approximately 3.5G)</li>
+<li><strong>Main Table Structure</strong>:
+<ul>
+<li><code>videos</code>: Video basic information (tags, is_nas_online, file_path, stars fields)</li>
+<li><code>actors</code>: Actor information</li>
+<li><code>tags</code>: Tag information</li>
+<li><code>video_actors</code>: Video-actor associations</li>
+<li><code>video_tags</code>: Video-tag associations</li>
+<li><code>javdb_info</code>: JAVDB metadata</li>
+<li><code>folders</code>: Folder information</li>
+</ul>
+</li>
+</ul>
+
+<hr>
+
+<h2>存储环境 / Storage Environment</h2>
+
+<p><strong>中文</strong><br>
+视频分布在本地和 NAS 存储：</p>
+
+<table>
+<thead>
+<tr><th>存储位置 / Location</th><th>路径 / Path</th><th>说明 / Description</th></tr>
+</thead>
+<tbody>
+<tr><td>本地 / Local</td><td><code>/Users/firewell</code></td><td>本地视频文件 / Local video files</td></tr>
+<tr><td>NAS 卷 / NAS Volume</td><td><code>/Volumes/app</code></td><td>NAS 应用卷 / NAS application volume</td></tr>
+<tr><td>NAS 卷 / NAS Volume</td><td><code>/Volumes/Video</code></td><td>NAS 视频卷 / NAS video volume</td></tr>
+<tr><td>NAS 卷 / NAS Volume</td><td><code>/Volumes/国产_DX4600</code></td><td>DX4600 国产卷 / DX4600 domestic volume</td></tr>
+<tr><td>NAS 卷 / NAS Volume</td><td><code>/Volumes/HC530_1</code></td><td>HC530 硬盘卷 / HC530 hard drive volume</td></tr>
+<tr><td>NAS 卷 / NAS Volume</td><td><code>/Volumes/Jav_HDD4</code></td><td>JAV HDD4 卷 / JAV HDD4 volume</td></tr>
+</tbody>
+</table>
+
+<p><strong>NAS 路径映射 / NAS Path Mapping</strong>：</p>
+
+<table>
+<thead>
+<tr><th>macOS SMB 挂载 / macOS SMB Mount</th><th>NAS 本地路径 / NAS Local Path</th></tr>
+</thead>
+<tbody>
+<tr><td><code>/Volumes/国产_DX4600/</code></td><td><code>/volume4/国产_DX4600/</code></td></tr>
+<tr><td><code>/Volumes/app/usr/</code></td><td><code>/volume1/app/usr/</code></td></tr>
+<tr><td><code>/Volumes/HC530_1/</code></td><td><code>/volume2/HC530_1/</code></td></tr>
+<tr><td><code>/Volumes/Jav_HDD4/</code></td><td><code>/volume4/Jav_HDD4/</code></td></tr>
+</tbody>
+</table>
+
+<hr>
+
+<h2>技术栈 / Technology Stack</h2>
+
+<p><strong>中文</strong></p>
+<ul>
+<li><strong>编程语言</strong>：Python 3.x</li>
+<li><strong>数据库</strong>：SQLite 3.0+</li>
+<li><strong>GUI 框架</strong>：PySide6（主界面）、Tkinter（旧版界面）</li>
+<li><strong>网络爬虫</strong>：Requests, Selenium, BeautifulSoup</li>
+<li><strong>视频处理</strong>：OpenCV, FFmpeg, PIL</li>
+<li><strong>AI 模型</strong>：Qwen3-VL-30B-A3B-Instruct（视频内容分析）</li>
+<li><strong>API 服务</strong>：SiliconFlow (https://api.siliconflow.cn)</li>
+<li><strong>数据处理</strong>：Pandas, NumPy, JSON, CSV</li>
+<li><strong>操作系统支持</strong>：跨平台 (Windows, macOS, Linux)</li>
+</ul>
+
+<p class="lang-en"><strong>English</strong></p>
+<ul class="lang-en">
+<li><strong>Programming Language</strong>: Python 3.x</li>
+<li><strong>Database</strong>: SQLite 3.0+</li>
+<li><strong>GUI Framework</strong>: PySide6 (main interface), Tkinter (legacy interface)</li>
+<li><strong>Web Crawling</strong>: Requests, Selenium, BeautifulSoup</li>
+<li><strong>Video Processing</strong>: OpenCV, FFmpeg, PIL</li>
+<li><strong>AI Model</strong>: Qwen3-VL-30B-A3B-Instruct (video content analysis)</li>
+<li><strong>API Service</strong>: SiliconFlow (https://api.siliconflow.cn)</li>
+<li><strong>Data Processing</strong>: Pandas, NumPy, JSON, CSV</li>
+<li><strong>OS Support</strong>: Cross-platform (Windows, macOS, Linux)</li>
+</ul>
+
+<hr>
+
+<h2>部署指南 / Deployment Guide</h2>
+
+<h3>环境要求 / Requirements</h3>
+<ul>
+<li>Python 3.7 或更高版本 / Python 3.7 or higher</li>
+<li>足够的磁盘空间存储视频和元数据 / Sufficient disk space for videos and metadata</li>
+<li>支持 OpenCV 的图形处理环境 / Graphics processing environment with OpenCV support</li>
+<li>（可选）用于 AI 分析的 SiliconFlow API Key / (Optional) SiliconFlow API Key for AI analysis</li>
+</ul>
+
+<h3>安装步骤 / Installation Steps</h3>
+
+<ol>
+<li><p><strong>克隆仓库 / Clone Repository</strong>：</p>
+<pre><code>git clone https://github.com/firewelly/media-library-manager.git
+cd media-library-manager</code></pre>
+</li>
+<li><p><strong>安装依赖 / Install Dependencies</strong>：</p>
+<pre><code>pip install -r requirements.txt -i https://pypi.tuna.tsinghua.edu.cn/simple</code></pre>
+</li>
+<li><p><strong>配置 API Key / Configure API Key</strong>：</p>
+<pre><code>export SILICONFLOW_API_KEY="your-api-key"</code></pre>
+</li>
+<li><p><strong>启动应用 / Start Application</strong>：</p>
+<pre><code># PySide6 版本（推荐）/ PySide6 version (recommended)
+python media_library_v2.py
+
+# 或 Tkinter 版本 / Or Tkinter version
+python media_library.py</code></pre>
+</li>
+</ol>
+
+<h3>Docker 部署 / Docker Deployment</h3>
+<p><strong>中文</strong>：系统支持 Docker 容器化部署，详见 <code>docker/</code> 目录。</p>
+<p class="lang-en"><strong>English</strong>: The system supports Docker containerized deployment, see <code>docker/</code> directory for details.</p>
+
+<hr>
+
+<h2>版本历史 / Version History</h2>
+
+<h3>v2.1.0 (2026-08-12)</h3>
+<p><strong>中文</strong></p>
+<ul>
+<li>pyside_v4 前端界面重构（深色影院风设计、57 个功能模块）</li>
+<li>MD5 完整性修复（覆盖率 69.8% → 97.9%）</li>
+<li>视频批量打标签系统（AI 视觉模型集成）</li>
+<li>NAS 存储迁移（DXP4800）</li>
+<li>数据库去重清理与路径修正</li>
+<li>安全与隐私增强</li>
+</ul>
+
+<p class="lang-en"><strong>English</strong></p>
+<ul class="lang-en">
+<li>pyside_v4 frontend interface refactoring (dark cinema design, 57 functional modules)</li>
+<li>MD5 integrity fix (coverage 69.8% → 97.9%)</li>
+<li>Batch video tagging system (AI vision model integration)</li>
+<li>NAS storage migration (DXP4800)</li>
+<li>Database deduplication cleanup and path correction</li>
+<li>Security and privacy enhancement</li>
+</ul>
+
+<h3>v2.0.0 (2025-12-27)</h3>
+<p><strong>中文</strong></p>
+<ul>
+<li>PySide6 版本功能完整化</li>
+<li>代码架构重构（Utils 模块分离）</li>
+<li>批量操作增强</li>
+<li>右键菜单重构</li>
+</ul>
+
+<p class="lang-en"><strong>English</strong></p>
+<ul class="lang-en">
+<li>PySide6 version feature completion</li>
+<li>Code architecture refactoring (Utils module separation)</li>
+<li>Batch operation enhancement</li>
+<li>Context menu refactoring</li>
+</ul>
+
+<hr>
+
+<h2>许可证 / License</h2>
+<p>MIT License</p>
+
+<hr>
+
+<h2>联系方式 / Contact</h2>
+<ul>
+<li><strong>GitHub</strong>: <a href="https://github.com/firewelly/media-library-manager">https://github.com/firewelly/media-library-manager</a></li>
+<li><strong>问题反馈 / Issue Report</strong>: <a href="https://github.com/firewelly/media-library-manager/issues">https://github.com/firewelly/media-library-manager/issues</a></li>
+</ul>
+
+<hr>
+
+<p><em>本文档由 OpenWiki 辅助生成 / This document was assisted by OpenWiki</em></p>
+
+</body>
+</html>

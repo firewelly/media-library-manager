@@ -1,0 +1,9 @@
+flowchart TD
+    DB[(media_library.db)] -->|"read untagged videos"| PA[production_video_analyzer_fixed.py]
+    PA -->|"extract frames"| VI[video_integrity.py]
+    VI -->|"verified playable"| PL[video_analyzer_pipeline.py]
+    PL -->|"frame extraction serial"| AN[video_analyzer_local_model_adult.py]
+    AN -->|"API calls parallel"| API[SiliconFlow API]
+    API -->|"tags"| PA
+    PA -->|"write tags"| DB
+    PA -->|"CSV report"| CSV[production_analysis_*.csv]

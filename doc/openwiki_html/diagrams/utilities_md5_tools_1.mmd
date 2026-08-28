@@ -1,0 +1,11 @@
+sequenceDiagram
+    participant Control as md5_calc_control.py
+    participant NAS as NAS (md5_calc_nas.sh)
+    participant DB as media_library.db
+
+    Control->>DB: 导出缺少 MD5 的记录
+    Control->>NAS: 通过 SSH 上传任务列表
+    NAS->>NAS: 并行计算 MD5
+    Control->>NAS: 检查状态 (--status)
+    Control->>NAS: 下载结果 (--download)
+    Control->>DB: 导入 MD5 值 (--import)

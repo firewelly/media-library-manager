@@ -32,6 +32,7 @@ cd "$PROJECT_DIR" || exit 1
 # ---------------------------------------------------------------------------
 PYTHON_CMD=""
 PYTHON_CANDIDATES=(
+    "/opt/homebrew/Caskroom/miniforge/base/bin/python3"
     "$HOME/anaconda3/bin/python3"
     "$HOME/miniconda3/bin/python3"
     "/opt/homebrew/bin/python3"
