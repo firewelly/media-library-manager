@@ -81,8 +81,7 @@ def get_pending_videos(folders=None, require_exists=True):
         FROM videos v
         LEFT JOIN javdb_info j ON v.id = j.video_id
         WHERE (j.id IS NULL OR NOT EXISTS (
-            SELECT 1 FROM video_actors va JOIN actors a ON va.actor_id = a.id
-            WHERE va.video_id = v.id AND a.profile_url LIKE '%javdb.com%'
+            SELECT 1 FROM video_actors va WHERE va.video_id = v.id
         )) AND ({folder_clause})
         ORDER BY v.created_at DESC
     """, folders)
