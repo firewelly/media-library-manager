@@ -700,7 +700,8 @@ def get_browser_preferences():
 
 
 def get_profile_modes():
-    return ["fresh", "persisted"]
+    # persisted(固定用户cookie/登录态) 优先，fresh(每次新建临时状态) 保留作为回退
+    return ["persisted", "fresh"]
 
 
 def setup_playwright_session(use_proxy=True, headless=True, browser_name="msedge", profile_mode="persisted"):
@@ -780,6 +781,71 @@ def close_playwright_session(session):
     if cleanup_path:
         with suppress(Exception):
             shutil.rmtree(cleanup_path, ignore_errors=True)
+
+
+def is_logged_in_pw(page):
+    """检测 javdb 页面是否处于已登录状态（导航栏出现登出/用户入口）"""
+    try:
+        if page.locator("a[href*='sign_out']").count() > 0:
+            return True
+        for text in ["登出", "ログアウト", "Sign Out", "登出"]:
+            if page.locator(f"a:has-text('{text}')").count() > 0:
+                return True
+        if page.locator(".navbar-item.has-dropdown .navbar-link img.avatar, a[href*='/users/']").count() > 0:
+            return True
+        return False
+    except Exception:
+        return False
+
+
+def do_manual_login():
+    """打开持久会话(persisted profile)浏览器，等待用户手动登录 javdb。
+    登录态(cookie)会保存在 .playwright_user_data/<browser> 中，供后续爬虫复用。
+    用法: python3 javdb_crawler_single.py --login
+    """
+    if sync_playwright is None:
+        print("[ERROR] Playwright 未安装，无法执行登录流程", file=sys.stderr)
+        return False
+    attempt = get_attempt_configs(USE_SOCKS5_PROXY)[0]
+    session = setup_playwright_session(
+        use_proxy=attempt["use_proxy"], headless=False,
+        browser_name="msedge", profile_mode="persisted")
+    if not session:
+        print("[ERROR] 无法启动持久会话浏览器", file=sys.stderr)
+        return False
+    page = session["page"]
+    try:
+        base_url = get_base_url_candidates(attempt["use_proxy"])[0]
+        page.goto(base_url, wait_until="domcontentloaded", timeout=60000)
+        random_delay(1.5, 3.0)
+        if is_cloudflare_challenge_pw(page):
+            print("检测到 Cloudflare 验证页，请在浏览器中完成验证...", file=sys.stderr)
+            if not wait_for_cloudflare_clear_pw(page, timeout_seconds=180):
+                print("[ERROR] Cloudflare 验证未通过", file=sys.stderr)
+                return False
+        if is_age_confirmation_pw(page):
+            dismiss_age_confirmation_pw(page)
+        if is_logged_in_pw(page):
+            print("[INFO] 持久会话已处于登录状态，无需重新登录", file=sys.stderr)
+            return True
+        print("[INFO] 请在打开的浏览器窗口中登录 javdb（5 分钟内完成）...", file=sys.stderr)
+        login_url = base_url.rstrip("/") + "/users/sign_in?locale=zh"
+        with suppress(Exception):
+            page.goto(login_url, wait_until="domcontentloaded", timeout=60000)
+        for _ in range(150):
+            if is_logged_in_pw(page):
+                random_delay(2, 3)
+                with suppress(Exception):
+                    page.goto(base_url, wait_until="domcontentloaded", timeout=60000)
+                    random_delay(1, 2)
+                if is_logged_in_pw(page):
+                    print("[INFO] 登录成功，登录态已保存到持久会话，后续爬虫将自动复用", file=sys.stderr)
+                    return True
+            time.sleep(2)
+        print("[ERROR] 等待登录超时", file=sys.stderr)
+        return False
+    finally:
+        close_playwright_session(session)
 
 
 def is_login_page_pw(page):
@@ -942,15 +1008,33 @@ def search_video_by_code_pw(page, video_code, base_url):
         search_url = f"{base_url}/search?q={video_code}&f=all"
         page.goto(search_url, wait_until="domcontentloaded", timeout=60000)
         random_delay(1, 2)
-        link = page.locator('a[href*="/v/"]').first
-        if link.count() == 0:
-            return None
-        href = link.get_attribute("href")
-        if not href:
-            return None
-        if not href.startswith("http"):
-            href = urljoin(base_url, href)
-        return href
+        # 遍历搜索结果，只接受番号精确匹配的条目（javdb 无结果时会返回模糊匹配，避免张冠李戴）
+        cards = page.locator("a[href*='/v/']")
+        try:
+            n = min(cards.count(), 10)
+        except Exception:
+            n = 0
+        target = (video_code or "").replace(" ", "").replace("-", "").upper()
+        for i in range(n):
+            try:
+                card = cards.nth(i)
+                href = card.get_attribute("href") or ""
+                if "/v/" not in href:
+                    continue
+                title_text = ""
+                with suppress(Exception):
+                    title_text = card.locator(".video-title").first.text_content() or ""
+                if not title_text:
+                    with suppress(Exception):
+                        title_text = card.text_content() or ""
+                norm = (title_text or "").replace(" ", "").replace("-", "").upper()
+                if target and target in norm:
+                    if not href.startswith("http"):
+                        href = urljoin(base_url, href)
+                    return href
+            except Exception:
+                continue
+        return None
     except Exception:
         return None
 
@@ -1051,7 +1135,8 @@ def parse_detail_pw(page, detail_url, base_url, use_proxy, max_retries=2):
             with suppress(Exception):
                 actors = page.evaluate("""
                     () => {
-                        const anchors = Array.from(document.querySelectorAll('a[href*="/actors/"]'));
+                        // 限定在详情信息面板内，避免抓到导航栏的演员分类入口(censored/uncensored等)
+                        const anchors = Array.from(document.querySelectorAll('.panel-block a[href*="/actors/"], .movie-panel-info a[href*="/actors/"]'));
                         const raw = [];
                         for (const a of anchors) {
                             const name = (a.textContent || '').trim();
@@ -1268,9 +1353,12 @@ def crawl_single_video(video_code):
     return crawl_single_video_selenium(video_code)
 
 if __name__ == "__main__":
+    if len(sys.argv) == 2 and sys.argv[1] == "--login":
+        sys.exit(0 if do_manual_login() else 1)
     if len(sys.argv) != 2:
-        print("Usage: python javdb_crawler_single.py <video_code>")
+        print("Usage: python javdb_crawler_single.py <video_code> | --login")
         print("Example: python javdb_crawler_single.py CJOD-413")
+        print("         python javdb_crawler_single.py --login  # 手动登录并保存固定用户cookie到持久会话")
         sys.exit(1)
     
     video_code = sys.argv[1]
