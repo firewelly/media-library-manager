@@ -22,6 +22,7 @@ import random
 import re
 import socket
 import struct
+import subprocess
 import sys
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -56,6 +57,54 @@ def hash_to_bytes(h):
     if len(h) == 32:
         return base64.b32decode(h.upper())
     return None
+
+
+JAVBUS_BASE = "https://www.javbus.com"
+JAVBUS_PROXIES = {"http": "socks5h://127.0.0.1:1080", "https": "socks5h://127.0.0.1:1080"}
+
+
+def _size_to_mb(text):
+    m = re.match(r"([\d.]+)\s*(GB|MB|TB|KB)", (text or "").strip(), re.I)
+    if not m:
+        return 0
+    v, unit = float(m.group(1)), m.group(2).upper()
+    return int(v * {"TB": 1024 * 1024, "GB": 1024, "MB": 1, "KB": 1 / 1024}[unit])
+
+
+def javbus_magnets(code):
+    """javbus 磁力（详情页表格由 AJAX 二次加载）：
+    先取页面 var gid/uc/img，再请求 uncledatoolsbyajax.php，返回与 parse_detail 兼容的条目"""
+    sess = requests.Session()
+    out = []
+    try:
+        r = sess.get(f"{JAVBUS_BASE}/{code}", headers=UA, timeout=25, proxies=JAVBUS_PROXIES)
+        if r.status_code != 200:
+            return out
+        gid = re.search(r"var\s+gid\s*=\s*['\"]?([0-9A-Za-z_-]+)", r.text)
+        uc = re.search(r"var\s+uc\s*=\s*['\"]?([0-9A-Za-z_-]+)", r.text)
+        img = re.search(r"var\s+img\s*=\s*['\"]([^'\"]+)", r.text)
+        if not gid:
+            return out
+        url = (f"{JAVBUS_BASE}/ajax/uncledatoolsbyajax.php?gid={gid.group(1)}&lang=zh"
+               f"&img={img.group(1) if img else ''}&uc={uc.group(1) if uc else 0}"
+               f"&floor={random.randint(1, 999)}")
+        h = dict(UA)
+        h["Referer"] = f"{JAVBUS_BASE}/{code}"
+        h["X-Requested-With"] = "XMLHttpRequest"
+        r2 = sess.get(url, headers=h, timeout=25, proxies=JAVBUS_PROXIES)
+        for blk in re.split(r"<tr\b", r2.text)[1:]:
+            lm = re.search(r'href="(magnet:\?xt=urn:btih:[^"]+)"', blk, re.I)
+            if not lm:
+                continue
+            link = lm.group(1).replace("&amp;", "&")
+            nm = re.search(r"href=\"magnet:[^\"]+\">\s*([^<]+?)\s*</a>", blk, re.I)
+            sizes = re.findall(r">\s*([\d.]+\s*(?:GB|MB|TB|KB))\s*<", blk, re.I)
+            out.append({"link": link, "name": (nm.group(1).strip() if nm else code),
+                        "tags": [], "size_mb": _size_to_mb(sizes[0]) if sizes else 0,
+                        "source": "javbus"})
+    except Exception as e:
+        log(f"  javbus 抓取失败: {str(e)[:80]}")
+    return out
 
 
 def search_detail_url(sess, code):
@@ -105,19 +154,23 @@ def _scrape_one_tracker(tracker, hashes, timeout):
     return out
 
 
-def scrape_all(hashes, timeout=6):
-    """并发查询全部 tracker，每 hash 取最大 seeder/leecher"""
+def scrape_all(hashes, timeout=6, batch_size=30):
+    """并发查询全部 tracker，每 hash 取最大 seeder/leecher。
+    注意：UDP scrape 单包上限约 74 个 hash，超出会被静默截断（假 0 做种），必须分批。"""
     result = {h.hex(): (0, 0, 0) for h in hashes}
-    with ThreadPoolExecutor(max_workers=len(UDP_TRACKERS)) as ex:
-        futs = {ex.submit(_scrape_one_tracker, t, hashes, timeout): t for t in UDP_TRACKERS}
-        for fut in as_completed(futs):
-            tr = fut.result()
-            live = 0
-            for h, (seed, comp, leech) in tr.items():
-                cur = result.get(h, (0, 0, 0))
-                result[h] = (max(cur[0], seed), max(cur[1], comp), max(cur[2], leech))
-                live += 1
-            log(f"    tracker {futs[fut][0]}:{futs[fut][1]} 应答覆盖 {live}/{len(hashes)} 个hash")
+    batches = [hashes[i:i + batch_size] for i in range(0, len(hashes), batch_size)]
+    for bi, bh in enumerate(batches, 1):
+        if len(batches) > 1:
+            log(f"  批次 {bi}/{len(batches)}（{len(bh)} hash）")
+        with ThreadPoolExecutor(max_workers=len(UDP_TRACKERS)) as ex:
+            futs = {ex.submit(_scrape_one_tracker, t, bh, timeout): t for t in UDP_TRACKERS}
+            for fut in as_completed(futs):
+                tr = fut.result()
+                for h, (seed, comp, leech) in tr.items():
+                    cur = result.get(h, (0, 0, 0))
+                    result[h] = (max(cur[0], seed), max(cur[1], comp), max(cur[2], leech))
+                if len(batches) == 1:
+                    log(f"    tracker {futs[fut][0]}:{futs[fut][1]} 应答覆盖 {len(tr)}/{len(bh)} 个hash")
     return result
 
 
@@ -142,6 +195,10 @@ def main():
         i = sys.argv.index("--tracker-timeout")
         if i + 1 < len(sys.argv):
             timeout = int(sys.argv[i + 1])
+    do_copy = "--copy" in sys.argv
+    available_only = "--available-only" in sys.argv
+    do_check = "--check" in sys.argv or available_only
+    codes = [c for c in codes if not c.isdigit()]
     if not codes:
         print(__doc__)
         sys.exit(1)
@@ -151,22 +208,26 @@ def main():
     pending_hashes = {}
     for code in codes:
         log(f"=== {code} ===")
+        title = ""
+        magnets = []
         try:
             url, title = search_detail_url(sess, code)
         except Exception as e:
             log(f"  搜索失败: {str(e)[:80]}")
-            continue
-        if not url:
-            log(f"  未找到精确匹配")
-            continue
-        log(f"  详情页: {url}")
-        try:
-            r = sess.get(url, headers=UA, timeout=25)
-        except Exception as e:
-            log(f"  详情页失败: {str(e)[:80]}")
-            continue
-        solo, magnets = parse_detail(r.text)
-        log(f"  磁力 {len(magnets)} 条" + ("（单体作品）" if solo else ""))
+            url = None
+        if url:
+            log(f"  详情页: {url}")
+            try:
+                r = sess.get(url, headers=UA, timeout=25)
+                solo, magnets = parse_detail(r.text)
+                log(f"  javdb 磁力 {len(magnets)} 条" + ("（单体作品）" if solo else ""))
+            except Exception as e:
+                log(f"  详情页失败: {str(e)[:80]}")
+        if not magnets:
+            log(f"  javdb 无结果 → 回退 javbus")
+            magnets = javbus_magnets(code)
+            log(f"  javbus 磁力 {len(magnets)} 条")
+            title = title or code
         for m in magnets:
             mm = re.search(r"btih:([a-fA-F0-9]{32,40})", m["link"])
             if not mm:
@@ -183,29 +244,67 @@ def main():
         log("无磁力可检查")
         return
 
-    log(f"\n=== 查询 {len(pending_hashes)} 个 info_hash 的种子健康度（{len(UDP_TRACKERS)} 个tracker）===")
-    t0 = time.time()
-    stats = scrape_all(list(pending_hashes.values()), timeout)
-    log(f"tracker 查询完成，耗时 {time.time()-t0:.0f}s\n")
+    stats = {}
+    if do_check:
+        log(f"\n=== 查询 {len(pending_hashes)} 个 info_hash 的种子健康度（{len(UDP_TRACKERS)} 个tracker）===")
+        t0 = time.time()
+        stats = scrape_all(list(pending_hashes.values()), timeout)
+        log(f"tracker 查询完成，耗时 {time.time()-t0:.0f}s\n")
 
-    # 输出报告（按番号分组，组内按 健康度+优选分 排序）
+    # 输出报告（按番号分组，组内按 优选规则[+健康度] 排序）
     print("=" * 100)
-    print(f"{'番号':<10} {'健康':<5} {'做种':>4} {'下栽':>4} {'体积':>8}  {'优选分':>3}  名称/标签")
+    print(f"{'番号':<10} {'健康':<5} {'做种':>4} {'下栽':>4} {'体积':>8}  名称/标签")
     print("-" * 100)
     by_code = {}
     for row in all_rows:
         by_code.setdefault(row[0], []).append(row)
     for code, rows in by_code.items():
         def sort_key(r):
-            seed, comp, leech = stats.get(r[3], (0, 0, 0))
+            seed = stats.get(r[3], (0, 0, 0))[0] if do_check else 0
             return (seed, magnet_score(r[2]))
         for code_, title, m, h in sorted(rows, key=sort_key, reverse=True):
             seed, comp, leech = stats.get(h, (0, 0, 0))
             tags = "/".join(m.get("tags") or [])[:30]
             name = (m.get("name") or "")[:45]
-            print(f"{code_:<10} {health_label(seed):<5} {seed:>4} {leech:>4} {fmt_size(m.get('size_mb', 0)):>8}"
-                  f"  {magnet_score(m)[0]}     {name}  [{tags}]")
+            hl = health_label(seed) if do_check else "-"
+            print(f"{code_:<10} {hl:<5} {seed:>4} {leech:>4} {fmt_size(m.get('size_mb', 0)):>8}"
+                  f"  {name}  [{tags}]")
         print("-" * 100)
+
+    # 按用户偏好规则优选（每个番号一条）+ 复制到剪贴板
+    if do_copy or available_only or True:
+        picks = []
+        for code, rows in by_code.items():
+            cand = []
+            for code_, title, m, h in rows:
+                seed = stats.get(h, (0, 0, 0))[0] if do_check else 0
+                if available_only and seed < 1:
+                    continue
+                cand.append((1 if seed >= 1 else 0, magnet_score(m), m, seed))
+            if not cand:
+                log(f"  [{code}] 无符合规则的磁力")
+                continue
+            cand.sort(key=lambda x: (x[0], x[1]), reverse=True)
+            _, _, m, seed = cand[0]
+            picks.append((code, m["link"], seed, m.get("name", ""), m.get("size_mb", 0), m.get("tags") or []))
+
+        print()
+        print("=" * 100)
+        print(f"【按偏好规则优选】{len(picks)}/{len(by_code)} 个番号命中")
+        print("规则: 中文字幕(-UC/-C/字幕标签) > 清晰度(1080p/FHD) > 体积(5-10GB最佳) > 无码/高清")
+        print("-" * 100)
+        for code, link, seed, name, sz, tags in picks:
+            extra = f" 做种{seed}" if do_check else ""
+            print(f"[{code}]{extra} {fmt_size(sz)} [{('/'.join(tags))[:20]}] {name[:40]}")
+            print(f"  {link}")
+        text = "\n".join(p[1] for p in picks)
+        if do_copy:
+            try:
+                subprocess.run(["pbcopy"], input=text.encode("utf-8"), check=True)
+                print()
+                print(f"✅ 已复制 {len(picks)} 条链接到剪贴板")
+            except Exception as e:
+                log(f"[警告] 复制剪贴板失败: {e}")
 
 
 if __name__ == "__main__":
