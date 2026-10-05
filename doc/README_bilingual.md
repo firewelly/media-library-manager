@@ -359,4 +359,4 @@ MIT License
 
 ---
 
-*本文档由 OpenWiki 辅助生成 / This document was assisted by OpenWiki*
+*本文档由 AI 辅助整理 / This document was assisted by AI*
