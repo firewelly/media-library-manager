@@ -246,6 +246,11 @@ def process_folder(
 ) -> FolderStats:
     stats = FolderStats()
 
+    # 统一在此归一化：调用方传 None 时用本地字典。
+    # 注意不能用 `cache or {}`——空字典会被替换成临时对象，算出的MD5无法回传保存。
+    if cache is None:
+        cache = {}
+
     # 读取磁盘文件（该文件夹范围内）
     disk_files = iter_folder_files(folder)
     disk_by_path: Dict[str, Tuple[str, int]] = {p: (n, s) for p, n, s in disk_files}
@@ -291,7 +296,7 @@ def process_folder(
                     continue
             except Exception:
                 continue
-            md5 = md5_with_cache(p, cache or {})
+            md5 = md5_with_cache(p, cache)
             if progress:
                 progress(f"补齐MD5: {os.path.basename(p)} -> {md5 or '计算失败'}")
             if md5:
@@ -334,7 +339,7 @@ def process_folder(
         match_row: Optional[sqlite3.Row] = None
         if enable_md5:
             # 复用缓存或串行计算
-            md5 = md5_with_cache(path, cache or {})
+            md5 = md5_with_cache(path, cache)
             if progress:
                 progress(f"MD5: {name} -> {md5 or '计算失败'}")
             if md5:
@@ -370,7 +375,7 @@ def process_folder(
                     match_row = candidates[0]
                 else:
                     # 多命中时，如果已算MD5则用MD5消歧
-                    md5 = md5_with_cache(path, cache or {})
+                    md5 = md5_with_cache(path, cache)
                     if md5:
                         md5_filtered = [r for r in candidates if (r["md5_hash"] or "") == md5]
                         if md5_filtered:
@@ -400,7 +405,7 @@ def process_folder(
                 duration, resolution = get_video_info(path)
                 title, stars = parse_title_and_stars(name)
                 # 新建记录强制计算MD5（去重基础字段），不受enable_md5控制
-                md5_val = md5_with_cache(path, cache or {})
+                md5_val = md5_with_cache(path, cache)
                 cur.execute(
                     """
                     INSERT OR IGNORE INTO videos (

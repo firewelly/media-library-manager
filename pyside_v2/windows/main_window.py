@@ -13,14 +13,17 @@ import platform
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QStatusBar,
     QSplitter, QScrollArea, QMenu, QMessageBox, QPushButton, QLineEdit,
-    QApplication, QComboBox,
+    QApplication, QComboBox, QStackedWidget,
 )
-from PySide6.QtCore import Qt, Signal, QPoint
+from PySide6.QtCore import Qt, Signal, QPoint, QThread
 from PySide6.QtGui import QAction, QKeySequence, QShortcut, QPixmap
 
 from pyside_v2.core import MediaLibraryCore, qt_log_handler
+from pyside_v2.core.formatters import format_duration, format_file_size, format_datetime
+from pyside_v2.core.settings import SettingsManager
 from pyside_v2.theme import Tokens, init_theme, current, color_hex
 from pyside_v2.widgets import VideoTableModel, VideoTableView, Sidebar, ClickableLabel
+from pyside_v2.widgets.cover_wall import CoverModel, CoverWallView, ThumbnailWorker
 from gui_adapter import setup_full_integration
 
 
@@ -33,6 +36,10 @@ class MainWindow(QMainWindow):
         # 所有后台 QThread 引用（closeEvent 时统一等待，避免销毁运行中线程崩溃）
         self._workers = []
         self._query_worker = None
+        self._thumb_worker = None
+
+        # 0. 应用设置（gui_config_v2.json）
+        self.core_settings = SettingsManager()
 
         # 1. 后端 facade
         self.core = MediaLibraryCore()
@@ -58,9 +65,15 @@ class MainWindow(QMainWindow):
         self.create_menus()
         self.create_shortcuts()
 
-        # 主题管理器（初始化后应用持久化的主题）
+        # 主题管理器（初始化后应用持久化的主题；设置文件的 theme 优先）
         self.theme_mgr = init_theme(QApplication.instance())
+        saved_theme = self.core_settings.get("theme")
+        if saved_theme and saved_theme != self.theme_mgr.theme_name:
+            self.theme_mgr.apply(saved_theme)
         self._update_theme_button()
+
+        # 应用持久化设置（每页条数/防抖/默认仅在线）+ 列布局
+        self._apply_persisted_settings()
 
         # 侧栏加载存储位置
         self.sidebar.load_storage_locations(self.core)
@@ -80,6 +93,37 @@ class MainWindow(QMainWindow):
 
         # 6. 首次加载数据
         self.load_videos()
+
+    def _apply_persisted_settings(self):
+        """启动时应用 gui_config_v2.json 的非主题设置。"""
+        s = self.core_settings
+        # 每页条数（两个 model 同步）
+        page_size = int(s.get("page_size") or 300)
+        self.video_model._page_size = page_size
+        if hasattr(self, "cover_model"):
+            self.cover_model._page_size = page_size
+        # 搜索防抖
+        self._search_timer.setInterval(int(s.get("search_debounce_ms") or 500))
+        # 默认仅在线
+        show_online = bool(s.get("show_online_only"))
+        self.show_online_only = show_online
+        self.btn_online.setChecked(show_online)
+        # 列布局
+        header_b64 = s.get("header_state") or ""
+        if header_b64:
+            try:
+                import base64
+                self.video_table.restore_header_state(base64.b64decode(header_b64))
+                # 从恢复的表头状态反推排序字段（QHeaderView state 含排序指示）
+                ind = self.video_table.horizontalHeader().sortIndicatorSection()
+                order = self.video_table.horizontalHeader().sortIndicatorOrder()
+                keys = self.video_model.column_keys
+                if 0 <= ind < len(keys):
+                    self.core.sort_column_name = keys[ind]
+                    from PySide6.QtCore import Qt as _Qt
+                    self.core.sort_reverse = (order == _Qt.DescendingOrder)
+            except Exception:
+                pass
 
     def _reconnect_core(self):
         """重建 core 的 SQLite 连接（修复桥接导致的连接关闭问题）。"""
@@ -116,9 +160,13 @@ class MainWindow(QMainWindow):
                     child.wait(3000)
             except Exception:
                 pass
-        # 保存列布局
+        # 保存列布局（header state base64 → gui_config_v2.json）
         try:
             if hasattr(self, 'video_table'):
+                import base64
+                state = self.video_table.save_header_state()
+                if state:
+                    self.core_settings.set("header_state", base64.b64encode(bytes(state)).decode("ascii"))
                 self.core.save_column_config()
         except Exception:
             pass
@@ -191,6 +239,19 @@ class MainWindow(QMainWindow):
 
         tbar_lay.addStretch()
 
+        # 视图切换（表格 / 封面墙）
+        self.btn_view_table = QPushButton("▦ 列表")
+        self.btn_view_table.setCheckable(True)
+        self.btn_view_table.setChecked(True)
+        self.btn_view_wall = QPushButton("▢ 封面")
+        self.btn_view_wall.setCheckable(True)
+        for b in (self.btn_view_table, self.btn_view_wall):
+            b.setCursor(Qt.PointingHandCursor)
+        self.btn_view_table.clicked.connect(lambda: self._switch_view(0))
+        self.btn_view_wall.clicked.connect(lambda: self._switch_view(1))
+        tbar_lay.addWidget(self.btn_view_table)
+        tbar_lay.addWidget(self.btn_view_wall)
+
         # 主题切换
         self.btn_theme = QPushButton("◐")
         self.btn_theme.setProperty("role", "icon")
@@ -214,14 +275,15 @@ class MainWindow(QMainWindow):
         content.setHandleWidth(1)
         content.setContentsMargins(0, 0, 0, 0)
 
-        # 列表区（列表 + 翻页栏，垂直）
+        # 列表区（视图堆叠 + 翻页栏，垂直）
         list_area = QWidget()
         list_lay = QVBoxLayout(list_area)
         list_lay.setContentsMargins(12, 12, 6, 12)
         list_lay.setSpacing(0)
 
         # 列表（真实数据，分页）
-        self.video_model = VideoTableModel(page_size=300)
+        page_size = int(self.core_settings.get("page_size") or 300)
+        self.video_model = VideoTableModel(page_size=page_size)
         self.video_table = VideoTableView(self)
         self.video_table.set_model(self.video_model)
         self.video_table.selection_changed.connect(self.on_video_selected)
@@ -230,7 +292,20 @@ class MainWindow(QMainWindow):
         self.video_table.star_clicked.connect(self._on_star_clicked_in_list)
         self.video_table.setContextMenuPolicy(Qt.CustomContextMenu)
         self.video_table.customContextMenuRequested.connect(self.show_context_menu)
-        list_lay.addWidget(self.video_table, 1)
+
+        # 封面墙（同一份查询数据，缩略图懒加载）
+        self.cover_model = CoverModel()
+        self.cover_wall = CoverWallView(self)
+        self.cover_wall.set_model(self.cover_model)
+        self.cover_wall.selection_changed.connect(self.on_video_selected)
+        self.cover_wall.double_clicked.connect(self.on_video_double_clicked)
+        self.cover_wall.customContextMenuRequested.connect(self.show_cover_context_menu)
+
+        # 视图堆叠：0=表格 / 1=封面墙
+        self.view_stack = QStackedWidget()
+        self.view_stack.addWidget(self.video_table)
+        self.view_stack.addWidget(self.cover_wall)
+        list_lay.addWidget(self.view_stack, 1)
 
         # 翻页栏
         page_bar = QWidget()
@@ -394,13 +469,6 @@ class MainWindow(QMainWindow):
             if item.widget():
                 item.widget().deleteLater()
 
-        # 状态栏
-        self.status_bar = QStatusBar()
-        self.setStatusBar(self.status_bar)
-        self.status_bar.showMessage("就绪")
-        self.video_count_label = QLabel("0 个视频")
-        self.status_bar.addPermanentWidget(self.video_count_label)
-
     # ==================================================================
     # 菜单（Phase 1 - 对齐 v1 全部菜单项）
     # ==================================================================
@@ -419,11 +487,13 @@ class MainWindow(QMainWindow):
         file_menu.addAction("批量导入JAVDB信息", self.on_batch_import_javdb_for_no_title)
         file_menu.addSeparator()
         file_menu.addAction("去重复", self.on_remove_duplicates)
+        file_menu.addAction("去重复管理（交互式）", self.on_open_duplicates)
 
         # ---- 工具 ----
         tools_menu = mb.addMenu("工具")
         tools_menu.addAction("标签管理", self.on_manage_tags)
         tools_menu.addAction("文件夹管理", self.on_manage_folders)
+        tools_menu.addAction("📊 库统计", self.on_open_stats)
         tools_menu.addSeparator()
         tools_menu.addAction("同步打分到文件", self.on_sync_stars_to_filename)
         tools_menu.addSeparator()
@@ -443,10 +513,15 @@ class MainWindow(QMainWindow):
         tools_menu.addSeparator()
         tools_menu.addAction("快速智能媒体库更新", self.on_quick_smart_media_update)
         tools_menu.addSeparator()
+        tools_menu.addAction("⚠️ 完全重置数据库", self.on_full_database_reset)
+        tools_menu.addSeparator()
         tools_menu.addAction("JAV信息面板", self.open_jav_info_dialog)
 
         # ---- 界面 ----
         view_menu = mb.addMenu("界面")
+        view_menu.addAction("列表视图", lambda: self._switch_view(0))
+        view_menu.addAction("封面墙视图", lambda: self._switch_view(1))
+        view_menu.addSeparator()
         view_menu.addAction("刷新", self.refresh_data)
         view_menu.addAction("清空筛选", self.clear_filters)
         view_menu.addAction("重置界面布局", self.on_reset_gui_layout)
@@ -474,6 +549,11 @@ class MainWindow(QMainWindow):
             sc = QShortcut(QKeySequence(str(i)), self.video_table,
                            activated=lambda r=i: self._quick_set_star(r))
             sc.setContext(Qt.WidgetShortcut)
+        # 封面墙同样生效（WidgetShortcut 互斥，不会与表格双触发）
+        for i in range(6):
+            sc = QShortcut(QKeySequence(str(i)), self.cover_wall,
+                           activated=lambda r=i: self._quick_set_star(r))
+            sc.setContext(Qt.WidgetShortcut)
 
     def _focus_search(self):
         """Ctrl+F：聚焦搜索框并全选。"""
@@ -482,7 +562,7 @@ class MainWindow(QMainWindow):
 
     def _quick_set_star(self, rating):
         """快捷键设置星级：支持批量（多选时确认后批量设置）。"""
-        ids = self.video_table.selected_video_ids()
+        ids = self._active_view_selected_ids()
         if not ids:
             # 兼容：无多选时用当前选中
             if self._current_video_id is not None:
@@ -582,10 +662,84 @@ class MainWindow(QMainWindow):
             from pyside_v2.dialogs import ActorBrowserDialog
             ActorBrowserDialog(self).exec(); return
         if key == 'settings':
-            self.status_bar.showMessage("设置（后续）", 3000); return
+            self.on_open_settings(); return
         # 筛选类导航：重新查询
         self.video_model._current_page_no = 0
         self.load_videos()
+
+    # ==================================================================
+    # 设置 / 统计 / 去重复 / 视频定位
+    # ==================================================================
+    def on_open_settings(self):
+        """打开设置对话框，确定后立即应用。"""
+        from pyside_v2.dialogs.settings import SettingsDialog
+        dlg = SettingsDialog(self)
+        if dlg.exec():
+            self.apply_settings()
+
+    def apply_settings(self):
+        """将 gui_config_v2.json 的设置应用到运行中的界面（无需重启）。"""
+        s = self.core_settings
+        # 主题
+        theme = s.get("theme")
+        if theme and theme != self.theme_mgr.theme_name:
+            self.theme_mgr.apply(theme)
+            self._update_theme_button()
+            self._refresh_inline_colors()
+        # 每页条数（两个 model 同步；页码归零后重载）
+        page_size = int(s.get("page_size") or 300)
+        if page_size != self.video_model.page_size:
+            self.video_model._page_size = page_size
+            self.cover_model._page_size = page_size
+            self.video_model._current_page_no = 0
+            self.load_videos()
+        # 搜索防抖
+        self._search_timer.setInterval(int(s.get("search_debounce_ms") or 500))
+        # 默认仅在线
+        show_online = bool(s.get("show_online_only"))
+        if show_online != self.show_online_only:
+            self.show_online_only = show_online
+            self.btn_online.setChecked(show_online)
+            self.load_videos()
+        self.status_bar.showMessage("✅ 设置已应用", 3000)
+
+    def on_open_stats(self):
+        """打开库统计面板。"""
+        from pyside_v2.dialogs.stats import StatsDialog
+        StatsDialog(self).exec()
+
+    def on_open_duplicates(self):
+        """打开交互式去重复管理界面；关闭后刷新主列表。"""
+        from pyside_v2.dialogs.duplicates import DuplicatesDialog
+        DuplicatesDialog(self).exec()
+        self.load_videos()
+
+    def on_full_database_reset(self):
+        """完全重置数据库（batch_tasks 内置二次确认）。"""
+        from pyside_v2.actions.batch_tasks import full_database_reset
+        full_database_reset(self)
+
+    def select_video_by_id(self, video_id):
+        """在当前视图中定位视频行（供演员详情等跳转）。"""
+        if video_id is None:
+            return False
+        row = None
+        for r in range(self.video_model.rowCount()):
+            if self.video_model.video_id_at(r) == video_id:
+                row = r
+                break
+        if row is None:
+            self.status_bar.showMessage("目标不在当前页，请调整筛选或翻页", 4000)
+            return False
+        # 定位到封面墙（若当前在封面视图）
+        if self.view_stack.currentIndex() == 1:
+            self.cover_wall.select_video_by_id(video_id)
+        else:
+            self.video_table.selectRow(row)
+            self.video_table.scrollTo(self.video_model.index(row, 0))
+        self._current_video_id = video_id
+        self.load_detail(video_id)
+        return True
 
     def _open_current_dir(self):
         """在文件管理器中打开当前视频所在目录。"""
@@ -631,6 +785,30 @@ class MainWindow(QMainWindow):
             self._build_batch_menu(menu, ids, count)
 
         menu.exec(self.video_table.viewport().mapToGlobal(position))
+
+    def show_cover_context_menu(self, position):
+        """封面墙右键菜单。position 是 cover_wall viewport 相对坐标。"""
+        index = self.cover_wall.indexAt(position)
+        if not index.isValid():
+            return
+        ids = self.cover_wall.selected_video_ids()
+        vid_clicked = index.data(Qt.UserRole)
+        if vid_clicked not in ids:
+            self.cover_wall.setCurrentIndex(index)
+            ids = [vid_clicked]
+
+        menu = QMenu(self)
+        if len(ids) == 1:
+            self._build_single_menu(menu, ids[0])
+        else:
+            self._build_batch_menu(menu, ids, len(ids))
+        menu.exec(self.cover_wall.viewport().mapToGlobal(position))
+
+    def _active_view_selected_ids(self):
+        """当前可见视图（表格/封面墙）的选中 video_id 列表。"""
+        if self.view_stack.currentIndex() == 1:
+            return self.cover_wall.selected_video_ids()
+        return self.video_table.selected_video_ids()
 
     def _build_single_menu(self, menu, video_id):
         """单选右键菜单。"""
@@ -1160,6 +1338,10 @@ class MainWindow(QMainWindow):
         page_size = self.video_model.page_size
         offset = page_no * page_size
         self.video_model.set_page(rows, total, page_no)
+        # 封面墙同步同一份数据；视图可见时才懒加载缩略图
+        self.cover_model.set_page(rows)
+        if self.view_stack.currentIndex() == 1:
+            self._load_cover_thumbnails()
         start = offset + 1 if total > 0 else 0
         end = min(offset + len(rows), total)
         self.video_count_label.setText(f"{total} 个视频")
@@ -1167,6 +1349,30 @@ class MainWindow(QMainWindow):
             f"显示 {start}-{end} / 共 {total}（第 {page_no+1} 页）", 3000)
         max_page = max(1, (total - 1) // page_size + 1) if total > 0 else 1
         self.page_label.setText(f"{page_no + 1} / {max_page}")
+
+    # ---- 视图切换（表格 / 封面墙）----
+    def _switch_view(self, index):
+        """0=表格 1=封面墙；切换时保持选中并按需加载缩略图。"""
+        self.view_stack.setCurrentIndex(index)
+        self.btn_view_table.setChecked(index == 0)
+        self.btn_view_wall.setChecked(index == 1)
+        if index == 1 and self.video_model.rowCount() > 0:
+            self._load_cover_thumbnails()
+            # 同步当前选中到封面墙
+            if self._current_video_id is not None:
+                self.cover_wall.select_video_by_id(self._current_video_id)
+
+    def _load_cover_thumbnails(self):
+        """后台批量加载当前页缩略图 → cover_model。"""
+        ids = [self.video_model.video_id_at(r) for r in range(self.video_model.rowCount())]
+        ids = [i for i in ids if i is not None]
+        if not ids:
+            return
+        # 复用旧 worker 未结束时直接放弃（新页数据已变）
+        self._thumb_worker = ThumbnailWorker(self.core, ids, self)
+        self._track_worker(self._thumb_worker)
+        self._thumb_worker.pixmaps_ready.connect(self.cover_model.set_pixmaps)
+        self._thumb_worker.start()
 
     def _on_query_error(self, msg):
         self.status_bar.showMessage(f"❌ 查询失败: {msg}", 5000)
@@ -1206,16 +1412,19 @@ class MainWindow(QMainWindow):
         if not text:
             return
         kw = f"%{text}%"
-        # 子查询：title/file_name/tags LIKE + 演员名 LIKE
+        # 子查询：title/file_name/tags/javdb_code LIKE + 演员名 LIKE + javdb_title LIKE
         conditions.append(
             "v.id IN ("
             "SELECT id FROM videos WHERE title LIKE ? OR file_name LIKE ? OR tags LIKE ? "
+            "OR javdb_code LIKE ? "
             "UNION "
             "SELECT va.video_id FROM video_actors va JOIN actors a ON va.actor_id=a.id "
-            "WHERE a.name LIKE ?"
+            "WHERE a.name LIKE ? "
+            "UNION "
+            "SELECT j.video_id FROM javdb_info j WHERE j.javdb_title LIKE ?"
             ")"
         )
-        params.extend([kw, kw, kw, kw])
+        params.extend([kw, kw, kw, kw, kw, kw])
 
     def _apply_nav_filter(self, conditions, params):
         """侧栏导航 → 筛选条件。"""
@@ -1466,13 +1675,10 @@ class MainWindow(QMainWindow):
         """加载封面缩略图（thumbnail_data BLOB 或 JAVDB 封面）。"""
         try:
             from PySide6.QtGui import QPixmap
-            from PIL import Image
-            import io
-            self.core.cursor.execute("SELECT thumbnail_data FROM videos WHERE id=?", (video_id,))
-            row = self.core.cursor.fetchone()
-            if row and row[0]:
+            data = self.core.get_thumbnail(video_id)
+            if data:
                 pix = QPixmap()
-                pix.loadFromData(row[0])
+                pix.loadFromData(data)
                 if not pix.isNull():
                     self.cover_label.setPixmap(
                         pix.scaled(self.cover_label.size(), Qt.KeepAspectRatioByExpanding, Qt.SmoothTransformation)
@@ -1628,23 +1834,16 @@ class MainWindow(QMainWindow):
 
     @staticmethod
     def _fmt_size(size):
-        if not size: return "—"
-        s = float(size)
-        for u in ('B','KB','MB','GB','TB'):
-            if s < 1024: return f"{s:.2f} {u}"
-            s /= 1024
-        return f"{s:.2f} PB"
+        return format_file_size(size)
 
     @staticmethod
     def _fmt_duration(sec):
-        if not sec: return "—"
-        s = int(sec); h, r = divmod(s, 3600); m, s = divmod(r, 60)
-        return f"{h:02d}:{m:02d}:{s:02d}" if h else f"{m:02d}:{s:02d}"
+        # JAVDB 导入的时长是 "122 分鍾" 文本，统一走 formatters 归一
+        return format_duration(sec)
 
     @staticmethod
     def _fmt_dt(dt):
-        if not dt: return "—"
-        return str(dt)[:19].replace('T', ' ')
+        return format_datetime(dt)
 
     def on_video_double_clicked(self, video_id):
         if video_id is not None:
@@ -1657,7 +1856,20 @@ class MainWindow(QMainWindow):
         else:
             self.core.sort_column_name = col_key
             self.core.sort_reverse = False
+        self._sync_sort_indicator()
         self.load_videos()
+
+    def _sync_sort_indicator(self):
+        """表头显示当前排序方向箭头。"""
+        col_key = getattr(self.core, 'sort_column_name', None)
+        header = self.video_table.horizontalHeader()
+        if not col_key:
+            header.setSortIndicator(-1, Qt.AscendingOrder)
+            return
+        keys = self.video_model.column_keys
+        if col_key in keys:
+            order = Qt.DescendingOrder if self.core.sort_reverse else Qt.AscendingOrder
+            header.setSortIndicator(keys.index(col_key), order)
 
     def _on_star_clicked_in_list(self, video_id, star):
         """列表内点击星级列直接打分（对齐 Tk on_star_click）。"""
@@ -1914,13 +2126,17 @@ class MainWindow(QMainWindow):
     # ==================================================================
     def _play_video(self, video_id):
         try:
-            self.core.cursor.execute("SELECT file_path FROM videos WHERE id = ?", (video_id,))
-            result = self.core.cursor.fetchone()
-            if not result or not result[0]:
+            file_path = self.core.get_video_path(video_id)
+            if not file_path:
                 return
-            file_path = result[0]
             if not os.path.exists(file_path):
                 self.status_bar.showMessage(f"文件不存在: {file_path}", 4000)
+                return
+            # 设置里配置了播放器则优先使用
+            player = self.core_settings.get("player_path") if hasattr(self, "core_settings") else ""
+            if player:
+                import subprocess
+                subprocess.Popen([player, file_path])
                 return
             if platform.system() == 'Darwin':
                 import subprocess

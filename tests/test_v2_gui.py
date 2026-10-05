@@ -197,10 +197,13 @@ def test_dialogs():
     tag_dlg = TagManagerDialog(win)
     test("TagManagerDialog 创建成功", tag_dlg.list.count() >= 0,
          f"count={tag_dlg.list.count()}")
-    # 验证颜色用的是 color_hex 而非硬编码
+    # 验证颜色用的是 color_hex 而非硬编码：样式值应与当前主题 danger token 一致
+    # （亮色主题的 danger 恰好就是 #cf222e，不能用"不包含该 hex"来断言）
     style = tag_dlg.btn_del.styleSheet()
-    test("TagManager 删除按钮用主题色", style.startswith("color: #") and "#cf222e" not in style or
-         "cf222e" not in style.replace(" ", ""), f"style={style}")
+    from pyside_v2.theme import color_hex as _ch
+    _expected = _ch('danger')
+    test("TagManager 删除按钮用主题色", _expected in style,
+         f"style={style} 主题danger={_expected}")
     tag_dlg.close()
 
     # 文件夹管理

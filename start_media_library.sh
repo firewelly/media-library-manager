@@ -18,6 +18,7 @@ cd "$APP_DIR" || exit 1
 PYTHON_CMD=""
 PYTHON_PATHS=(
     "$HOME/anaconda3/bin/python3"
+    "/opt/homebrew/Caskroom/miniforge/base/bin/python3"   # 依赖最完整（requests/playwright/cv2/PySide6…）
     "/opt/homebrew/bin/python3"
     "/usr/local/bin/python3"
     "/usr/bin/python3"

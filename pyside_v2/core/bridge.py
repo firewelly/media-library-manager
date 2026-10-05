@@ -19,6 +19,13 @@ import os as _os
 try:
     from dotenv import load_dotenv as _load_dotenv
     _load_dotenv(_os.path.join(_os.path.dirname(_os.path.dirname(_os.path.dirname(_os.path.abspath(__file__)))), '.env'))
+    try:  # 密钥集中存放于 OneDrive MacMgt/config，项目内不留明文
+        import sys as _sys
+        _sys.path.insert(0, _os.path.dirname(_os.path.dirname(_os.path.dirname(_os.path.abspath(__file__)))))
+        from utils.secrets import load_keys as _load_keys
+        _load_keys()
+    except Exception:
+        pass
 except ImportError:
     _env_path = _os.path.join(_os.path.dirname(_os.path.dirname(_os.path.dirname(_os.path.abspath(__file__)))), '.env')
     if _os.path.exists(_env_path):
@@ -1736,6 +1743,14 @@ class MediaLibraryCore:
         )
         r = self.cursor.fetchone()
         return r[0] if r and r[0] else 0
+
+    def get_thumbnail(self, video_id):
+        """返回视频封面二进制(bytes)，无封面返回 None。"""
+        self.cursor.execute(
+            "SELECT thumbnail_data FROM videos WHERE id=?", (video_id,)
+        )
+        r = self.cursor.fetchone()
+        return r[0] if r and r[0] else None
 
 
 class GenericWorker(QThread):

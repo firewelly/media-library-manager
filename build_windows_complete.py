@@ -4,7 +4,7 @@
 完整的Windows构建脚本
 功能：
 1. 以 media_library.py 为主入口编译成 exe
-2. 打包所有依赖项（ffmpeg、msedgedriver等）
+2. 打包所有依赖项（ffmpeg等）
 3. 编译其他功能性 py 文件（排除 obs 文件夹）
 4. 输出到 release 文件夹
 """
@@ -135,9 +135,6 @@ def pyinstaller_cmd(script: Path, name: str, is_main=False):
         "coloredlogs",
         "yaml",
         "send2trash",
-        "selenium",
-        "selenium.webdriver",
-        "selenium.webdriver.edge",
         "jieba",
     ]
     
@@ -313,22 +310,6 @@ def find_ffprobe():
     return None
 
 
-def find_msedgedriver():
-    """查找 msedgedriver"""
-    candidates = [
-        Path(r"C:\bin\edgedriver_win64\msedgedriver.exe"),
-        Path(r"C:\Program Files (x86)\Microsoft\Edge\Application\msedgedriver.exe"),
-        Path(r"C:\Program Files\Microsoft\Edge\Application\msedgedriver.exe"),
-        Path(r"C:\edgedriver_win64\msedgedriver.exe"),
-        Path(r"C:\WebDriver\bin\msedgedriver.exe"),
-        Path(r"C:\selenium\msedgedriver.exe"),
-    ]
-    for p in candidates:
-        if p.exists():
-            return p
-    return None
-
-
 def copy_tools():
     """复制外部工具到 tools 目录"""
     print("[步骤] 复制外部工具...")
@@ -353,15 +334,6 @@ def copy_tools():
         tools_copied.append("ffprobe")
     else:
         print(f"  [警告] 未找到 ffprobe.exe")
-    
-    # 复制 msedgedriver
-    msedgedriver = find_msedgedriver()
-    if msedgedriver:
-        shutil.copy2(msedgedriver, TOOLS_DIR / "msedgedriver.exe")
-        print(f"  已复制: msedgedriver.exe")
-        tools_copied.append("msedgedriver")
-    else:
-        print(f"  [警告] 未找到 msedgedriver.exe")
     
     return tools_copied
 
@@ -440,7 +412,7 @@ def write_readme():
 【目录结构】
 - MediaLibrary.exe    主程序（双击启动）
 - bin/                程序文件和配置
-- tools/              外部工具（ffmpeg、msedgedriver等）
+- tools/              外部工具（ffmpeg等）
 - assets/             资源文件和文档
 
 【启动方式】
@@ -454,7 +426,6 @@ def write_readme():
 【依赖说明】
 本打包版本已包含以下依赖：
 - ffmpeg / ffprobe    视频处理工具
-- msedgedriver        Edge浏览器驱动（用于爬虫功能）
 
 【注意事项】
 1. 首次运行前请确保已正确配置 config.json

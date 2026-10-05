@@ -209,15 +209,9 @@ class VideoTableModel(QAbstractTableModel):
             return str(size)
 
     def _fmt_duration(self, seconds):
-        if not seconds:
-            return ""
-        try:
-            sec = int(seconds)
-            h, rem = divmod(sec, 3600)
-            m, s = divmod(rem, 60)
-            return f"{h:02d}:{m:02d}:{s:02d}" if h > 0 else f"{m:02d}:{s:02d}"
-        except Exception:
-            return str(seconds)
+        # 共享实现：兼容 "122 分鍾" 等 JAVDB 文本时长
+        from pyside_v2.core.formatters import format_duration
+        return format_duration(seconds, empty="")
 
     def _fmt_datetime(self, dt):
         if not dt:

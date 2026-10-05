@@ -1,357 +1,150 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-JAVDB演员作品信息爬虫工具
-============================
+JAVDB演员作品信息爬虫工具（Playwright 版）
+============================================
 
 功能描述:
 ---------
-本工具用于从JAVDB网站抓取指定演员的所有作品信息，包括：
+从 JAVDB（主站或镜像域名）抓取指定演员的所有作品信息，包括：
 - 作品标题、番号、发行日期、时长、评分
 - 演员信息、制作商、标签分类
 - 封面图片URL、磁力链接
 - 支持断点续爬、增量更新
-- 自动处理登录验证、反爬虫检测
+- 自动处理 Cloudflare 验证、年龄确认、登录检测
 - 智能过滤（单体作品+磁力链接）
 
 核心特性:
 ---------
-1. **UI模式爬虫**: 使用Selenium Edge驱动，模拟真实用户行为
-2. **智能反检测**: 随机延迟、鼠标移动、页面滚动等人类行为模拟
-3. **登录状态保持**: 支持复用Edge浏览器登录态，自动处理登录页
-4. **断点续爬**: CSV文件存在时自动续爬，避免重复抓取
-5. **灵活过滤**: 默认只抓取单体作品且有磁力链接，支持legacy模式
-6. **并发安全**: 专用用户数据目录，避免与系统Edge冲突
+1. **Playwright 驱动**: 使用 launch_persistent_context 持久化登录态，
+   与 javdb_crawler_single.py 共用 `.playwright_user_data/<browser>` 配置目录
+2. **固定登录态优先**: persisted 模式优先复用已保存的 cookie，fresh 模式为临时会话
+3. **反检测**: 注入 webdriver 隐藏脚本、随机延迟、滚动与鼠标移动模拟
+4. **Cloudflare 处理**: 自动等待验证通过，失败时可人工介入
+5. **断点续爬**: CSV 文件存在时自动续爬，避免重复抓取
+6. **灵活过滤**: 默认只抓取单体作品且有磁力链接（t=d,s），--filter 可自定义
 
-技术架构:
+CLI 兼容性说明:
 ---------
-- 基于Selenium WebDriver的UI自动化爬虫
-- 支持SOCKS5代理配置
-- 智能页面等待与元素定位
-- 多重异常处理与重试机制
-- CSV数据持久化存储
+- 保留了原 Selenium 版的 actor_url / --from / --to / --name / --csv /
+  --legacy-filter / --min-delay / --max-delay / --no-human-actions
+- 移除了 Edge 专属参数（--user-data-dir / --profile-directory /
+  --use-dedicated-profile），替换为 --browser / --profile-mode / --headless / --proxy
+- CSV 字段与原版完全一致，旧 CSV 可直接续爬
 
 依赖配置:
 ---------
-- Python 3.7+
-- selenium>=4.0.0
-- Edge浏览器与EdgeDriver
-- SOCKS5代理（可选）
+- Python 3.8+
+- playwright（pip install playwright && playwright install msedge 或 chromium）
+- SOCKS5代理（可选，访问 javdb.com 主站时默认启用，镜像域名默认直连）
 
-作者: AI Assistant
-创建时间: 2024
-更新记录: 持续维护中
+用法示例:
+---------
+    python javdb_actor_all.py "https://javdb571.com/actors/5Dya"                 # 全部单体+可下载
+    python javdb_actor_all.py "https://javdb.com/actors/abc123" --filter s       # 仅单体作品（含无磁力）
+    python javdb_actor_all.py "https://javdb.com/actors/abc123" --from 1 --to 5
+    python javdb_actor_all.py "https://javdb.com/actors/abc123" --login          # 手动登录保存登录态
 """
-
-# 从 JAVDB 抓取所有演员信息
 
 import os
 import re
 import sys
 import csv
-import json
 import time
 import random
-import subprocess
+import shutil
+import tempfile
+import argparse
 from urllib.parse import urljoin, urlparse, parse_qsl, urlencode, urlunparse
+from contextlib import suppress
 
-import socks
-import socket
-import platform
+try:
+    from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeoutError
+except Exception:
+    sync_playwright = None
+    PlaywrightTimeoutError = Exception
 
-from selenium import webdriver
-from selenium.webdriver.common.by import By
-from selenium.webdriver.support.ui import WebDriverWait
-from selenium.webdriver.support import expected_conditions as EC
-from selenium.webdriver.edge.options import Options
-from selenium.common.exceptions import TimeoutException
-from selenium.webdriver import ActionChains
-
-from config import SOCKS5_PROXY_HOST, SOCKS5_PROXY_PORT, BASE_URL, MIN_DELAY, MAX_DELAY, LOGIN_EMAIL, LOGIN_PASSWORD
-
-
-# ---------- Utils ----------
-def random_delay(min_seconds=MIN_DELAY, max_seconds=MAX_DELAY):
-    delay = random.uniform(min_seconds, max_seconds)
-    time.sleep(delay)
+from config import (
+    SOCKS5_PROXY_HOST, SOCKS5_PROXY_PORT, MIN_DELAY, MAX_DELAY,
+    LOGIN_EMAIL, LOGIN_PASSWORD, USE_SOCKS5_PROXY,
+    JAVDB_PROXY_DOMAIN,
+)
+from utils.runtime import runtime_path
 
 CRAWL_MIN_DELAY = MIN_DELAY
 CRAWL_MAX_DELAY = MAX_DELAY
 HUMAN_ACTIONS = True
-USE_SINGLE_ONLY = True  # 默认仅抓取单体且有磁性链接（t=d,s）；可通过 --legacy-filter 关闭
+DEFAULT_FILTER = "d,s"  # 默认单体且有磁力链接；--filter 可改为如 "s"、"d"、"a"
+RUN_BASE_URL = None     # 本次运行的基础URL（取自输入演员链接的域名）
 
-def human_pause(driver, min_seconds=None, max_seconds=None, do_actions=None):
-    ms = (min_seconds if min_seconds is not None else CRAWL_MIN_DELAY)
-    mx = (max_seconds if max_seconds is not None else CRAWL_MAX_DELAY)
-    random_delay(ms, mx)
-    if do_actions is None:
-        do_actions = HUMAN_ACTIONS
-    if not do_actions:
+DEFAULT_USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
+REQUEST_LANGUAGE = "zh-CN,zh;q=0.9,ja;q=0.8,en;q=0.7"
+
+ANTI_DETECT_SCRIPT = """
+    Object.defineProperty(navigator, 'webdriver', {get: () => undefined});
+    Object.defineProperty(navigator, 'languages', {get: () => ['zh-CN', 'zh', 'ja', 'en-US', 'en']});
+    Object.defineProperty(navigator, 'language', {get: () => 'zh-CN'});
+    Object.defineProperty(navigator, 'plugins', {get: () => [1, 2, 3, 4, 5]});
+    window.chrome = {runtime: {}, loadTimes: function() {}, csi: function() {}, app: {}};
+"""
+
+
+# ---------- Utils ----------
+def random_delay(min_seconds=None, max_seconds=None):
+    lo = min_seconds if min_seconds is not None else CRAWL_MIN_DELAY
+    hi = max_seconds if max_seconds is not None else CRAWL_MAX_DELAY
+    time.sleep(random.uniform(lo, hi))
+
+
+def human_pause(page, min_seconds=None, max_seconds=None, do_actions=None):
+    """页面停留 + 随机滚动/鼠标移动，模拟人类浏览行为"""
+    do = HUMAN_ACTIONS if do_actions is None else do_actions
+    random_delay(min_seconds, max_seconds)
+    if not do or page is None:
         return
     try:
-        total_h = driver.execute_script("return Math.max(document.body.scrollHeight, document.documentElement.scrollHeight)")
-        win_h = driver.execute_script("return window.innerHeight")
-        if total_h and win_h:
-            max_y = max(0, int(total_h) - int(win_h))
-            y = random.randint(0, max_y) if max_y > 0 else 0
-            driver.execute_script("window.scrollTo(0, arguments[0]);", y)
-        try:
-            ac = ActionChains(driver)
-            ac.move_by_offset(random.randint(-30, 30), random.randint(-20, 20)).perform()
-            ac.move_by_offset(random.randint(-30, 30), random.randint(-20, 20)).perform()
-        except Exception:
-            pass
+        viewport = page.viewport_size or {"width": 1280, "height": 800}
+        scroll_y = random.randint(100, 400)
+        page.evaluate(f"window.scrollBy(0, {scroll_y})")
+        random_delay(0.5, 1.2)
+        scroll_y2 = random.randint(-80, 150)
+        page.evaluate(f"window.scrollBy(0, {scroll_y2})")
+        x = random.randint(100, max(101, viewport["width"] - 100))
+        y = random.randint(100, max(101, viewport["height"] - 100))
+        page.mouse.move(x, y)
     except Exception:
         pass
+
 
 def get_results_dir():
-    """返回并确保存在的 results 目录"""
-    d = os.path.join(os.getcwd(), 'results')
-    try:
-        os.makedirs(d, exist_ok=True)
-    except Exception:
-        pass
+    d = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'results')
+    os.makedirs(d, exist_ok=True)
     return d
 
-def detect_default_edge_user_data_dir():
-    """自动检测本机 Edge 用户数据目录（优先 macOS），找不到则返回 None"""
-    try:
-        sysname = (platform.system() or '').lower()
-        if 'darwin' in sysname or 'mac' in sysname:
-            p = os.path.expanduser('~/Library/Application Support/Microsoft Edge')
-            return p if os.path.isdir(p) else None
-        if 'windows' in sysname:
-            base = os.environ.get('LOCALAPPDATA', '')
-            if base:
-                p = os.path.join(base, 'Microsoft', 'Edge', 'User Data')
-                return p if os.path.isdir(p) else None
-        # linux
-        p = os.path.expanduser('~/.config/microsoft-edge')
-        return p if os.path.isdir(p) else None
-    except Exception:
-        return None
-
-def detect_default_edge_profile_directory(user_data_dir):
-    """优先返回 'Default' 配置目录，若不存在则返回 None"""
-    try:
-        if not user_data_dir:
-            return None
-        d = os.path.join(user_data_dir, 'Default')
-        return 'Default' if os.path.isdir(d) else None
-    except Exception:
-        return None
-
-def is_edge_running():
-    """检测系统中是否有 Edge 正在运行，若在运行则返回 True"""
-    try:
-        sysname = (platform.system() or '').lower()
-        if 'darwin' in sysname or 'mac' in sysname:
-            # 优先使用 pgrep
-            try:
-                r = subprocess.run(['pgrep', '-f', 'Microsoft Edge'], capture_output=True)
-                if r.returncode == 0:
-                    return True
-            except Exception:
-                pass
-            try:
-                r = subprocess.run(['pgrep', '-f', 'msedge'], capture_output=True)
-                if r.returncode == 0:
-                    return True
-            except Exception:
-                pass
-            # 回退到 ps aux
-            try:
-                r = subprocess.run(['ps', 'aux'], capture_output=True, text=True)
-                s = (r.stdout or '').lower()
-                if 'microsoft edge' in s or 'msedge' in s:
-                    return True
-            except Exception:
-                pass
-        elif 'windows' in sysname:
-            try:
-                r = subprocess.run(['tasklist'], capture_output=True, text=True)
-                s = (r.stdout or '').lower()
-                if 'msedge.exe' in s or 'microsoftedge.exe' in s:
-                    return True
-            except Exception:
-                pass
-        else:
-            # linux 系统
-            for pat in ['msedge', 'microsoft-edge', 'Microsoft Edge']:
-                try:
-                    r = subprocess.run(['pgrep', '-f', pat], capture_output=True)
-                    if r.returncode == 0:
-                        return True
-                except Exception:
-                    pass
-            try:
-                r = subprocess.run(['ps', 'aux'], capture_output=True, text=True)
-                s = (r.stdout or '').lower()
-                if 'microsoft-edge' in s or 'msedge' in s:
-                    return True
-            except Exception:
-                pass
-    except Exception:
-        pass
-    return False
-
-def get_dedicated_edge_user_data_dir():
-    """返回并创建一个专用于 EdgeDriver 的用户数据目录，以持久化登录态。
-    该目录与系统 Edge 的用户数据隔离，可在 Edge 运行中使用而不冲突。
-    """
-    try:
-        base = os.path.dirname(os.path.abspath(__file__))
-        d = os.path.join(base, '.edge_driver_user_data')
-        os.makedirs(d, exist_ok=True)
-        return d
-    except Exception:
-        # 回退到当前工作目录
-        try:
-            d = os.path.join(os.getcwd(), '.edge_driver_user_data')
-            os.makedirs(d, exist_ok=True)
-            return d
-        except Exception:
-            return None
 
 def safe_filename(filename: str) -> str:
-    filename = re.sub(r'[<>:"/\\|?*]', '_', filename)
-    filename = filename.strip(' .')
-    return filename[:200] if len(filename) > 200 else filename
+    return re.sub(r'[\\/:*?"<>|\s]+', '_', str(filename)).strip('._') or 'actor'
 
 
 def extract_actor_id_from_url(url: str):
+    m = re.search(r'/actors/([A-Za-z0-9]+)', url or '')
+    return m.group(1) if m else None
+
+
+def url_origin(url: str) -> str:
     try:
-        path = urlparse(url).path or ""
-        m = re.search(r"/actors/([^/\?&#]+)", path)
-        return m.group(1) if m else None
+        p = urlparse(url)
+        return f"{p.scheme or 'https'}://{p.netloc}"
     except Exception:
-        return None
+        return url
 
 
-def setup_driver(user_data_dir: str = None, profile_directory: str = None):
-    """
-    初始化并返回一个带代理的Edge WebDriver
-    
-    功能说明:
-    ---------
-    1. 配置Edge浏览器选项（代理、用户数据目录、无头模式等）
-    2. 设置SOCKS5代理（从config.py读取）
-    3. 配置反检测参数（禁用自动化标识）
-    4. 初始化Edge WebDriver实例
-    
-    参数说明:
-    ---------
-    user_data_dir : str, 可选
-        Edge用户数据目录路径，None则使用系统默认
-    profile_directory : str, 可选
-        Edge配置目录名，默认"Default"
-    
-    返回:
-    ------
-    selenium.webdriver.Edge
-        已配置的Edge驱动实例
-    
-    配置详情:
-    ---------
-    - 代理设置: 读取config.py中的SOCKS5代理配置
-    - 用户数据: 支持自定义用户数据目录保持登录状态
-    - 反检测: 禁用navigator.webdriver标识，模拟真实浏览器
-    - 窗口大小: 最大化启动，禁用信息栏
-    - 驱动路径: 自动检测系统平台并选择对应EdgeDriver
-    
-    异常处理:
-    ---------
-    - 自动尝试多种启动方式（代理/无代理/服务模式）
-    - 处理驱动初始化失败异常
-    - 提供详细的错误信息
-    
-    使用示例:
-    ---------
-    >>> # 基础用法
-    >>> driver = setup_driver()
-    >>> driver.get("https://javdb.com")
-    >>> 
-    >>> # 使用专用用户数据目录
-    >>> driver = setup_driver(user_data_dir="/path/to/edge/data")
-    
-    注意事项:
-    ---------
-    - 需要安装Edge浏览器和EdgeDriver
-    - SOCKS5代理需要在config.py中配置
-    - 强制UI模式（非无头）以通过反检测
-    - 建议定期清理用户数据目录避免冲突
-    """
-    """Setup MS Edge browser driver and FORCE UI mode (non-headless).
-    Optionally attach to an existing Edge user profile to help pass security checks.
-    """
-    def build_options(use_proxy=True):
-        opts = Options()
-        opts.page_load_strategy = 'eager'
-        opts.add_argument('--no-sandbox')
-        opts.add_argument('--disable-dev-shm-usage')
-        opts.add_argument('--disable-blink-features=AutomationControlled')
-        opts.add_experimental_option("excludeSwitches", ["enable-automation"])
-        opts.add_experimental_option('useAutomationExtension', False)
-        opts.add_argument('--remote-allow-origins=*')
-        opts.add_argument('--disable-gpu')
-        opts.add_argument('--start-maximized')
-        opts.add_argument('--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36')
-        # Attach to real Edge user profile to reuse cookies and human signals
-        if user_data_dir:
-            opts.add_argument(f"--user-data-dir={user_data_dir}")
-        if profile_directory:
-            opts.add_argument(f"--profile-directory={profile_directory}")
-        if use_proxy:
-            opts.add_argument(f'--proxy-server=socks5://{SOCKS5_PROXY_HOST}:{SOCKS5_PROXY_PORT}')
-            opts.add_argument('--proxy-bypass-list=<-loopback>')
-        return opts
-
-    system = platform.system().lower()
-    if system == "windows":
-        default_driver_path = r"C:\\bin\\edgedriver_win64\\msedgedriver.exe"
-    elif system == "darwin":
-        machine = platform.machine().lower()
-        default_driver_path = "/usr/local/bin/edgedriver_mac64_m1/msedgedriver" if machine in ['arm64', 'aarch64'] else "/usr/local/bin/edgedriver_mac64/msedgedriver"
-    elif system == "linux":
-        default_driver_path = "/usr/local/bin/edgedriver_linux64/msedgedriver"
-    else:
-        default_driver_path = "/usr/local/bin/edgedriver_mac64/msedgedriver"
-
-    user_driver_path = os.path.expanduser("~/bin/edgedriver_mac64_m1/msedgedriver")
-    driver_path = user_driver_path if os.path.exists(user_driver_path) else default_driver_path
-
-    last_error = None
-    attempts = [
-        {"proxy": True,  "use_service": True,  "label": "ui+proxy+service"},
-        {"proxy": False, "use_service": True,  "label": "ui+no-proxy+service"},
-        {"proxy": False, "use_service": False, "label": "ui+no-proxy+PATH"},
-    ]
-    for att in attempts:
-        try:
-            print(f"尝试启动Edge驱动（{att['label']}），路径: {driver_path}")
-            opts = build_options(use_proxy=att["proxy"]) 
-            if att["use_service"] and os.path.exists(driver_path):
-                service = webdriver.edge.service.Service(driver_path)
-                driver = webdriver.Edge(service=service, options=opts)
-            else:
-                driver = webdriver.Edge(options=opts)
-            driver.set_page_load_timeout(60)
-            driver.set_script_timeout(30)
-            try:
-                driver.execute_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
-            except Exception:
-                pass
-            print("Edge驱动启动成功（UI模式）")
-            return driver
-        except Exception as e:
-            last_error = e
-            print(f"启动失败（{att['label']}）: {e}")
-            time.sleep(1)
-
-    print(f"MS Edge driver startup failed: {last_error}")
-    print("Please make sure MS Edge browser and EdgeDriver are installed")
-    print("You can run update_msedge_driver.py to install the driver")
-    return None
+def guess_use_proxy(actor_url: str) -> bool:
+    """javdb.com 主站默认走代理，镜像域名（javdbNNN.com 等）默认直连"""
+    host = (urlparse(actor_url).netloc or '').lower()
+    if host.startswith('www.'):
+        host = host[4:]
+    return host == JAVDB_PROXY_DOMAIN
 
 
 def find_best_magnet_link(magnet_links):
@@ -366,163 +159,617 @@ def find_best_magnet_link(magnet_links):
     return magnet_links[0] if magnet_links else None
 
 
-def parse_detail(driver, detail_url, max_retries=2):
+# ---------- Playwright session ----------
+def setup_playwright_session(use_proxy=True, headless=False, browser_name="msedge", profile_mode="persisted"):
+    """启动 Playwright 持久化会话（登录态保存在 .playwright_user_data/<browser>）"""
+    if sync_playwright is None:
+        print("Playwright 未安装，请先: pip install playwright && playwright install msedge", file=sys.stderr)
+        return None
+    proxy = {"server": f"socks5://{SOCKS5_PROXY_HOST}:{SOCKS5_PROXY_PORT}"} if use_proxy else None
+    if profile_mode == "fresh":
+        parent = runtime_path(".playwright_user_data_fresh", browser_name)
+        os.makedirs(parent, exist_ok=True)
+        user_data_dir = tempfile.mkdtemp(prefix="pw_", dir=parent)
+        cleanup_user_data_dir = user_data_dir
+    else:
+        user_data_dir = runtime_path(".playwright_user_data", browser_name)
+        os.makedirs(user_data_dir, exist_ok=True)
+        cleanup_user_data_dir = None
+    launch_kwargs = {
+        "headless": headless,
+        "proxy": proxy,
+        "locale": "zh-CN",
+        "user_agent": DEFAULT_USER_AGENT,
+        "extra_http_headers": {"Accept-Language": REQUEST_LANGUAGE},
+        "viewport": {"width": 1280, "height": 800},
+        "args": [
+            "--disable-blink-features=AutomationControlled",
+            "--disable-infobars",
+            "--no-sandbox",
+            "--disable-dev-shm-usage",
+            "--lang=zh-CN",
+        ],
+    }
+    pw = None
+    context = None
+    try:
+        pw = sync_playwright().start()
+        if browser_name == "msedge":
+            try:
+                context = pw.chromium.launch_persistent_context(user_data_dir, channel="msedge", **launch_kwargs)
+            except Exception:
+                context = pw.chromium.launch_persistent_context(user_data_dir, **launch_kwargs)
+        elif browser_name == "firefox":
+            ff_kwargs = dict(launch_kwargs)
+            ff_kwargs.pop("viewport", None)
+            ff_kwargs["firefox_user_prefs"] = {"intl.accept_languages": "zh-CN,zh,ja,en-US,en"}
+            context = pw.firefox.launch_persistent_context(user_data_dir, **ff_kwargs)
+        else:
+            context = pw.chromium.launch_persistent_context(user_data_dir, **launch_kwargs)
+        page = context.pages[0] if context.pages else context.new_page()
+        page.set_default_timeout(30000)
+        page.add_init_script(ANTI_DETECT_SCRIPT)
+        return {
+            "pw": pw,
+            "context": context,
+            "page": page,
+            "browser_name": browser_name,
+            "profile_mode": profile_mode,
+            "cleanup_user_data_dir": cleanup_user_data_dir,
+        }
+    except Exception as e:
+        print(f"Playwright 启动失败({browser_name}): {e}", file=sys.stderr)
+        with suppress(Exception):
+            if context:
+                context.close()
+        with suppress(Exception):
+            if pw:
+                pw.stop()
+        return None
+
+
+def close_playwright_session(session):
+    if not session:
+        return
+    with suppress(Exception):
+        session["context"].close()
+    with suppress(Exception):
+        session["pw"].stop()
+    cleanup_path = session.get("cleanup_user_data_dir")
+    if cleanup_path:
+        with suppress(Exception):
+            shutil.rmtree(cleanup_path, ignore_errors=True)
+
+
+# ---------- 页面状态检测（Cloudflare / 年龄确认 / 登录） ----------
+def is_age_confirmation_html(page_source: str) -> bool:
+    if not page_source:
+        return False
+    s = page_source.lower()
+    age_markers = [
+        "您必須已達", "你必须已达", "法定年齡", "法定年龄",
+        "you must be of legal age", "age verification",
+        "18歲", "18岁", "years of age", "confirm you are of legal age",
+    ]
+    return sum(1 for m in age_markers if m in s) >= 2
+
+
+def is_age_confirmation_pw(page):
+    try:
+        return is_age_confirmation_html(page.content() or "")
+    except Exception:
+        return False
+
+
+def dismiss_age_confirmation_pw(page, timeout_seconds=10):
+    selectors = [
+        "a.button.is-primary", "button.button.is-primary",
+        "a.button.is-large", "button.button.is-large",
+        "a.button.is-success", "button.button.is-success",
+        "a.button:has-text('是')", "button.button:has-text('是')",
+        "button.btn-primary", "a.btn-primary",
+        "button:has-text('YES')", "button:has-text('Yes')",
+        "a:has-text('YES')", "a:has-text('Yes')",
+        ".confirm-age-btn", "#confirm-age",
+    ]
+    for sel in selectors:
+        try:
+            loc = page.locator(sel).first
+            if loc.count() > 0 and loc.is_visible():
+                loc.click()
+                random_delay(1.5, 2.5)
+                if not is_age_confirmation_pw(page):
+                    print(f"已自动点击年龄确认按钮: {sel}")
+                    return True
+        except Exception:
+            continue
+    return False
+
+
+def is_cloudflare_challenge_html(page_source: str, title: str = "") -> bool:
+    if not page_source:
+        return False
+    if is_age_confirmation_html(page_source):
+        return False
+    t = (title or "").lower()
+    s = page_source.lower()
+    strong_markers = [
+        "checking your browser before accessing",
+        "attention required!",
+        "cf-browser-verification",
+    ]
+    if any(marker in s for marker in strong_markers):
+        return True
+    secondary_markers = ["cf-challenge", "challenge-platform", "turnstile", "cf_chl_", "cf-chl-", "/cdn-cgi/challenge-platform/"]
+    if any(marker in s for marker in secondary_markers):
+        cf_page_markers = ["checking your browser", "just a moment", "please stand by", "enable javascript", "ray id"]
+        if any(m in s for m in cf_page_markers):
+            return True
+    title_markers = ["cloudflare", "just a moment", "checking your browser", "attention required!"]
+    body_markers = ["just a moment", "checking your browser", "please stand by, while we are checking your browser"]
+    if any(marker in t for marker in title_markers) and any(marker in s for marker in body_markers):
+        return True
+    turnstile_markers = ["turnstile", "cf-turnstile", "data-sitekey", "challenges.cloudflare.com"]
+    if any(marker in s for marker in turnstile_markers):
+        return True
+    return False
+
+
+def is_cloudflare_challenge_pw(page):
+    try:
+        return is_cloudflare_challenge_html(page.content() or "", page.title() or "")
+    except Exception:
+        return False
+
+
+def is_cloudflare_verification_failed(page):
+    try:
+        title = (page.title() or "").lower()
+        s = (page.content() or "").lower()
+        failed_markers = [
+            "verification failed", "please refresh the page", "verify you are human",
+            "error 1020", "access denied", "sorry, you have been blocked",
+        ]
+        return any(m in s or m in title for m in failed_markers)
+    except Exception:
+        return False
+
+
+def wait_for_cloudflare_pass(page, base_url=None, max_retries=3, retry_delay=300):
+    """等待 Cloudflare 验证通过（自动轮询 + 刷新 + 首页恢复）"""
+    for attempt in range(max_retries):
+        if is_cloudflare_verification_failed(page):
+            print(f"检测到Cloudflare验证失败，等待{retry_delay}秒后重试 (第{attempt+1}/{max_retries}次)...", file=sys.stderr)
+            random_delay(retry_delay, retry_delay + 60)
+            with suppress(Exception):
+                page.reload(wait_until="domcontentloaded", timeout=30000)
+            random_delay(10, 20)
+            if not is_cloudflare_challenge_pw(page):
+                print("刷新后验证通过", file=sys.stderr)
+                return True
+        elif not is_cloudflare_challenge_pw(page):
+            return True
+        else:
+            print(f"等待Cloudflare自动验证 (第{attempt+1}/{max_retries}次)...", file=sys.stderr)
+            for _ in range(30):  # 最多等90秒
+                if not is_cloudflare_challenge_pw(page):
+                    print("自动验证通过", file=sys.stderr)
+                    return True
+                time.sleep(3)
+            if is_cloudflare_challenge_pw(page):
+                print(f"自动验证超时，等待{retry_delay}秒后重试...", file=sys.stderr)
+                random_delay(retry_delay, retry_delay + 60)
+                with suppress(Exception):
+                    page.reload(wait_until="domcontentloaded", timeout=30000)
+                random_delay(10, 20)
+    if base_url:
+        print("尝试导航到首页重新获取cookie...", file=sys.stderr)
+        try:
+            page.goto(base_url, wait_until="domcontentloaded", timeout=30000)
+            random_delay(60, 120)
+            if not is_cloudflare_challenge_pw(page):
+                print("首页导航成功，验证通过", file=sys.stderr)
+                return True
+        except Exception as e:
+            print(f"首页导航失败: {e}", file=sys.stderr)
+    return False
+
+
+def is_logged_in_pw(page):
+    """导航栏出现登出/用户入口视为已登录"""
+    try:
+        if page.locator("a[href*='sign_out']").count() > 0:
+            return True
+        for text in ["登出", "ログアウト", "Sign Out"]:
+            if page.locator(f"a:has-text('{text}')").count() > 0:
+                return True
+        if page.locator(".navbar-item.has-dropdown .navbar-link img.avatar, a[href*='/users/']").count() > 0:
+            return True
+        return False
+    except Exception:
+        return False
+
+
+def is_login_page_pw(page):
+    try:
+        url = (page.url or '').lower()
+        if 'login' in url or '/sign_in' in url:
+            return True
+        has_email = page.locator('input[type="email"], input[name="email"]').count() > 0
+        has_pwd = page.locator('input[type="password"], input[name="password"]').count() > 0
+        return has_email and has_pwd
+    except Exception:
+        return False
+
+
+def handle_login_pw(page):
+    """尝试用 config.py 中的账号自动填充登录表单"""
+    if not (LOGIN_EMAIL and LOGIN_PASSWORD):
+        print("未配置 LOGIN_EMAIL/LOGIN_PASSWORD，跳过自动填充，请手工登录")
+        return False
+    try:
+        email = page.locator('input[type="email"], input[name="email"]').first
+        if email.count() == 0:
+            return False
+        email.fill(LOGIN_EMAIL)
+        random_delay(1, 2)
+        page.locator('input[type="password"], input[name="password"]').first.fill(LOGIN_PASSWORD)
+        random_delay(1, 2)
+        page.locator('button[type="submit"], input[type="submit"], .btn-primary').first.click()
+        print("已提交登录表单，等待跳转/人工验证…")
+        random_delay(3, 5)
+        return True
+    except Exception as e:
+        print(f"登录处理异常: {e}")
+        return False
+
+
+def wait_for_manual_login(page, seconds=300, reopen_url=None):
+    """等待人工完成登录/验证：按回车立即继续，否则最多等待 seconds 秒"""
+    import select
+    print(f"需要人工介入（登录/验证）。按回车立即继续，或最多等待 {int(seconds)} 秒…")
+    try:
+        rlist, _, _ = select.select([sys.stdin], [], [], seconds)
+        if rlist:
+            _ = sys.stdin.readline()
+            print("检测到回车，继续执行…")
+        else:
+            print("等待超时，继续执行…")
+    except Exception:
+        time.sleep(seconds)
+    if reopen_url:
+        try:
+            print(f"人工处理完成，重新打开页面：{reopen_url}")
+            page.goto(reopen_url, wait_until="domcontentloaded", timeout=45000)
+            human_pause(page, 2, 4)
+        except Exception:
+            pass
+
+
+def goto_ready(page, url, timeout_ms=45000):
+    """导航到 URL 并依次处理超时/年龄确认/Cloudflare/登录，返回页面是否可用"""
+    for attempt in range(2):
+        try:
+            page.goto(url, wait_until="domcontentloaded", timeout=timeout_ms)
+        except PlaywrightTimeoutError:
+            print(f"页面加载超时(第{attempt+1}次): {url}")
+        except Exception as e:
+            print(f"导航失败: {e}")
+        human_pause(page)
+        if is_age_confirmation_pw(page):
+            dismiss_age_confirmation_pw(page)
+        if is_cloudflare_challenge_pw(page):
+            print("检测到 Cloudflare 验证页，等待通过…")
+            if not wait_for_cloudflare_pass(page, base_url=RUN_BASE_URL):
+                return False
+        if is_cloudflare_challenge_pw(page):
+            continue
+        if is_login_page_pw(page) and not is_logged_in_pw(page):
+            print("检测到登录页，尝试自动填充后等待人工验证…")
+            handle_login_pw(page)
+            wait_for_manual_login(page, seconds=300, reopen_url=url)
+            if is_login_page_pw(page):
+                print("提示：仍未登录，将以游客身份继续（部分内容可能不可见）")
+        return True
+    return False
+
+
+def do_manual_login(base_url):
+    """打开持久会话浏览器，等待用户手动登录；登录态保存到 persisted 配置目录"""
+    session = setup_playwright_session(use_proxy=guess_use_proxy(base_url), headless=False,
+                                       browser_name="msedge", profile_mode="persisted")
+    if not session:
+        print("无法启动持久会话浏览器", file=sys.stderr)
+        return False
+    page = session["page"]
+    try:
+        page.goto(base_url, wait_until="domcontentloaded", timeout=60000)
+        if is_age_confirmation_pw(page):
+            dismiss_age_confirmation_pw(page)
+        if is_logged_in_pw(page):
+            print("当前持久会话已是登录状态，无需重新登录")
+            return True
+        print(f"请在打开的浏览器窗口中登录 {base_url}，完成后按回车继续…")
+        try:
+            input()
+        except EOFError:
+            time.sleep(300)
+        if is_logged_in_pw(page):
+            print("登录成功，登录态已保存到持久会话目录（.playwright_user_data/msedge）")
+            return True
+        print("未检测到登录态，请检查是否登录成功")
+        return False
+    finally:
+        close_playwright_session(session)
+
+
+# ---------- URL 构造 ----------
+def build_page_url(actor_url, page_num, filter_val=DEFAULT_FILTER):
+    """构造分页URL：第1页强制加入 t=<filter> 与 sort_type=0，后续页追加 page=N"""
+    if page_num <= 1:
+        try:
+            parsed = urlparse(actor_url)
+            query_pairs = dict(parse_qsl(parsed.query, keep_blank_values=True))
+            query_pairs['t'] = filter_val
+            query_pairs['sort_type'] = '0'
+            new_query = urlencode(query_pairs)
+            return urlunparse((parsed.scheme, parsed.netloc, parsed.path, parsed.params, new_query, parsed.fragment))
+        except Exception:
+            sep = '&' if '?' in actor_url else '?'
+            return f"{actor_url}{sep}t={filter_val}&sort_type=0"
+    if '?' in actor_url:
+        return f"{actor_url}&page={page_num}&sort_type=0&t={filter_val}"
+    return f"{actor_url}?page={page_num}&sort_type=0&t={filter_val}"
+
+
+# ---------- 列表页解析 ----------
+def extract_page_video_links(page):
+    """从当前列表页提取视频详情链接"""
+    selectors = [
+        'div.item a.box[href*="/v/"]',
+        'div.item a[href*="/v/"]',
+        '.movie-list .item a[href*="/v/"]',
+        'a[href*="/v/"]',
+    ]
+    for sel in selectors:
+        try:
+            hrefs = page.eval_on_selector_all(sel, "els => els.map(e => e.href)")
+            hrefs = [h for h in hrefs if h and '/v/' in h]
+            if hrefs:
+                return hrefs
+        except Exception:
+            continue
+    return []
+
+
+def collect_actor_video_links(page, actor_url, start_page=1, end_page=None, filter_val=DEFAULT_FILTER):
+    """
+    流式爬取演员所有视频链接（Playwright版）
+
+    1. 构建分页URL，支持 t=<filter> 过滤（默认单体+可下载）
+    2. 逐页解析视频列表，提取详情页链接
+    3. 连续两页无新链接视为末页
+    """
+    links = []
+    seen = set()
+    empty_streak = 0
+    page_num = start_page
+    while True:
+        url = build_page_url(actor_url, page_num, filter_val)
+        print(f"访问第{page_num}页: {url}")
+        if not goto_ready(page, url):
+            print("页面不可用，结束翻页")
+            break
+        try:
+            page.wait_for_selector('div.item a[href*="/v/"], a[href*="/v/"]', timeout=20000)
+        except PlaywrightTimeoutError:
+            pass
+        except Exception:
+            pass
+        hrefs = extract_page_video_links(page)
+        new_links = [h for h in hrefs if h not in seen]
+        if not new_links:
+            empty_streak += 1
+            print(f"第{page_num}页无新增链接（连续{empty_streak}次）")
+            if empty_streak >= 2:
+                print("已到末页，结束翻页")
+                break
+            page_num += 1
+            continue
+        empty_streak = 0
+        seen.update(new_links)
+        links.extend(new_links)
+        print(f"第{page_num}页新增{len(new_links)}个视频链接，总计{len(links)}")
+        if end_page is not None and page_num >= end_page:
+            break
+        page_num += 1
+    return links
+
+
+# ---------- 详情页解析 ----------
+def _text_first(page, css_list, xpath_list=()):
+    for sel in list(css_list) + [f"xpath={xp}" for xp in xpath_list]:
+        try:
+            loc = page.locator(sel)
+            if loc.count() > 0:
+                txt = loc.first.inner_text().strip()
+                if txt:
+                    return txt
+        except Exception:
+            continue
+    return 'N/A'
+
+
+def _texts_by_xpath(page, xpaths):
+    for xp in xpaths:
+        try:
+            loc = page.locator(f"xpath={xp}")
+            if loc.count() > 0:
+                txt = loc.first.inner_text().strip()
+                if txt:
+                    return txt
+        except Exception:
+            continue
+    return 'N/A'
+
+
+def _parse_actors(page):
+    """提取演员（优先识别新版 actor-female 标记，兼容旧版 ♀ 符号）"""
+    actors = []
+    sec_xpaths = [
+        "//strong[text()='演員:']/following-sibling::span[1]",
+        "//strong[text()='演員']/following-sibling::span[1]",
+        "//strong[text()='Actors:']/following-sibling::span[1]",
+    ]
+    for xp in sec_xpaths:
+        try:
+            sec = page.locator(f"xpath={xp}")
+            if sec.count() == 0:
+                continue
+            links = sec.first.locator("a")
+            for i in range(links.count()):
+                a = links.nth(i)
+                nm = (a.inner_text() or '').strip()
+                lk = a.get_attribute('href') or ''
+                try:
+                    # 新版结构: 演员链接自身或其父元素带 actor-female class
+                    is_female = 'actor-female' in (a.get_attribute('class') or '').split()
+                    if not is_female:
+                        try:
+                            pcl = a.locator("xpath=..").get_attribute('class') or ''
+                            is_female = 'actor-female' in pcl.split()
+                        except Exception:
+                            pass
+                    if not is_female:
+                        # 旧版结构: 链接后跟 <strong class="symbol female">♀</strong>
+                        fem = a.locator("xpath=./following-sibling::strong[contains(@class,'female')][1]")
+                        if fem.count() == 0 or '♀' not in (fem.first.inner_text() or ''):
+                            continue
+                except Exception:
+                    continue
+                if nm:
+                    actors.append({'name': nm, 'link': urljoin(RUN_BASE_URL or '', lk)})
+            if actors:
+                break
+        except Exception:
+            continue
+    return actors
+
+
+def _parse_magnets(page):
+    magnets = []
+    try:
+        loc = page.locator(".magnet-links [data-clipboard-text^='magnet:?xt']")
+        for i in range(loc.count()):
+            v = loc.nth(i).get_attribute('data-clipboard-text')
+            if v:
+                magnets.append(v)
+    except Exception:
+        pass
+    if not magnets:
+        try:
+            hrefs = page.eval_on_selector_all("a[href^='magnet:?']", "els => els.map(e => e.href)")
+            magnets = [h for h in hrefs if h]
+        except Exception:
+            pass
+    if not magnets:
+        try:
+            loc = page.locator("xpath=//a[contains(text(),'Copy')][@data-clipboard-text]")
+            for i in range(loc.count()):
+                v = loc.nth(i).get_attribute('data-clipboard-text')
+                if v:
+                    magnets.append(v)
+        except Exception:
+            pass
+    # 去重并保持顺序
+    seen = set()
+    uniq = []
+    for m in magnets:
+        if m not in seen:
+            seen.add(m)
+            uniq.append(m)
+    return uniq
+
+
+def parse_detail(page, detail_url, max_retries=2):
+    """解析单个视频详情页，返回字段字典；安全验证/不可用时返回 None"""
     for attempt in range(max_retries):
         try:
-            driver.get(detail_url)
-            WebDriverWait(driver, 15).until(
-                EC.presence_of_element_located((By.CSS_SELECTOR, '.container, #content, body'))
-            )
-            human_pause(driver)
-
-            # 如果仍是安全验证页面，则不返回数据以避免写入CSV
+            if not goto_ready(page, detail_url):
+                return None
             try:
-                if is_security_verification_page(driver):
-                    print("仍为安全验证页面，跳过该详情")
-                    return None
+                page.wait_for_selector('.container, #content, .panel, h2.title', timeout=15000)
             except Exception:
                 pass
+            human_pause(page)
 
-            title = 'N/A'
-            for selector in ['h2.title', 'h1.title', 'h2', 'h1', '.title']:
-                try:
-                    el = driver.find_element(By.CSS_SELECTOR, selector)
-                    if el and el.text:
-                        title = el.text.strip()
-                        break
-                except:
-                    continue
+            title = _text_first(page, ['h2.title', 'h1.title', '.current-title', 'h2', 'h1', '.title'])
             if title == 'N/A':
                 raise ValueError("Could not parse title")
 
-            video_id = 'N/A'
-            for xp in [
+            video_id = _texts_by_xpath(page, [
                 "//strong[text()='番號:']/following-sibling::span[1]",
                 "//strong[text()='識別碼:']/following-sibling::span[1]",
                 "//strong[text()='ID:']/following-sibling::span[1]",
-            ]:
-                try:
-                    el = driver.find_element(By.XPATH, xp)
-                    video_id = el.text.strip()
-                    break
-                except:
-                    continue
+                "//p[contains(@class,'video-id')]/strong[1]",
+                "//span[contains(@class,'video-id')][1]",
+            ])
 
-            release_date = 'N/A'
-            for xp in [
+            release_date = _texts_by_xpath(page, [
                 "//strong[text()='日期:']/following-sibling::span[1]",
                 "//strong[text()='發行日期:']/following-sibling::span[1]",
                 "//strong[text()='Date:']/following-sibling::span[1]",
-            ]:
-                try:
-                    el = driver.find_element(By.XPATH, xp)
-                    release_date = el.text.strip()
-                    break
-                except:
-                    continue
+                "//span[@class='release-date'][1]",
+            ])
 
-            duration = 'N/A'
-            for xp in [
+            duration = _texts_by_xpath(page, [
                 "//strong[text()='時長:']/following-sibling::span[1]",
                 "//strong[text()='Duration:']/following-sibling::span[1]",
-            ]:
-                try:
-                    el = driver.find_element(By.XPATH, xp)
-                    duration = el.text.strip()
-                    break
-                except:
-                    continue
+                "//span[@class='video-duration'][1]",
+            ])
 
             rating = 'N/A'
-            for xp in [
+            rating_txt = _texts_by_xpath(page, [
                 "//strong[text()='評分:']/following-sibling::span[1]",
                 "//strong[text()='Rating:']/following-sibling::span[1]",
-            ]:
-                try:
-                    el = driver.find_element(By.XPATH, xp)
-                    txt = el.text.strip()
-                    m = re.search(r'(\d+\.\d+)', txt)
-                    rating = m.group(1) if m else txt
-                    break
-                except:
-                    continue
+                "//span[contains(@class,'score')][1]",
+            ])
+            if rating_txt != 'N/A':
+                m = re.search(r'(\d+(?:\.\d+)?)', rating_txt)
+                rating = m.group(1) if m else rating_txt
 
             tags = []
-            for xp in [
-                "//strong[text()='類別:']/following-sibling::span[1]/a",
-                "//strong[text()='Tags:']/following-sibling::span[1]/a",
-            ]:
-                try:
-                    els = driver.find_elements(By.XPATH, xp)
-                    tags = [e.text.strip() for e in els]
-                    if tags:
-                        break
-                except:
-                    continue
-
-            actors = []
             try:
-                sec = driver.find_element(By.XPATH, "//strong[text()='演員:']/following-sibling::span[1]")
-                links = sec.find_elements(By.TAG_NAME, "a")
-                for a in links:
-                    nm = a.text.strip()
-                    lk = a.get_attribute('href')
-                    try:
-                        fem = a.find_element(By.XPATH, "./following-sibling::strong[@class='symbol female'][1]")
-                        if fem and '♀' in fem.text:
-                            actors.append({'name': nm, 'link': lk})
-                    except:
-                        continue
-            except:
-                try:
-                    links = driver.find_elements(By.XPATH, "//strong[text()='Actors:']/following-sibling::span[1]//a")
-                    for a in links:
-                        nm = a.text.strip()
-                        lk = a.get_attribute('href')
-                        try:
-                            fem = a.find_element(By.XPATH, "./following-sibling::strong[@class='symbol female'][1]")
-                            if fem and '♀' in fem.text:
-                                actors.append({'name': nm, 'link': lk})
-                        except:
-                            continue
-                except:
-                    pass
+                loc = page.locator("xpath=//strong[text()='類別:']/following-sibling::span[1]/a | //strong[text()='Tags:']/following-sibling::span[1]/a")
+                for i in range(loc.count()):
+                    t = (loc.nth(i).inner_text() or '').strip()
+                    if t:
+                        tags.append(t)
+            except Exception:
+                pass
 
-            studio = 'N/A'
-            for xp in [
+            actors = _parse_actors(page)
+
+            studio = _texts_by_xpath(page, [
                 "//strong[text()='片商:']/following-sibling::span[1]",
                 "//strong[text()='製作商:']/following-sibling::span[1]",
                 "//strong[text()='Studio:']/following-sibling::span[1]",
-            ]:
-                try:
-                    el = driver.find_element(By.XPATH, xp)
-                    studio = el.text.strip()
-                    break
-                except:
-                    continue
+            ])
 
             img_url = ''
-            for selector in ['div.cover img', '.cover img', 'img.video-cover', 'img[src*="cover"]', 'img[src*="thumb"]', '.movie-panel img']:
+            for sel in ['div.cover img', '.cover img', 'img.video-cover', 'img[src*="cover"]', 'img[src*="thumb"]', '.movie-panel img']:
                 try:
-                    img_element = driver.find_element(By.CSS_SELECTOR, selector)
-                    if img_element:
-                        img_url = img_element.get_attribute('src')
-                        if img_url and not img_url.startswith('http'):
-                            img_url = urljoin(BASE_URL, img_url)
-                        break
-                except:
+                    loc = page.locator(sel)
+                    if loc.count() > 0:
+                        img_url = loc.first.get_attribute('src') or ''
+                        if img_url:
+                            if not img_url.startswith('http'):
+                                img_url = urljoin(RUN_BASE_URL or detail_url, img_url)
+                            break
+                except Exception:
                     continue
 
-            magnet_links = []
-            try:
-                els = driver.find_elements(By.CSS_SELECTOR, '.magnet-links [data-clipboard-text^="magnet:?xt"]')
-                magnet_links = [e.get_attribute('data-clipboard-text') for e in els]
-            except Exception:
-                try:
-                    copy_buttons = driver.find_elements(By.XPATH, "//a[contains(text(), 'Copy')]")
-                    magnet_links = [b.get_attribute('data-clipboard-text') for b in copy_buttons]
-                except Exception:
-                    pass
+            magnet_links = _parse_magnets(page)
 
             return {
                 'title': title,
@@ -537,253 +784,28 @@ def parse_detail(driver, detail_url, max_retries=2):
                 'cover_image_url': img_url,
                 'magnet_links': magnet_links,
             }
-
         except Exception as e:
             print(f"解析详情失败({attempt+1}/{max_retries}): {e}")
             if attempt < max_retries - 1:
                 random_delay(3, 5)
                 continue
-            else:
-                return {
-                    'title': 'N/A',
-                    'video_id': 'N/A',
-                    'detail_url': detail_url,
-                    'release_date': 'N/A',
-                    'duration': 'N/A',
-                    'rating': 'N/A',
-                    'tags': [],
-                    'actors': [],
-                    'studio': 'N/A',
-                    'cover_image_url': '',
-                    'magnet_links': [],
-                }
+            return {
+                'title': 'N/A', 'video_id': 'N/A', 'detail_url': detail_url,
+                'release_date': 'N/A', 'duration': 'N/A', 'rating': 'N/A',
+                'tags': [], 'actors': [], 'studio': 'N/A',
+                'cover_image_url': '', 'magnet_links': [],
+            }
 
 
-def build_page_url(actor_url, page_num):
-    # 计算筛选参数：默认 t=d,s（单体且有磁性链接）；legacy 模式使用 t=d（旧行为）
-    t_val = 'd,s' if USE_SINGLE_ONLY else 'd'
-    # 第1页：在输入URL基础上强制加入 t=... 和 sort_type=0
-    if page_num <= 1:
-        try:
-            parsed = urlparse(actor_url)
-            query_pairs = dict(parse_qsl(parsed.query, keep_blank_values=True))
-            query_pairs['t'] = t_val
-            query_pairs['sort_type'] = '0'
-            new_query = urlencode(query_pairs)
-            return urlunparse((parsed.scheme, parsed.netloc, parsed.path, parsed.params, new_query, parsed.fragment))
-        except Exception:
-            sep = '&' if '?' in actor_url else '?'
-            return f"{actor_url}{sep}t={t_val}&sort_type=0"
-    # 后续页：沿用原逻辑追加 page=N，并确保包含 t=... 与 sort_type=0
-    if '?' in actor_url:
-        return f"{actor_url}&page={page_num}&sort_type=0&t={t_val}"
-    return f"{actor_url}?page={page_num}&sort_type=0&t={t_val}"
-
-
-def is_login_page(driver):
-    try:
-        url = (driver.current_url or '').lower()
-        if 'login' in url or '/sign_in' in url:
-            return True
-        if driver.find_elements(By.CSS_SELECTOR, 'input[type="email"], input[name="email"]'):
-            return True
-        if driver.find_elements(By.CSS_SELECTOR, 'input[type="password"], input[name="password"]'):
-            return True
-        if driver.find_elements(By.CSS_SELECTOR, '[data-sitekey], .captcha, iframe[src*="captcha"]'):
-            return True
-        if driver.find_elements(By.XPATH, "//*[contains(text(),'登录') or contains(text(),'Sign in') or contains(text(),'ログイン')]"):
-            return True
-    except Exception:
-        pass
-    return False
-
-def is_security_verification_page(driver):
-    try:
-        url = (driver.current_url or '').lower()
-        # URL关键词命中
-        if any(k in url for k in ['challenge', 'verify', 'security', 'captcha', 'cf-challenge']):
-            return True
-        # 常见Cloudflare/验证码痕迹
-        if driver.find_elements(By.CSS_SELECTOR, '#cf-challenge, .cf-challenge, .challenge-container'):
-            return True
-        if driver.find_elements(By.CSS_SELECTOR, '[data-sitekey], .captcha, iframe[src*="captcha"]'):
-            return True
-        # 文本提示
-        if driver.find_elements(By.XPATH, "//*[contains(translate(text(),'ABCDEFGHIJKLMNOPQRSTUVWXYZ','abcdefghijklmnopqrstuvwxyz'),'security verification')]"):
-            return True
-        if driver.find_elements(By.XPATH, "//*[contains(text(),'安全验证') or contains(text(),'请完成安全验证') or contains(text(),'驗證')]"):
-            return True
-        if driver.find_elements(By.XPATH, "//*[contains(text(),'Verify you are human') or contains(text(),'Just a moment')]"):
-            return True
-    except Exception:
-        pass
-    return False
-
-def handle_login(driver):
-    try:
-        email_input = driver.find_element(By.CSS_SELECTOR, 'input[type="email"], input[name="email"]')
-        email_input.clear()
-        email_input.send_keys(LOGIN_EMAIL)
-        random_delay(1, 2)
-
-        password_input = driver.find_element(By.CSS_SELECTOR, 'input[type="password"], input[name="password"]')
-        password_input.clear()
-        password_input.send_keys(LOGIN_PASSWORD)
-        random_delay(1, 2)
-
-        login_button = driver.find_element(By.CSS_SELECTOR, 'button[type="submit"], input[type="submit"], .btn-primary')
-        login_button.click()
-        print("已提交登录表单，等待人工验证/跳转…")
-        return True
-    except Exception as e:
-        print(f"登录处理异常: {e}")
-        return False
-
-
-def wait_for_manual_login(driver, seconds=300, reopen_url=None):
-    # 支持按回车立即继续；否则最长等待seconds秒
-    import sys as _sys
-    import select as _select
-    print(f"检测到登录页，请手工登录。按回车立即继续，或最多等待 {int(seconds)} 秒…")
-    try:
-        rlist, _, _ = _select.select([_sys.stdin], [], [], seconds)
-        if rlist:
-            _ = _sys.stdin.readline()
-            print("检测到回车，继续执行…")
-        else:
-            print("等待超时，继续执行…")
-    except Exception:
-        time.sleep(seconds)
-    if reopen_url:
-        try:
-            print(f"登录处理完成，重新打开页面：{reopen_url}")
-            driver.get(reopen_url)
-            human_pause(driver)
-        except Exception:
-            pass
-
-
-def collect_actor_video_links(driver, actor_url, start_page=1, end_page=None):
-    """
-    流式爬取演员所有视频链接（UI模式）
-    
-    功能说明:
-    ---------
-    1. 访问演员首页，获取演员姓名
-    2. 构建分页URL，支持t=d筛选（单体作品）
-    3. 逐页解析视频列表，提取详情页链接
-    4. 智能过滤：默认只抓取单体作品且有磁力链接
-    5. 支持断点续爬：跳过已处理的URL
-    
-    参数说明:
-    ---------
-    driver : selenium.webdriver.Edge
-        已初始化的Edge驱动实例
-    actor_url : str
-        演员首页URL，格式：https://javdb.com/actors/{actor_id}
-    start_page : int, 可选
-        起始页码，默认1
-    end_page : int, 可选
-        结束页码，None表示自动探测末页
-    
-    返回:
-    ------
-    list
-        视频详情页URL列表
-    
-    异常处理:
-    ---------
-    - 自动检测登录页面，提示用户登录
-    - 处理网络超时，自动重试
-    - 跳过无磁力链接的作品（非legacy模式）
-    - 详细错误日志记录
-    
-    使用示例:
-    ---------
-    >>> driver = setup_driver()
-    >>> links = collect_actor_video_links(driver, "https://javdb.com/actors/abc123")
-    >>> print(f"共抓取到 {len(links)} 个视频链接")
-    
-    注意事项:
-    ---------
-    - 需要保持driver登录状态
-    - 建议设置适当延迟避免被封
-    - 支持断点续爬机制
-    """
-    links = []
-    page = start_page
-    while True:
-        url = build_page_url(actor_url, page)
-        print(f"访问第{page}页: {url}")
-        try:
-            driver.get(url)
-            human_pause(driver)
-            if is_security_verification_page(driver):
-                print("检测到安全验证页面，请完成认证后按回车继续…")
-                wait_for_manual_login(driver, seconds=300, reopen_url=url)
-            if is_login_page(driver):
-                print("检测到登录页，等待手工登录（最长5分钟，可按回车立即继续）…")
-                wait_for_manual_login(driver, seconds=300, reopen_url=url)
-            wait = WebDriverWait(driver, 25)
-            wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, 'div.item, .movie-list .item, a[href*="/v/"]')))
-            elems = []
-            try:
-                elems = driver.find_elements(By.CSS_SELECTOR, 'div.item a[href*="/v/"]')
-            except Exception:
-                pass
-            if not elems:
-                try:
-                    elems = driver.find_elements(By.CSS_SELECTOR, '.movie-list .item a[href*="/v/"]')
-                except Exception:
-                    pass
-            if not elems:
-                elems = driver.find_elements(By.CSS_SELECTOR, 'a[href*="/v/"]')
-            page_links = []
-            for e in elems:
-                href = e.get_attribute('href')
-                if href and '/v/' in href and href not in links:
-                    page_links.append(href)
-            if not page_links:
-                print("本页未找到更多视频链接，可能已到末页")
-                break
-            links.extend(page_links)
-            print(f"第{page}页新增{len(page_links)}个视频链接，总计{len(links)}")
-            # 若指定了结束页，到达后停止；否则继续到下一页直到无链接
-            if end_page is not None and page >= end_page:
-                break
-            page += 1
-        except TimeoutException:
-            print(f"第{page}页加载超时，尝试直接解析链接")
-            try:
-                elems = driver.find_elements(By.CSS_SELECTOR, 'div.item a[href*="/v/"], .movie-list .item a[href*="/v/"], a[href*="/v/"]')
-                page_links = []
-                for e in elems:
-                    href = e.get_attribute('href')
-                    if href and '/v/' in href and href not in links:
-                        page_links.append(href)
-                if not page_links:
-                    print("解析失败，结束翻页")
-                    break
-                links.extend(page_links)
-                print(f"超时但解析到{len(page_links)}个链接，总计{len(links)}")
-                # 若指定了结束页，到达后停止；否则继续到下一页直到无链接
-                if end_page is not None and page >= end_page:
-                    break
-                page += 1
-            except Exception:
-                print("解析失败，结束翻页")
-                break
-        except Exception as e:
-            print(f"解析第{page}页出错: {e}")
-            break
-    return links
+# ---------- CSV ----------
+CSV_HEADERS = ['title', 'actor', 'release_date', 'video_id', 'detail_url', 'studio',
+               'rating', 'duration', 'magnet_link', 'all_magnet_links']
 
 
 def open_csv_stream(csv_path):
     is_new = not os.path.exists(csv_path)
     f = open(csv_path, 'a', newline='', encoding='utf-8')
-    headers = ['title', 'actor', 'release_date', 'video_id', 'detail_url', 'studio', 'rating', 'duration', 'magnet_link', 'all_magnet_links']
-    writer = csv.DictWriter(f, fieldnames=headers)
+    writer = csv.DictWriter(f, fieldnames=CSV_HEADERS)
     if is_new:
         writer.writeheader()
     return f, writer
@@ -796,7 +818,6 @@ def load_processed_urls_from_csv(csv_path):
     try:
         with open(csv_path, 'r', newline='', encoding='utf-8') as f:
             reader = csv.DictReader(f)
-            # 优先使用 detail_url，其次回退到 video_id
             use_detail = 'detail_url' in (reader.fieldnames or [])
             use_vid = 'video_id' in (reader.fieldnames or [])
             for row in reader:
@@ -815,22 +836,18 @@ def load_processed_urls_from_csv(csv_path):
 
 
 def find_existing_actor_csv(actor_name, search_dir=None):
-    """在指定目录中寻找该演员的既有CSV文件，返回最新修改的一个路径"""
+    """在 results 目录（其次当前目录）中寻找该演员的既有CSV，返回最新修改的一个"""
     try:
-        # 使用短演员名：取第一个逗号或空白前片段
         short_actor = actor_name.strip()
         try:
             short_actor = re.split(r"[，,\s]+", short_actor, maxsplit=1)[0]
         except Exception:
             pass
         base = safe_filename(short_actor)
-        # 优先在 results 目录查找，其次回退到当前目录，避免丢失历史文件
         primary_dir = search_dir or get_results_dir()
-        dirs_to_check = []
-        if primary_dir:
-            dirs_to_check.append(primary_dir)
+        dirs_to_check = [primary_dir]
         cwd_dir = os.getcwd()
-        if not primary_dir or primary_dir != cwd_dir:
+        if primary_dir != cwd_dir:
             dirs_to_check.append(cwd_dir)
         candidates = []
         for directory in dirs_to_check:
@@ -838,7 +855,6 @@ def find_existing_actor_csv(actor_name, search_dir=None):
                 for fn in os.listdir(directory):
                     if not fn.lower().endswith('.csv'):
                         continue
-                    # 兼容两种命名：带时间戳的 javdb_<actor>_YYYYmmdd_HHMMSS.csv 与固定名 javdb_<actor>.csv
                     if fn.startswith(f"javdb_{base}_") or fn == f"javdb_{base}.csv":
                         full = os.path.join(directory, fn)
                         try:
@@ -856,371 +872,177 @@ def find_existing_actor_csv(actor_name, search_dir=None):
     return None
 
 
-def detect_max_pages_from_current(driver):
-    try:
-        # 收集所有分页链接中的最大页码
-        anchors = driver.find_elements(By.CSS_SELECTOR, 'a[href*="page="]')
-        nums = []
-        for a in anchors:
-            href = a.get_attribute('href') or ''
-            m = re.search(r'[?&]page=(\d+)', href)
-            if m:
-                try:
-                    nums.append(int(m.group(1)))
-                except Exception:
-                    pass
-        if nums:
-            return max(nums)
-        # 备用：分页组件中的数字文本
-        candidates = driver.find_elements(By.CSS_SELECTOR, '.pagination li, .pagination a, .page-item, .pages a')
-        for el in candidates:
-            txt = (el.text or '').strip()
-            if txt.isdigit():
-                nums.append(int(txt))
-        return max(nums) if nums else 10
-    except Exception:
-        return 10
-
-
+# ---------- main ----------
 def main():
-    """
-    主函数 - JAVDB演员作品爬虫入口
-    
-    调用方式:
-    --------
-    基础用法:
-        python javdb_actor_all.py <演员URL>
-        
-    完整参数示例:
-        python javdb_actor_all.py "https://javdb.com/actors/abc123" \
-            --from 1 --to 5 \
-            --name "演员姓名" \
-            --csv "output.csv" \
-            --min-delay 2.0 --max-delay 6.0 \
-            --use-dedicated-profile \
-            --legacy-filter \
-            --no-human-actions
-    
-    参数说明:
-    --------
-    位置参数:
-        actor_url          : 演员首页URL (必填)
-                           格式: https://javdb.com/actors/{actor_id}
-                           
-    可选参数:
-        --from           : 起始页码，默认1
-        --to             : 结束页码，默认自动探测末页
-        --name           : 演员姓名（可选），不提供则自动提取
-        --csv            : 输出CSV文件路径（可选），存在则启用断点续爬
-        --user-data-dir  : Edge用户数据目录路径
-        --profile-directory : Edge配置目录名，默认"Default"
-        --use-dedicated-profile : 使用专用EdgeDriver用户数据目录
-        --legacy-filter  : 使用旧版过滤模式（仅t=d，不限定单体）
-        --min-delay      : 最小随机延迟秒数，默认3.0
-        --max-delay      : 最大随机延迟秒数，默认7.0
-        --no-human-actions : 禁用随机滚动与鼠标移动
-    
-    使用场景:
-    --------
-    1. 首次抓取:
-        python javdb_actor_all.py "https://javdb.com/actors/abc123"
-        
-    2. 指定页码范围:
-        python javdb_actor_all.py "https://javdb.com/actors/abc123" --from 1 --to 10
-        
-    3. 断点续爬:
-        python javdb_actor_all.py "https://javdb.com/actors/abc123" --csv "javdb_演员名.csv"
-        
-    4. 快速抓取（减少延迟）:
-        python javdb_actor_all.py "https://javdb.com/actors/abc123" --min-delay 1.0 --max-delay 2.0
-        
-    5. 后台运行（无UI交互）:
-        python javdb_actor_all.py "https://javdb.com/actors/abc123" --no-human-actions
-    
-    输出格式:
-    --------
-    CSV文件包含以下字段:
-    - title: 作品标题
-    - actor: 演员姓名
-    - release_date: 发行日期
-    - video_id: 作品番号
-    - detail_url: 详情页URL
-    - studio: 制作商
-    - rating: 评分
-    - duration: 时长
-    - magnet_link: 最佳磁力链接
-    - all_magnet_links: 所有磁力链接（分号分隔）
-    
-    错误处理:
-    --------
-    - 自动检测并处理登录页面
-    - 安全验证页面人工交互提示
-    - 网络超时重试机制
-    - 详细错误日志输出
-    
-    注意事项:
-    --------
-    - 需要配置SOCKS5代理（config.py）
-    - Edge浏览器和EdgeDriver必须安装
-    - 首次使用可能需要手动登录验证
-    - 建议设置适当延迟避免被封IP
-    - 输出文件默认保存在results/目录
-    """
-    import argparse
     parser = argparse.ArgumentParser(
-        description='JAVDB演员作品信息爬虫 - 支持断点续爬、智能过滤、反检测',
-        epilog='示例: python javdb_actor_all.py "https://javdb.com/actors/abc123" --from 1 --to 10 --csv output.csv',
-        formatter_class=argparse.RawDescriptionHelpFormatter
+        description='JAVDB演员作品信息爬虫（Playwright版）- 支持断点续爬、智能过滤、Cloudflare处理',
+        epilog='示例: python javdb_actor_all.py "https://javdb571.com/actors/5Dya" --filter s --csv output.csv',
+        formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    parser.add_argument('actor_url', help='演员首页链接，如 https://javdb.com/actors/yAW')
+    parser.add_argument('actor_url', nargs='?', default='', help='演员首页链接，如 https://javdb571.com/actors/5Dya')
+    parser.add_argument('actor_name_pos', nargs='?', default='',
+                        help='演员名（位置参数，等价于 --name，兼容 README 旧用法）')
+    parser.add_argument('max_pages_pos', nargs='?', type=int, default=None,
+                        help='最大页数（位置参数，等价于 --to，兼容 README 旧用法）')
     parser.add_argument('--from', dest='from_page', type=int, default=1, help='起始页，默认 1')
-    parser.add_argument('--to', dest='to_page', type=int, default=None, help='结束页，默认自动探测最大页')
+    parser.add_argument('--to', dest='to_page', type=int, default=None, help='结束页，默认自动翻到末页')
     parser.add_argument('--name', dest='actor_name', default='', help='演员名（可选），不提供则自动提取或使用ID')
     parser.add_argument('--csv', dest='csv_path', default='', help='输出CSV路径（可选，存在则启用断点续爬并追加写入）')
-    parser.add_argument('--user-data-dir', dest='user_data_dir', default='', help='Edge用户数据目录（可选），如 ~/Library/Application Support/Microsoft Edge')
-    parser.add_argument('--profile-directory', dest='profile_directory', default='', help='Edge配置目录名（可选），一般为 Default')
-    parser.add_argument('--use-dedicated-profile', dest='use_dedicated_profile', action='store_true',
-                        help='使用专用EdgeDriver用户数据目录（持久化登录态，避免与系统Edge冲突）')
+    parser.add_argument('--filter', dest='filter_val', default=DEFAULT_FILTER,
+                        help="列表过滤参数 t 的值，默认 'd,s'（单体+可下载）；'s'=全部单体作品，'d'=仅可下载，'a'=全部")
     parser.add_argument('--legacy-filter', dest='legacy_filter', action='store_true',
-                        help='与旧版一致：仅使用 t=d（不限定单体）；默认使用 t=d,s（单体且有磁性链接）')
+                        help="与旧版一致：仅使用 t=d（不限定单体）；等价于 --filter d")
+    parser.add_argument('--browser', dest='browser', default='msedge', choices=['msedge', 'chromium', 'firefox'],
+                        help='Playwright 浏览器内核，默认 msedge')
+    parser.add_argument('--profile-mode', dest='profile_mode', default='persisted', choices=['persisted', 'fresh'],
+                        help='persisted=复用固定登录态（默认，登录态存于 .playwright_user_data/<browser>）；fresh=临时会话')
+    parser.add_argument('--headless', dest='headless', action='store_true', help='无头模式运行（默认有头，便于人工过验证）')
+    parser.add_argument('--proxy', dest='proxy', action='store_true', default=None,
+                        help='强制使用 SOCKS5 代理（javdb.com 主站默认开启）')
+    parser.add_argument('--no-proxy', dest='proxy', action='store_false',
+                        help='强制直连（镜像域名 javdbNNN.com 默认直连）')
     parser.add_argument('--min-delay', dest='min_delay', type=float, default=3.0, help='最小随机等待秒数，默认 3.0')
     parser.add_argument('--max-delay', dest='max_delay', type=float, default=7.0, help='最大随机等待秒数，默认 7.0')
     parser.add_argument('--no-human-actions', dest='no_human_actions', action='store_true', help='禁用随机滚动与鼠标移动')
+    parser.add_argument('--login', dest='do_login', action='store_true',
+                        help='打开持久会话浏览器进行手动登录，登录态保存后退出（无需演员链接）')
     args = parser.parse_args()
 
-    actor_url = args.actor_url.strip()
-    from_page = max(1, int(args.from_page or 1))
-    to_page = args.to_page if args.to_page and args.to_page >= from_page else None
-    actor_name = args.actor_name.strip()
-
-    # 设置全局节奏参数
-    global CRAWL_MIN_DELAY, CRAWL_MAX_DELAY, HUMAN_ACTIONS, USE_SINGLE_ONLY
+    global CRAWL_MIN_DELAY, CRAWL_MAX_DELAY, HUMAN_ACTIONS, RUN_BASE_URL
     CRAWL_MIN_DELAY = max(0.5, float(args.min_delay or 3.0))
     CRAWL_MAX_DELAY = max(CRAWL_MIN_DELAY, float(args.max_delay or 7.0))
     HUMAN_ACTIONS = not bool(args.no_human_actions)
-    # 筛选模式：默认单体且有磁性链接；legacy 模式还原旧行为
-    USE_SINGLE_ONLY = not bool(args.legacy_filter)
+    filter_val = 'd' if args.legacy_filter else (args.filter_val or DEFAULT_FILTER).strip()
 
-    # 用户数据目录选择逻辑：
-    # 1) 若显式提供 --user-data-dir，则优先使用用户提供值
-    # 2) 若指定 --use-dedicated-profile，则使用专用目录（与系统 Edge 隔离）
-    # 3) 若检测到 Edge 正在运行，则使用专用目录以避免锁冲突并持久化登录态
-    # 4) 否则，默认复用系统 Edge 用户数据以提升通过验证概率
-    ud_arg = (args.user_data_dir or '').strip()
-    pd_arg = (args.profile_directory or '').strip()
-    use_dedicated = bool(args.use_dedicated_profile)
+    if args.do_login:
+        base = args.actor_url.strip() or f"https://{JAVDB_PROXY_DOMAIN}"
+        RUN_BASE_URL = url_origin(base)
+        ok = do_manual_login(RUN_BASE_URL)
+        sys.exit(0 if ok else 1)
 
-    ud = None
-    pd = None
-    if ud_arg:
-        ud = ud_arg
-        pd = pd_arg or (detect_default_edge_profile_directory(ud) or 'Default')
-        print(f"使用用户提供的 Edge 用户数据目录: {ud}，配置: {pd}")
-    elif use_dedicated or is_edge_running():
-        if is_edge_running() and not use_dedicated:
-            print("检测到 Edge 正在运行，改用专用 EdgeDriver 会话目录以避免冲突并持久化登录态")
-        ud = get_dedicated_edge_user_data_dir()
-        pd = 'Default'
-        if ud:
-            print(f"使用专用 EdgeDriver 用户数据目录: {ud}，配置: {pd}")
-        else:
-            print("无法创建专用用户数据目录，回退到不复用登录态")
-            ud, pd = None, None
-    else:
-        ud = detect_default_edge_user_data_dir() or None
-        pd = detect_default_edge_profile_directory(ud) or None
-        if ud:
-            print(f"复用系统 Edge 用户数据目录: {ud}，配置: {pd or 'Default'}")
-        else:
-            print("未检测到系统 Edge 用户数据目录，使用临时会话（不复用登录态）")
+    actor_url = args.actor_url.strip()
+    if not actor_url:
+        parser.error("请提供演员首页链接，或使用 --login 进入手动登录流程")
+    if '/actors/' not in actor_url:
+        print("警告：输入链接似乎不是演员页（未包含 /actors/），仍将尝试抓取")
 
-    # 强制UI模式
-    driver = setup_driver(user_data_dir=ud, profile_directory=pd)
-    if not driver:
+    from_page = max(1, int(args.from_page or 1))
+    to_page = args.to_page if args.to_page and args.to_page >= from_page else None
+    if to_page is None and args.max_pages_pos:
+        to_page = max(from_page, int(args.max_pages_pos))
+    actor_name = args.actor_name.strip() or (args.actor_name_pos or '').strip()
+    RUN_BASE_URL = url_origin(actor_url)
+    use_proxy = guess_use_proxy(actor_url) if args.proxy is None else bool(args.proxy)
+    print(f"目标域名: {RUN_BASE_URL} | 代理: {'socks5://%s:%s' % (SOCKS5_PROXY_HOST, SOCKS5_PROXY_PORT) if use_proxy else '直连'}"
+          f" | 过滤: t={filter_val} | 会话: {args.profile_mode}/{args.browser}")
+
+    session = setup_playwright_session(use_proxy=use_proxy, headless=args.headless,
+                                       browser_name=args.browser, profile_mode=args.profile_mode)
+    if not session:
         sys.exit(1)
+    page = session["page"]
 
     try:
-        # 统一以第一页URL开始（强制 t=d & sort_type=0）
-        first_page_url = build_page_url(actor_url, 1)
-        driver.get(first_page_url)
-        human_pause(driver)
-        if is_security_verification_page(driver):
-            print("检测到安全验证页面，请完成认证后按回车继续…")
-            wait_for_manual_login(driver, seconds=300, reopen_url=first_page_url)
-        if is_login_page(driver):
-            print("检测到登录页，尝试自动填充后手工验证…")
-            handle_login(driver)
-            wait_for_manual_login(driver, seconds=300, reopen_url=first_page_url)
+        first_page_url = build_page_url(actor_url, from_page, filter_val)
+        if not goto_ready(page, first_page_url):
+            print("首页不可用（可能是验证未通过），退出")
+            sys.exit(1)
 
-        # 若未提供演员名，则尝试从页面提取
+        # 提取演员名
         if not actor_name:
-            try:
-                # 常见选择器尝试
-                for sel in ['h2.title', 'h1.title', '.title', 'title']:
-                    els = driver.find_elements(By.CSS_SELECTOR, sel)
-                    if els:
-                        txt = els[0].text.strip() if hasattr(els[0], 'text') else els[0].get_attribute('innerText')
+            for sel in ['strong.current-title', 'h2.title', 'h1.title', '.title']:
+                try:
+                    loc = page.locator(sel)
+                    if loc.count() > 0:
+                        txt = (loc.first.inner_text() or '').strip()
                         if txt:
-                            actor_name = re.sub(r"\s*[-|｜].*$", "", txt).strip()
+                            actor_name = re.sub(r"\s*[-|｜].*$", "", txt.splitlines()[0]).strip()
                             break
-            except Exception:
-                pass
-        # 兜底：使用URL中的actor_id
+                except Exception:
+                    continue
         if not actor_name:
             actor_name = extract_actor_id_from_url(actor_url) or 'actor'
+        print(f"演员: {actor_name}")
 
-        # 未指定 --to 时不再首页估计最大页，改为动态遍历到末页
         if to_page is None:
             print("未指定结束页，将自动翻页直至末页")
 
-        # 先翻页收集所有详情链接（支持起止页范围）
         print(f"准备收集详情链接，页范围: {from_page} → {'末页' if to_page is None else to_page}")
-        links = collect_actor_video_links(driver, actor_url, start_page=from_page, end_page=to_page)
+        links = collect_actor_video_links(page, actor_url, start_page=from_page, end_page=to_page, filter_val=filter_val)
         print(f"共收集到 {len(links)} 条详情链接")
 
-        # 准备CSV流式输出文件（支持断点续爬）
-        resume_mode = False
+        # CSV 输出与断点续爬（与旧版逻辑一致）
         results_dir = get_results_dir()
         if args.csv_path:
             out_path = os.path.abspath(args.csv_path)
-            resume_mode = os.path.exists(out_path)
         else:
-            # 优先在 results 目录检测是否已有该演员的CSV，若有则启用续爬并在其后追加
             existing = find_existing_actor_csv(actor_name, search_dir=results_dir)
             if existing:
                 out_path = existing
-                resume_mode = True
                 print(f"检测到已有CSV，启用断点续爬: {out_path}")
             else:
-                # 生成短文件名：取第一个逗号或空白前的片段，默认放入 results 目录
                 short_actor = actor_name.strip()
                 try:
                     short_actor = re.split(r"[，,\s]+", short_actor, maxsplit=1)[0]
                 except Exception:
                     pass
-                out_name = safe_filename(f"javdb_{short_actor}.csv")
-                out_path = os.path.join(results_dir, out_name)
-                # 若固定名已存在，也视为断点续爬
-                if os.path.exists(out_path):
-                    resume_mode = True
-                    print(f"检测到固定名CSV，启用断点续爬: {out_path}")
-        # 加载已处理链接集合
+                out_path = os.path.join(results_dir, safe_filename(f"javdb_{short_actor}.csv"))
+        resume_mode = os.path.exists(out_path)
         processed_urls = load_processed_urls_from_csv(out_path) if resume_mode else set()
         f_csv, writer = open_csv_stream(out_path)
         print(f"CSV输出: {out_path}")
         if resume_mode:
             print(f"断点续爬启用：已存在 {len(processed_urls)} 条记录，将跳过这些详情链接")
 
-        # 根据已处理的 detail_url 预过滤待解析链接
         remaining_links = [l for l in links if l not in processed_urls] if processed_urls else links
         pre_skipped = len(links) - len(remaining_links)
         if pre_skipped > 0:
             print(f"根据已爬取 detail_url 预过滤，跳过 {pre_skipped} 条，剩余 {len(remaining_links)} 条待解析")
 
-        # 逐详情页解析并即时写入一行
         skipped = 0
         written = 0
-        for idx, durl in enumerate(remaining_links, start=1):
-            print(f"解析详情({idx}/{len(remaining_links)}): {durl}")
-            # 跳过已处理的链接（detail_url 或 video_id）
-            if durl in processed_urls:
-                skipped += 1
-                print("已在CSV中存在，跳过")
-                continue
-            # 进入详情页前也检测安全验证
-            try:
-                driver.get(durl)
-                human_pause(driver)
-                if is_security_verification_page(driver):
-                    print("检测到安全验证页面，请完成认证后按回车继续…")
-                    wait_for_manual_login(driver, seconds=300, reopen_url=durl)
-            except Exception:
-                pass
-            info = parse_detail(driver, durl, max_retries=2)
-            if info is None:
-                skipped += 1
-                print("安全验证或页面不可用，未写入CSV，跳过")
-                continue
-            best = find_best_magnet_link(info.get('magnet_links', []))
-            all_links = info.get('magnet_links', [])
-
-            row = {
-                'title': info.get('title', 'N/A'),
-                'actor': actor_name,
-                'release_date': info.get('release_date', 'N/A'),
-                'video_id': info.get('video_id', 'N/A'),
-                'detail_url': durl,
-                'studio': info.get('studio', 'N/A'),
-                'rating': info.get('rating', 'N/A'),
-                'duration': info.get('duration', 'N/A'),
-                'magnet_link': best or '',
-                'all_magnet_links': '; '.join(all_links) if all_links else '',
-            }
-            try:
-                writer.writerow(row)
-                f_csv.flush()
-                processed_urls.add(durl)
-                written += 1
-            except Exception as e:
-                print(f"写入CSV失败: {e}")
+        try:
+            for idx, durl in enumerate(remaining_links, start=1):
+                print(f"解析详情({idx}/{len(remaining_links)}): {durl}")
+                if durl in processed_urls:
+                    skipped += 1
+                    print("已在CSV中存在，跳过")
+                    continue
+                info = parse_detail(page, durl, max_retries=2)
+                if info is None:
+                    skipped += 1
+                    print("安全验证或页面不可用，未写入CSV，跳过")
+                    continue
+                best = find_best_magnet_link(info.get('magnet_links', []))
+                all_links = info.get('magnet_links', [])
+                row = {
+                    'title': info.get('title', 'N/A'),
+                    'actor': actor_name,
+                    'release_date': info.get('release_date', 'N/A'),
+                    'video_id': info.get('video_id', 'N/A'),
+                    'detail_url': durl,
+                    'studio': info.get('studio', 'N/A'),
+                    'rating': info.get('rating', 'N/A'),
+                    'duration': info.get('duration', 'N/A'),
+                    'magnet_link': best or '',
+                    'all_magnet_links': '; '.join(all_links) if all_links else '',
+                }
+                try:
+                    writer.writerow(row)
+                    f_csv.flush()
+                    processed_urls.add(durl)
+                    written += 1
+                except Exception as e:
+                    print(f"写入CSV失败: {e}")
+        finally:
+            with suppress(Exception):
+                f_csv.close()
 
         print(f"全部详情解析完成，CSV已写入。新增 {written} 条，跳过 {skipped} 条。")
 
     finally:
-        try:
-            driver.quit()
-        except Exception:
-            pass
+        close_playwright_session(session)
 
 
 if __name__ == "__main__":
-    """
-    脚本入口点
-    
-    快速开始:
-    ----------
-    1. 安装依赖:
-        pip install selenium
-        
-    2. 配置代理 (config.py):
-        # 添加SOCKS5代理配置
-        PROXY_HOST = "127.0.0.1"
-        PROXY_PORT = 1080
-        
-    3. 首次运行:
-        python javdb_actor_all.py "https://javdb.com/actors/abc123"
-        
-    4. 高级用法:
-        # 断点续爬 + 指定页码
-        python javdb_actor_all.py "https://javdb.com/actors/abc123" \
-            --from 1 --to 20 \
-            --csv "results/演员名.csv" \
-            --min-delay 2.0 --max-delay 5.0
-            
-        # 后台运行 + 快速模式
-        python javdb_actor_all.py "https://javdb.com/actors/abc123" \
-            --no-human-actions \
-            --min-delay 1.0 --max-delay 2.0 \
-            --use-dedicated-profile
-    
-    故障排除:
-    ----------
-    - EdgeDriver未找到: 确保Edge浏览器已安装，或手动下载EdgeDriver
-    - 登录失败: 检查代理配置，可能需要手动登录验证
-    - 页面加载超时: 增加延迟时间，检查网络连接
-    - 抓取为空: 确认演员URL正确，检查过滤条件
-    
-    输出文件:
-    ----------
-    - CSV文件: 包含所有抓取的作品信息
-    - 日志输出: 实时显示抓取进度和错误信息
-    - 断点文件: 自动保存已处理URL，支持续爬
-    
-    性能优化:
-    ----------
-    - 调整延迟参数平衡速度与稳定性
-    - 使用专用用户数据目录避免冲突
-    - 合理设置页码范围分批抓取
-    - 定期清理用户数据目录释放空间
-    """
     main()

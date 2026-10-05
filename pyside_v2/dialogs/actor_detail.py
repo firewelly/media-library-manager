@@ -10,7 +10,7 @@ import os
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QSplitter,
     QListWidget, QListWidgetItem, QLineEdit, QWidget, QGroupBox,
-    QMessageBox, QScrollArea,
+    QMessageBox, QScrollArea, QTextBrowser, QFrame,
 )
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QPixmap, QFont
@@ -79,7 +79,19 @@ class ActorDetailWindow(QDialog):
         self.info_label.setWordWrap(True)
         self.info_label.setStyleSheet("color: palette(text);")
         left_lay.addWidget(self.info_label)
-        left_lay.addStretch()
+
+        # 详细介绍（长文本，可滚动）
+        self.bio_label = QLabel("详细介绍")
+        self.bio_label.setStyleSheet("color: palette(mid);")
+        left_lay.addWidget(self.bio_label)
+        self.bio_view = QTextBrowser()
+        self.bio_view.setOpenExternalLinks(True)
+        self.bio_view.setFrameShape(QFrame.NoFrame)
+        self.bio_view.setStyleSheet(
+            "background: transparent; color: palette(text); font-size: 12px;"
+        )
+        self.bio_view.setMinimumHeight(140)
+        left_lay.addWidget(self.bio_view, 1)
 
         # 收藏按钮
         self.btn_fav = QPushButton("☆ 收藏")
@@ -119,7 +131,7 @@ class ActorDetailWindow(QDialog):
             return
         # (id, name, name_traditional, name_common, aliases, avatar_url,
         #  avatar_data, profile_url, movie_count, birth_date, debut_date,
-        #  height, measurements, description, is_favorite)
+        #  height, measurements, description, is_favorite, cup, bio)
         self._actor_id = info[0]
         self.name_label.setText(info[1] or name)
         aliases = []
@@ -136,7 +148,9 @@ class ActorDetailWindow(QDialog):
         online_n = sum(1 for m in movies if m[8])
         self.stats_label.setText(f"库内作品 {len(movies)} · 在线 {online_n}")
 
-        # 信息
+        # 信息（结构化字段）
+        cup = info[15] if len(info) > 15 else None
+        bio = info[16] if len(info) > 16 else None
         lines = []
         if info[9]:
             lines.append(f"生日：{info[9]}")
@@ -146,9 +160,13 @@ class ActorDetailWindow(QDialog):
             lines.append(f"身高——{info[11]} cm")
         if info[12]:
             lines.append(f"三围——{info[12]}")
-        if info[14]:
-            lines.append(info[14])
+        if cup:
+            lines.append(f"罩杯——{cup}")
         self.info_label.setText("\n".join(lines))
+
+        # 详细介绍（优先 bio 字段，回退旧 description）
+        detail = (bio or "").strip() or (info[13] or "").strip()
+        self.bio_view.setPlainText(detail or "（暂无详细介绍）")
 
         # 收藏状态
         self._update_fav_button(bool(info[14]) if len(info) > 14 else False, info[14])
@@ -223,6 +241,9 @@ class ActorDetailWindow(QDialog):
     def _open_movie(self, item):
         mid = item.data(Qt.UserRole)
         if mid is not None:
-            self.mw.select_video_by_id(mid) if hasattr(self.mw, 'select_video_by_id') else None
-            self.mw.load_detail(mid)
+            # 在主列表定位该视频（对齐 v1 的跳转行为；双击主列表即可播放）
+            if hasattr(self.mw, 'select_video_by_id'):
+                self.mw.select_video_by_id(mid)
+            else:
+                self.mw.load_detail(mid)
             self.accept()

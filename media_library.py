@@ -9,6 +9,12 @@ import os
 try:
     from dotenv import load_dotenv
     load_dotenv(os.path.join(os.path.dirname(__file__), '.env'))
+    # 密钥集中存放在 OneDrive MacMgt/config（项目内不保存明文密钥）
+    try:
+        from utils.secrets import load_keys as _load_keys
+        _load_keys()
+    except Exception:
+        pass
 except ImportError:
     env_path = os.path.join(os.path.dirname(__file__), '.env')
     if os.path.exists(env_path):
@@ -58,6 +64,14 @@ from utils import javsp_migration, javsp_copy
 from utils.file_utils import FileUtils
 from utils import video_rotate
 from utils.runtime import ensure_file_in_runtime, runtime_dir, runtime_path
+
+# 媒体库统一识别的视频扩展名。
+# 注意：扫描范围缺项会把"文件不在扫描结果里"误判成"文件已消失"，
+# 进而删除记录（见 comprehensive_media_update 第二阶段）。
+VIDEO_EXTENSIONS = (
+    '.mp4', '.mkv', '.avi', '.mov', '.wmv', '.flv', '.webm', '.m4v',
+    '.ts', '.m2ts', '.mts', '.mpg', '.mpeg', '.3gp',
+)
 
 # 日志级别配置
 class LogLevel:
@@ -981,6 +995,22 @@ class MediaLibrary:
                 if 'is_favorite' not in actor_columns:
                     self.cursor.execute('ALTER TABLE actors ADD COLUMN is_favorite INTEGER DEFAULT 0')
                     print("添加字段: is_favorite")
+
+                if 'cup' not in actor_columns:
+                    self.cursor.execute('ALTER TABLE actors ADD COLUMN cup TEXT')
+                    print("添加字段: cup")
+
+                if 'bio' not in actor_columns:
+                    self.cursor.execute('ALTER TABLE actors ADD COLUMN bio TEXT')
+                    print("添加字段: bio")
+
+                # JavDB 无码演员页（与有码页是两个独立链接）
+                if 'profile_url_uncensored' not in actor_columns:
+                    self.cursor.execute('ALTER TABLE actors ADD COLUMN profile_url_uncensored TEXT')
+                    print("添加字段: profile_url_uncensored")
+                if 'javdb_uncensored_id' not in actor_columns:
+                    self.cursor.execute('ALTER TABLE actors ADD COLUMN javdb_uncensored_id TEXT')
+                    print("添加字段: javdb_uncensored_id")
             
             # 创建数据库索引以优化查询性能
             self.create_database_indexes()
@@ -8232,7 +8262,7 @@ class MediaLibrary:
                 for folder_path in active_folders:
                     for root, dirs, files in os.walk(folder_path):
                         for file in files:
-                            if file.lower().endswith(('.mp4', '.avi', '.mkv', '.mov', '.wmv', '.flv', '.webm', '.m4v')):
+                            if file.lower().endswith(VIDEO_EXTENSIONS):
                                 total_files_to_scan += 1
                 
                 log_message(f"发现 {total_files_to_scan} 个视频文件需要处理")
@@ -8259,7 +8289,7 @@ class MediaLibrary:
                     log_message(f"扫描文件夹: {folder_path}")
                     for root, dirs, files in os.walk(folder_path):
                         for file in files:
-                            if file.lower().endswith(('.mp4', '.avi', '.mkv', '.mov', '.wmv', '.flv', '.webm', '.m4v')):
+                            if file.lower().endswith(VIDEO_EXTENSIONS):
                                 file_path = os.path.join(root, file)
                                 try:
                                     file_size = os.path.getsize(file_path)
@@ -8407,39 +8437,47 @@ class MediaLibrary:
                     else:
                         # 文件不在原位置，尝试查找迁移
                         file_name = os.path.basename(file_path)
+                        file_folder = os.path.dirname(file_path)
+                        is_from_online_folder = any(file_folder.startswith(online_folder) for online_folder in active_folders)
                         found_path = None
-                        
-                        # 优先使用MD5哈希查找（最准确）
-                        if md5_hash and md5_hash in md5_to_paths_map:
-                            # 在MD5映射中找到匹配的文件
-                            potential_paths = md5_to_paths_map[md5_hash]
-                            if len(potential_paths) == 1:
-                                # 只有一个匹配，直接使用
-                                found_path = potential_paths[0]
-                            else:
-                                # 多个匹配，优先选择同名文件
-                                for path in potential_paths:
-                                    if os.path.basename(path) == file_name:
-                                        found_path = path
-                                        break
-                                # 如果没有同名文件，使用第一个
-                                if not found_path:
+
+                        # 仅当记录所在文件夹在线时才做迁移匹配：离线文件夹中的文件只是
+                        # 所在卷未挂载，不能认定它"移动"到了在线卷上的同名/同MD5文件
+                        # （多库之间允许存在同一部片子的重复拷贝，各自保留记录）
+                        if is_from_online_folder:
+                            # 优先使用MD5哈希查找（最准确）
+                            if md5_hash and md5_hash in md5_to_paths_map:
+                                # 在MD5映射中找到匹配的文件（排除已被前面记录认领的路径：
+                                # active_files_map 的条目在认领后会被删除，直接索引会 KeyError）
+                                potential_paths = [p for p in md5_to_paths_map[md5_hash] if p in active_files_map]
+                                if len(potential_paths) == 1:
+                                    # 只有一个匹配，直接使用
                                     found_path = potential_paths[0]
-                        
-                        # 如果MD5查找失败，尝试文件名查找
-                        if not found_path and file_name in filename_to_paths_map:
-                            potential_paths = filename_to_paths_map[file_name]
-                            if len(potential_paths) == 1:
-                                found_path = potential_paths[0]
-                            else:
-                                # 多个同名文件，需要进一步验证（如果有MD5的话）
-                                if md5_hash:
+                                elif potential_paths:
+                                    # 多个匹配，优先选择同名文件
                                     for path in potential_paths:
-                                        if active_files_map[path]['md5'] == md5_hash:
+                                        if os.path.basename(path) == file_name:
                                             found_path = path
                                             break
-                                if not found_path:
-                                    found_path = potential_paths[0]  # 使用第一个作为备选
+                                    # 如果没有同名文件，使用第一个
+                                    if not found_path:
+                                        found_path = potential_paths[0]
+
+                            # 如果MD5查找失败，尝试文件名查找
+                            if not found_path and file_name in filename_to_paths_map:
+                                # 同样排除已被前面记录认领的路径
+                                potential_paths = [p for p in filename_to_paths_map[file_name] if p in active_files_map]
+                                if len(potential_paths) == 1:
+                                    found_path = potential_paths[0]
+                                elif potential_paths:
+                                    # 多个同名文件，需要进一步验证（如果有MD5的话）
+                                    if md5_hash:
+                                        for path in potential_paths:
+                                            if active_files_map[path]['md5'] == md5_hash:
+                                                found_path = path
+                                                break
+                                    if not found_path:
+                                        found_path = potential_paths[0]  # 使用第一个作为备选
                         
                         if found_path:
                             # 检查新路径是否已存在于数据库中
@@ -8468,10 +8506,8 @@ class MediaLibrary:
                             if found_path in active_files_map:
                                 del active_files_map[found_path]
                         else:
-                            # 检查文件是否在任何配置的文件夹范围内
-                            file_folder = os.path.dirname(file_path)
+                            # file_folder / is_from_online_folder 已在上方计算
                             is_from_configured_folder = any(file_folder.startswith(configured_folder) for configured_folder in all_configured_folders)
-                            is_from_online_folder = any(file_folder.startswith(online_folder) for online_folder in active_folders)
                             
                             if not is_from_configured_folder:
                                 # 收集需要删除的记录（不在任何配置文件夹范围内）
@@ -8610,12 +8646,9 @@ class MediaLibrary:
                 log_message(f"错误: {error_msg}")
                 self.root.after(0, lambda: messagebox.showerror("错误", f"智能媒体库更新时出错: {error_msg}"))
             finally:
-                # 清理MD5缓存文件
-                try:
-                    self.cleanup_md5_cache(cache_file_path)
-                    log_message("临时缓存文件已清理")
-                except:
-                    pass
+                # 保留 MD5 缓存：其键为 路径|mtime|大小，可安全复用；
+                # 删除它会导致下次更新重算全部哈希（大库代价极高）
+                log_message("MD5缓存已保留，供下次更新复用")
         
         # 在新线程中执行更新
         threading.Thread(target=comprehensive_update, daemon=True).start()
@@ -11711,13 +11744,20 @@ class MediaLibrary:
             messagebox.showerror("错误", f"批量导入JAVDB信息失败: {str(e)}")
 
     def get_actor_info_by_name(self, actor_name):
-        """根据演员名称获取演员详细信息"""
+        """根据演员名称获取演员详细信息
+
+        返回列顺序（GUI 依赖该顺序）:
+            0 id, 1 name, 2 name_traditional, 3 name_common, 4 aliases,
+            5 avatar_url, 6 avatar_data, 7 profile_url, 8 movie_count,
+            9 birth_date, 10 debut_date, 11 height, 12 measurements,
+            13 description, 14 is_favorite, 15 cup, 16 bio
+        """
         try:
             self.cursor.execute("""
                 SELECT id, name, name_traditional, name_common, aliases, 
                        avatar_url, avatar_data, profile_url, movie_count,
                        birth_date, debut_date, height, measurements, description,
-                       COALESCE(is_favorite, 0)
+                       COALESCE(is_favorite, 0), cup, bio
                 FROM actors 
                 WHERE name = ? OR name_common = ? OR name_traditional = ?
                 LIMIT 1

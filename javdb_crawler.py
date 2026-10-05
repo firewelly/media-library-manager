@@ -1,19 +1,46 @@
-import time
-import random
-import requests
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+JavDB 爬虫（Playwright 版）
+
+浏览器层委托同目录的 javdb_crawler_single.py（Playwright 优先，含
+Cloudflare/年龄确认/登录等待与持久化会话回退），本文件只负责批量编排与结果落盘。
+
+用法:
+    python javdb_crawler.py <video_code>   # 单番号, 输出 JSON
+    python javdb_crawler.py                # 批量: 存在 av_codes_list.txt 时按番号
+                                           # 批量, 否则爬取首页列表
+结果保存到 ./results/ (JSON + Excel)
+"""
+
+import json
 import os
+import random
 import re
-from urllib.parse import urljoin, urlparse
+import sys
+import time
+
 import pandas as pd
-from selenium import webdriver
-from selenium.webdriver.common.by import By
-from selenium.webdriver.support.ui import WebDriverWait
-from selenium.webdriver.support import expected_conditions as EC
-from selenium.webdriver.edge.options import Options
-from selenium.common.exceptions import TimeoutException, WebDriverException
-import socks
-import socket
-from config import SOCKS5_PROXY_HOST, SOCKS5_PROXY_PORT, BASE_URL, LOGIN_EMAIL, LOGIN_PASSWORD, MAX_PAGES, MIN_DELAY, MAX_DELAY
+
+from config import MAX_PAGES, MIN_DELAY, MAX_DELAY
+from javdb_crawler_single import (
+    USE_SOCKS5_PROXY,
+    crawl_single_video_playwright,
+    get_attempt_configs,
+    get_browser_preferences,
+    get_profile_modes,
+    get_base_url_candidates,
+    setup_playwright_session,
+    close_playwright_session,
+    is_cloudflare_challenge_pw,
+    wait_for_cloudflare_clear_pw,
+    is_age_confirmation_pw,
+    dismiss_age_confirmation_pw,
+    is_login_page_pw,
+    wait_for_manual_login_pw,
+    ensure_preferred_language_pw,
+    parse_detail_pw,
+)
 
 # Create results directory
 if not os.path.exists('results'):
@@ -22,79 +49,6 @@ if not os.path.exists('results'):
 # Create images directory
 if not os.path.exists('results/images'):
     os.makedirs('results/images')
-
-def setup_socks5_proxy():
-    """Setup SOCKS5 proxy for requests"""
-    # Save original socket
-    original_socket = socket.socket
-    
-    # Set up SOCKS5 proxy
-    socks.set_default_proxy(socks.SOCKS5, SOCKS5_PROXY_HOST, SOCKS5_PROXY_PORT)
-    socket.socket = socks.socksocket
-    
-    return original_socket
-
-def restore_socket(original_socket):
-    """Restore original socket"""
-    socket.socket = original_socket
-
-def setup_driver():
-    """Setup MS Edge browser driver with SOCKS5 proxy"""
-    import platform
-    
-    edge_options = Options()
-    
-    # Set page load strategy to "eager", not waiting for images and other resources
-    edge_options.page_load_strategy = 'eager'
-
-    # Add various options to simulate real users
-    edge_options.add_argument('--no-sandbox')
-    edge_options.add_argument('--disable-dev-shm-usage')
-    edge_options.add_argument('--disable-blink-features=AutomationControlled')
-    edge_options.add_experimental_option("excludeSwitches", ["enable-automation"])
-    edge_options.add_experimental_option('useAutomationExtension', False)
-    edge_options.add_argument('--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36')
-    
-    # Set up SOCKS5 proxy for Edge
-    edge_options.add_argument(f'--proxy-server=socks5://{SOCKS5_PROXY_HOST}:{SOCKS5_PROXY_PORT}')
-    
-    # Add headless mode
-    edge_options.add_argument('--headless')
-    
-    try:
-        # Determine EdgeDriver path based on system
-        system = platform.system().lower()
-        if system == "windows":
-            driver_path = r"C:\bin\edgedriver_win64\msedgedriver.exe"
-        elif system == "darwin":  # macOS
-            machine = platform.machine().lower()
-            if machine in ['arm64', 'aarch64']:
-                driver_path = "/usr/local/bin/edgedriver_mac64_m1/msedgedriver"
-            else:
-                driver_path = "/usr/local/bin/edgedriver_mac64/msedgedriver"
-        elif system == "linux":
-            driver_path = "/usr/local/bin/edgedriver_linux64/msedgedriver"
-        else:
-            driver_path = "/usr/local/bin/edgedriver_mac64/msedgedriver"
-        
-        # Check if user directory driver exists
-        import os
-        user_driver_path = os.path.expanduser("~/bin/edgedriver_mac64_m1/msedgedriver")
-        if os.path.exists(user_driver_path):
-            driver_path = user_driver_path
-        
-        driver = webdriver.Edge(service=webdriver.edge.service.Service(driver_path), options=edge_options)
-        # Set page load timeout and script timeout
-        driver.set_page_load_timeout(60)
-        driver.set_script_timeout(30)
-        # Hide webdriver features
-        driver.execute_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
-        return driver
-    except Exception as e:
-        print(f"MS Edge driver startup failed: {e}")
-        print("Please make sure MS Edge browser and EdgeDriver are installed")
-        print("You can run update_msedge_driver.py to install the driver")
-        return None
 
 def random_delay(min_seconds=MIN_DELAY, max_seconds=MAX_DELAY):
     """Random delay to simulate human behavior"""
@@ -111,416 +65,54 @@ def safe_filename(filename):
         filename = filename[:100]
     return filename
 
-def download_image(img_url, filename):
-    """Download image to local"""
-    try:
-        # Setup SOCKS5 proxy for requests
-        original_socket = setup_socks5_proxy()
-        
-        headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
-            'Referer': BASE_URL
-        }
-        
-        response = requests.get(img_url, headers=headers, timeout=30)
-        response.raise_for_status()
-        
-        # Get file extension
-        parsed_url = urlparse(img_url)
-        ext = os.path.splitext(parsed_url.path)[1]
-        if not ext:
-            ext = '.jpg'  # Default extension
-        
-        safe_name = safe_filename(filename)
-        filepath = os.path.join('results/images', f"{safe_name}{ext}")
-        
-        with open(filepath, 'wb') as f:
-            f.write(response.content)
-        
-        print(f"Image downloaded successfully: {filepath}")
-        # Restore original socket
-        restore_socket(original_socket)
-        return filepath
-    
-    except Exception as e:
-        print(f"Image download failed {img_url}: {e}")
-        # Restore original socket
-        restore_socket(original_socket)
+def _map_result(raw):
+    """Map javdb_crawler_single's field names to the legacy result dict"""
+    return {
+        'title': raw.get('title'),
+        'video_id': raw.get('video_id'),
+        'detail_url': raw.get('detail_url'),
+        'release_date': raw.get('release_date'),
+        'duration': raw.get('duration'),
+        'rating': raw.get('rating'),
+        'tags': raw.get('tags') or [],
+        'actors': raw.get('actors') or [],
+        'studio': raw.get('studio'),
+        'img_url': raw.get('cover_image_url') or '',
+        'local_img_path': raw.get('local_image_path'),
+        'magnet_links': raw.get('magnet_links') or [],
+    }
+
+def _failed_result(video_code, title):
+    return {
+        'title': title,
+        'video_id': video_code,
+        'detail_url': 'N/A',
+        'release_date': 'N/A',
+        'duration': 'N/A',
+        'rating': 'N/A',
+        'tags': [],
+        'actors': [],
+        'studio': 'N/A',
+        'img_url': '',
+        'local_img_path': None,
+        'magnet_links': []
+    }
+
+def crawl_single_video(video_code):
+    """Crawl information for a single video code via the Playwright pipeline
+
+    Args:
+        video_code (str): Video code, e.g. 'ABF-255'
+
+    Returns:
+        dict: Dictionary containing video information, returns None if failed
+    """
+    raw = crawl_single_video_playwright(video_code)
+    if not raw or raw.get('title') in (None, 'N/A'):
+        print(f"Failed to parse detail page for video code {video_code}")
         return None
-
-def is_female_actor(driver, actor_link):
-    """Check if an actor is female by visiting their profile page"""
-    if not actor_link:
-        return False
-    
-    try:
-        # Save current window handle
-        original_window = driver.current_window_handle
-        
-        # Open actor page in new tab
-        driver.execute_script("window.open(arguments[0]);", actor_link)
-        driver.switch_to.window(driver.window_handles[-1])
-        
-        # Wait for page to load
-        WebDriverWait(driver, 10).until(
-            EC.presence_of_element_located((By.CSS_SELECTOR, 'body'))
-        )
-        
-        # Look for gender indicators
-        page_source = driver.page_source.lower()
-        
-        # Check for female indicators
-        female_indicators = ['女', 'female', '♀', 'actress', '女優', '女演员']
-        male_indicators = ['男', 'male', '♂', 'actor', '男優', '男演员']
-        
-        # Count occurrences
-        female_count = sum(page_source.count(indicator) for indicator in female_indicators)
-        male_count = sum(page_source.count(indicator) for indicator in male_indicators)
-        
-        # Close the tab and switch back
-        driver.close()
-        driver.switch_to.window(original_window)
-        
-        # Return True if more female indicators than male
-        return female_count > male_count
-        
-    except Exception as e:
-        # If error occurs, close any open tabs and return to original window
-        try:
-            if len(driver.window_handles) > 1:
-                driver.close()
-                driver.switch_to.window(original_window)
-        except:
-            pass
-        print(f"Error checking actor gender for {actor_link}: {e}")
-        return True  # Default to True to avoid filtering out actors due to errors
-
-def search_video_by_code(driver, video_code):
-    """Search for a video by its code"""
-    try:
-        search_url = f"{BASE_URL}/search?q={video_code}&f=all"
-        print(f"Searching for video: {video_code}")
-        driver.get(search_url)
-        
-        # Wait for search results to load
-        WebDriverWait(driver, 10).until(
-            EC.presence_of_element_located((By.CSS_SELECTOR, 'div.item, .movie-list .item'))
-        )
-        
-        # Find the first result link
-        try:
-            first_result = driver.find_element(By.CSS_SELECTOR, 'div.item a')
-            detail_url = first_result.get_attribute('href')
-            if detail_url and '/v/' in detail_url:
-                return detail_url
-        except Exception as e:
-            print(f"No search results found for {video_code}: {e}")
-            return None
-            
-    except Exception as e:
-        print(f"Error searching for video {video_code}: {e}")
-        return None
-    
-    return None
-
-def get_video_detail_links(driver, max_pages=MAX_PAGES):
-    """Get all video detail links from the homepage"""
-    all_links = []
-    
-    for page in range(1, max_pages + 1):
-        url = f"{BASE_URL}?page={page}"
-        print(f"Visiting page {page}: {url}")
-        driver.get(url)
-        
-        random_delay(2, 4)
-        
-        try:
-            WebDriverWait(driver, 10).until(
-                EC.presence_of_element_located((By.CSS_SELECTOR, 'div.item a, .movie-list .item'))
-            )
-        except TimeoutException:
-            print(f"Page {page} content loading timeout or no items found.")
-            continue
-        
-        # Get only detail page links
-        page_links = []
-        try:
-            elements = driver.find_elements(By.CSS_SELECTOR, 'div.item a')
-            for element in elements:
-                href = element.get_attribute('href')
-                if href and '/v/' in href:
-                    if href not in all_links:
-                        page_links.append(href)
-        except Exception as e:
-            print(f"Failed to get detail links: {e}")
-        
-        if page_links:
-            all_links.extend(page_links)
-            print(f"Page {page} got {len(page_links)} links, total {len(all_links)}")
-        else:
-            print(f"No links found on page {page}")
-    
-    print(f"Total {len(all_links)} detail page links obtained")
-    return all_links
-
-def parse_detail(driver, detail_url, max_retries=2):
-    """Parse detail page"""
-    for attempt in range(max_retries):
-        try:
-            print(f"Visiting detail page: {detail_url} (Attempt {attempt + 1}/{max_retries})")
-            driver.get(detail_url)
-            
-            # Wait for core page content to load
-            WebDriverWait(driver, 15).until(
-                EC.presence_of_element_located((By.CSS_SELECTOR, '.container, #content, body'))
-            )
-            random_delay(1, 2)
-
-            # Get title
-            title = 'N/A'
-            title_selectors = ['h2.title', 'h1.title', 'h2', 'h1', '.title']
-            for selector in title_selectors:
-                try:
-                    title_element = driver.find_element(By.CSS_SELECTOR, selector)
-                    if title_element and title_element.text:
-                        title = title_element.text.strip()
-                        break
-                except:
-                    continue
-            
-            # If title not found, page has issues, retry
-            if title == 'N/A':
-                raise ValueError("Could not parse title, page may not have loaded correctly.")
-
-            # Get番号(ID)
-            video_id = 'N/A'
-            try:
-                video_id_element = driver.find_element(By.XPATH, "//strong[text()='番號:']/following-sibling::span[1]")
-                video_id = video_id_element.text.strip()
-            except:
-                try:
-                    video_id_element = driver.find_element(By.XPATH, "//strong[text()='識別碼:']/following-sibling::span[1]")
-                    video_id = video_id_element.text.strip()
-                except:
-                    try:
-                        video_id_element = driver.find_element(By.XPATH, "//strong[text()='ID:']/following-sibling::span[1]")
-                        video_id = video_id_element.text.strip()
-                    except:
-                        pass
-
-            # Get date
-            release_date = 'N/A'
-            try:
-                date_element = driver.find_element(By.XPATH, "//strong[text()='日期:']/following-sibling::span[1]")
-                release_date = date_element.text.strip()
-            except:
-                try:
-                    date_element = driver.find_element(By.XPATH, "//strong[text()='發行日期:']/following-sibling::span[1]")
-                    release_date = date_element.text.strip()
-                except:
-                    try:
-                        date_element = driver.find_element(By.XPATH, "//strong[text()='Date:']/following-sibling::span[1]")
-                        release_date = date_element.text.strip()
-                    except:
-                        pass
-
-            # Get duration
-            duration = 'N/A'
-            try:
-                duration_element = driver.find_element(By.XPATH, "//strong[text()='時長:']/following-sibling::span[1]")
-                duration = duration_element.text.strip()
-            except:
-                try:
-                    duration_element = driver.find_element(By.XPATH, "//strong[text()='Duration:']/following-sibling::span[1]")
-                    duration = duration_element.text.strip()
-                except:
-                    pass
-
-            # Get rating
-            rating = 'N/A'
-            try:
-                rating_element = driver.find_element(By.XPATH, "//strong[text()='評分:']/following-sibling::span[1]")
-                rating = rating_element.text.strip()
-            except:
-                try:
-                    rating_element = driver.find_element(By.XPATH, "//strong[text()='Rating:']/following-sibling::span[1]")
-                    rating = rating_element.text.strip()
-                except:
-                    pass
-
-            # Get tags
-            tags = []
-            try:
-                tag_elements = driver.find_elements(By.XPATH, "//strong[text()='類別:']/following-sibling::span[1]/a")
-                tags = [tag.text.strip() for tag in tag_elements]
-            except:
-                try:
-                    tag_elements = driver.find_elements(By.XPATH, "//strong[text()='Tags:']/following-sibling::span[1]/a")
-                    tags = [tag.text.strip() for tag in tag_elements]
-                except:
-                    pass
-
-            # Get actors (only female actors)
-            actors = []
-            try:
-                # Find the actor section
-                actor_section = driver.find_element(By.XPATH, "//strong[text()='演員:']/following-sibling::span[1]")
-                # Get all actor links and their following gender symbols
-                actor_links = actor_section.find_elements(By.TAG_NAME, "a")
-                
-                for actor_link in actor_links:
-                    actor_name = actor_link.text.strip()
-                    actor_href = actor_link.get_attribute('href')
-                    
-                    # Check if there's a female symbol after this actor link
-                    try:
-                        # Look for female symbol immediately following the actor link
-                        parent_element = actor_link.find_element(By.XPATH, "./following-sibling::strong[@class='symbol female'][1]")
-                        if parent_element and '♀' in parent_element.text:
-                            actors.append({
-                                'name': actor_name,
-                                'link': actor_href
-                            })
-                    except:
-                        # If no female symbol found, skip this actor
-                        continue
-            except:
-                try:
-                    actor_elements = driver.find_elements(By.XPATH, "//strong[text()='Actors:']/following-sibling::span[1]//a")
-                    for actor_element in actor_elements:
-                        actor_name = actor_element.text.strip()
-                        actor_link = actor_element.get_attribute('href')
-                        
-                        # Check for female symbol
-                        try:
-                            parent_element = actor_element.find_element(By.XPATH, "./following-sibling::strong[@class='symbol female'][1]")
-                            if parent_element and '♀' in parent_element.text:
-                                actors.append({
-                                    'name': actor_name,
-                                    'link': actor_link
-                                })
-                        except:
-                            continue
-                except:
-                    pass
-
-            # Get studio/maker (片商)
-            studio = 'N/A'
-            try:
-                studio_element = driver.find_element(By.XPATH, "//strong[text()='片商:']/following-sibling::span[1]")
-                studio = studio_element.text.strip()
-            except:
-                try:
-                    studio_element = driver.find_element(By.XPATH, "//strong[text()='製作商:']/following-sibling::span[1]")
-                    studio = studio_element.text.strip()
-                except:
-                    try:
-                        studio_element = driver.find_element(By.XPATH, "//strong[text()='Studio:']/following-sibling::span[1]")
-                        studio = studio_element.text.strip()
-                    except:
-                        pass
-
-            # Get cover image
-            img_url = ''
-            img_selectors = [
-                'div.cover img', '.cover img', 'img.video-cover', 'img[src*="cover"]', 
-                'img[src*="thumb"]', '.movie-panel img'
-            ]
-            for selector in img_selectors:
-                try:
-                    img_element = driver.find_element(By.CSS_SELECTOR, selector)
-                    if img_element:
-                        img_url = img_element.get_attribute('src')
-                        if img_url and not img_url.startswith('http'):
-                            img_url = urljoin(BASE_URL, img_url)
-                        break
-                except:
-                    continue
-            
-            # Get magnet links
-            magnet_links = []
-            try:
-                magnet_elements = driver.find_elements(By.CSS_SELECTOR, '.magnet-links [data-clipboard-text^="magnet:?xt"]')
-                magnet_links = [element.get_attribute('data-clipboard-text') for element in magnet_elements]
-            except Exception:
-                try:
-                    copy_buttons = driver.find_elements(By.XPATH, "//a[contains(text(), 'Copy')]")
-                    magnet_links = [button.get_attribute('data-clipboard-text') for button in copy_buttons]
-                except Exception:
-                    pass  # Allow magnet links to be empty
-
-            # Download cover image
-            local_img_path = None
-            if img_url and title != 'N/A':
-                filename = f"{video_id}_{title}" if video_id != 'N/A' else title
-                local_img_path = download_image(img_url, filename)
-            
-            print(f"Parse successful - Title: {title[:50]}..., ID: {video_id}")
-            return {
-                'title': title,
-                'video_id': video_id,
-                'detail_url': detail_url,
-                'release_date': release_date,
-                'duration': duration,
-                'rating': rating,
-                'tags': tags,
-                'actors': actors,
-                'studio': studio,
-                'img_url': img_url,
-                'local_img_path': local_img_path,
-                'magnet_links': magnet_links
-            }
-
-        except Exception as e:
-            print(f"Error parsing detail page (Attempt {attempt + 1}/{max_retries}): {e}")
-            if attempt < max_retries - 1:
-                print("Waiting to retry...")
-                random_delay(3, 5)
-                continue
-            else:
-                print("All retries failed. Recording as unable to parse.")
-                # Return default failure object
-                return {
-                    'title': 'N/A',
-                    'video_id': 'N/A',
-                    'detail_url': detail_url,
-                    'release_date': 'N/A',
-                    'duration': 'N/A',
-                    'rating': 'N/A',
-                    'tags': [],
-                    'actors': [],
-                    'studio': 'N/A',
-                    'img_url': '',
-                    'local_img_path': None,
-                    'magnet_links': []
-                }
-
-def handle_login(driver):
-    try:
-        # Wait for login window to appear
-        WebDriverWait(driver, 10).until(
-            EC.presence_of_element_located((By.CSS_SELECTOR, 'input[type="email"], input[name="email"]'))
-        )
-        # Fill email
-        email_input = driver.find_element(By.CSS_SELECTOR, 'input[type="email"], input[name="email"]')
-        email_input.clear()
-        email_input.send_keys(LOGIN_EMAIL)
-        # Fill password
-        pwd_input = driver.find_element(By.CSS_SELECTOR, 'input[type="password"], input[name="password"]')
-        pwd_input.clear()
-        pwd_input.send_keys(LOGIN_PASSWORD)
-        # Wait for you to manually enter the captcha
-        captcha_input = driver.find_element(By.CSS_SELECTOR, 'input[name="captcha"], input[type="text"][autocomplete="off"]')
-        print("Please view the captcha image in the browser, then enter the captcha here:")
-        captcha_code = input("Captcha: ").strip()
-        captcha_input.clear()
-        captcha_input.send_keys(captcha_code)
-        # Submit
-        captcha_input.send_keys(u'\\ue007')  # Enter key
-        print("Login form submitted automatically")
-        time.sleep(2)
-    except Exception as e:
-        print(f"Automatic login failed: {e}")
+    print(f"Successfully obtained information for video code {video_code}")
+    return _map_result(raw)
 
 def read_video_codes_from_file(filename):
     """Read video codes from a text file"""
@@ -532,107 +124,137 @@ def read_video_codes_from_file(filename):
         print(f"Error reading video codes from file {filename}: {e}")
         return []
 
-def crawl_by_video_codes(driver, video_codes):
-    """Crawl videos by their codes"""
+def crawl_by_video_codes(video_codes):
+    """Crawl videos by their codes (each code runs the full Playwright fallback pipeline)"""
     results = []
-    
+
     for i, code in enumerate(video_codes, 1):
-        print(f"\\nProcessing video {i}/{len(video_codes)}: {code}")
+        print(f"\nProcessing video {i}/{len(video_codes)}: {code}")
         try:
-            # Search for the video
-            detail_url = search_video_by_code(driver, code)
-            
-            if detail_url:
-                # Parse the video details
-                result = parse_detail(driver, detail_url)
+            result = crawl_single_video(code)
+            if result:
                 results.append(result)
                 print(f"Successfully parsed: {result['title']}")
             else:
                 print(f"Video not found: {code}")
-                results.append({
-                    'title': 'Not Found',
-                    'video_id': code,
-                    'detail_url': 'N/A',
-                    'release_date': 'N/A',
-                    'duration': 'N/A',
-                    'rating': 'N/A',
-                    'tags': [],
-                    'actors': [],
-                    'studio': 'N/A',
-                    'img_url': '',
-                    'local_img_path': None,
-                    'magnet_links': []
-                })
-            
-            if i < len(video_codes):
-                wait_time = random.uniform(3, 6)
-                print(f"Waiting {wait_time:.1f} seconds...")
-                time.sleep(wait_time)
-                
+                results.append(_failed_result(code, 'Not Found'))
         except Exception as e:
             print(f"Error processing video {code}: {e}")
-            results.append({
-                'title': 'Parse Error',
-                'video_id': code,
-                'detail_url': 'N/A',
-                'release_date': 'N/A',
-                'duration': 'N/A',
-                'rating': 'N/A',
-                'tags': [],
-                'actors': [],
-                'studio': 'N/A',
-                'img_url': '',
-                'local_img_path': None,
-                'magnet_links': []
-            })
-    
+            results.append(_failed_result(code, 'Parse Error'))
+
+        if i < len(video_codes):
+            wait_time = random.uniform(3, 6)
+            print(f"Waiting {wait_time:.1f} seconds...")
+            time.sleep(wait_time)
+
     return results
 
-def crawl_homepage_videos(driver, max_pages=MAX_PAGES):
+def _pass_page_gates_pw(page, attempt):
+    """Handle Cloudflare / age confirmation / login gates. Returns True if passed."""
+    if is_cloudflare_challenge_pw(page):
+        print("检测到 Cloudflare 验证页，等待通过...", file=sys.stderr)
+        if attempt["headless"]:
+            print("当前为无头模式，无法人工验证，切换到有界面模式重试。", file=sys.stderr)
+            return False
+        if not wait_for_cloudflare_clear_pw(page, timeout_seconds=180):
+            return False
+    if is_age_confirmation_pw(page):
+        print("检测到年龄确认页，尝试自动点击...", file=sys.stderr)
+        if not dismiss_age_confirmation_pw(page):
+            print("未能自动通过年龄确认，请手动点击...", file=sys.stderr)
+            if attempt["headless"]:
+                return False
+            for _ in range(30):
+                if not is_age_confirmation_pw(page):
+                    break
+                time.sleep(2)
+    if is_login_page_pw(page):
+        print("检测到登录页，请在浏览器中完成登录...", file=sys.stderr)
+        if attempt["headless"]:
+            return False
+        if not wait_for_manual_login_pw(page, timeout_seconds=240):
+            return False
+    return True
+
+def get_video_detail_links_pw(page, base_url, max_pages=MAX_PAGES):
+    """Get video detail links from the homepage listing via Playwright"""
+    all_links = []
+    seen = set()
+    for page_num in range(1, max_pages + 1):
+        url = base_url if page_num == 1 else f"{base_url}?page={page_num}"
+        page.goto(url, wait_until="domcontentloaded", timeout=60000)
+        random_delay(1.5, 3.0)
+        if is_cloudflare_challenge_pw(page) or is_login_page_pw(page):
+            break
+        found = page.evaluate("""
+            () => Array.from(document.querySelectorAll('a[href*="/v/"]'))
+                .map(a => a.href)
+                .filter(h => /\\/v\\/[A-Za-z0-9]+$/.test(h))
+        """)
+        if not found:
+            break
+        for link in found:
+            if link not in seen:
+                seen.add(link)
+                all_links.append(link)
+        print(f"Page {page_num}: collected {len(all_links)} links so far")
+    return all_links
+
+def crawl_homepage_videos(max_pages=MAX_PAGES):
     """Crawl videos from homepage"""
-    print(f"Starting to crawl homepage: {BASE_URL}")
-    links = get_video_detail_links(driver, max_pages)
-    if not links:
-        print("No detail page links obtained, exiting program")
-        return []
-    
-    print(f"Obtained {len(links)} detail page links, starting to parse...")
-    results = []
-    
-    for i, url in enumerate(links, 1):
-        print(f"\\nProcessing item {i}/{len(links)}...")
-        try:
-            result = parse_detail(driver, url)
-            results.append(result)
-            print(f"Successfully parsed: {result['title']}")
-            if i < len(links):
-                wait_time = random.uniform(3, 6)
-                print(f"Waiting {wait_time:.1f} seconds...")
-                time.sleep(wait_time)
-        except Exception as e:
-            print(f"Parse error {url}: {e}")
-            results.append({
-                'title': 'Parse failed',
-                'video_id': 'N/A',
-                'detail_url': url,
-                'release_date': 'N/A',
-                'duration': 'N/A',
-                'rating': 'N/A',
-                'tags': [],
-                'actors': [],
-                'img_url': '',
-                'local_img_path': None,
-                'magnet_links': []
-            })
-    
-    return results
+    for attempt in get_attempt_configs(USE_SOCKS5_PROXY):
+        for browser_name in get_browser_preferences():
+            for profile_mode in get_profile_modes():
+                session = setup_playwright_session(
+                    use_proxy=attempt["use_proxy"],
+                    headless=attempt["headless"],
+                    browser_name=browser_name,
+                    profile_mode=profile_mode
+                )
+                if not session:
+                    continue
+                page = session["page"]
+                try:
+                    for base_url in get_base_url_candidates(attempt["use_proxy"]):
+                        page.goto(base_url, wait_until="domcontentloaded", timeout=60000)
+                        random_delay(1.5, 3.0)
+                        if not _pass_page_gates_pw(page, attempt):
+                            continue
+                        ensure_preferred_language_pw(page, session["context"], base_url)
+                        links = get_video_detail_links_pw(page, base_url, max_pages)
+                        if not links:
+                            continue
+
+                        print(f"Obtained {len(links)} detail page links, starting to parse...")
+                        results = []
+                        for i, url in enumerate(links, 1):
+                            print(f"\nProcessing item {i}/{len(links)}...")
+                            try:
+                                raw = parse_detail_pw(page, url, base_url, attempt["use_proxy"])
+                                if raw and raw.get('title') not in (None, 'N/A'):
+                                    results.append(_map_result(raw))
+                                    print(f"Successfully parsed: {raw['title']}")
+                                else:
+                                    print(f"Parse failed: {url}")
+                            except Exception as e:
+                                print(f"Parse error {url}: {e}")
+                            if i < len(links):
+                                wait_time = random.uniform(3, 6)
+                                print(f"Waiting {wait_time:.1f} seconds...")
+                                time.sleep(wait_time)
+                        if results:
+                            return results
+                except Exception:
+                    pass
+                finally:
+                    close_playwright_session(session)
+    return []
 
 def save_results_to_json(results, filename):
     """Save results to JSON file"""
-    import json
     json_path = os.path.join('results', filename)
     print(f"\nStarting to save results to {json_path}...")
-    
+
     # Convert results to JSON-serializable format
     json_results = []
     for result in results:
@@ -651,66 +273,17 @@ def save_results_to_json(results, filename):
             'magnet_links': result['magnet_links']
         }
         json_results.append(json_result)
-    
+
     with open(json_path, 'w', encoding='utf-8') as f:
         json.dump(json_results, f, ensure_ascii=False, indent=2)
-    
-    print(f"Results saved to {json_path}")
 
-def crawl_single_video(video_code):
-    """Crawl information for a single video code
-    
-    Args:
-        video_code (str): Video code, e.g. 'ABF-255'
-        
-    Returns:
-        dict: Dictionary containing video information, returns None if failed
-    """
-    driver = setup_driver()
-    if not driver:
-        return None
-        
-    try:
-        # Handle login
-        driver.get(BASE_URL)
-        random_delay(2, 4)
-        
-        try:
-            if driver.find_elements(By.CSS_SELECTOR, 'input[type="email"], input[name="email"]'):
-                print("Login window detected, manual login required...")
-                handle_login(driver)
-                print("Waiting 30 seconds, please complete captcha input and login...")
-                time.sleep(30)
-                random_delay(2, 4)
-        except Exception as e:
-            print(f"Login process exception: {e}")
-        
-        # Search video
-        detail_url = search_video_by_code(driver, video_code)
-        if not detail_url:
-            print(f"Detail page not found for video code {video_code}")
-            return None
-            
-        # Parse detail page
-        result = parse_detail(driver, detail_url)
-        if result:
-            print(f"Successfully obtained information for video code {video_code}")
-            return result
-        else:
-            print(f"Failed to parse detail page for video code {video_code}")
-            return None
-            
-    except Exception as e:
-        print(f"Error occurred while crawling video code {video_code}: {e}")
-        return None
-    finally:
-        driver.quit()
+    print(f"Results saved to {json_path}")
 
 def save_results_to_excel(results, filename):
     """Save results to Excel file"""
     excel_path = os.path.join('results', filename)
     print(f"Generating Excel file to: {excel_path}")
-    
+
     try:
         # Flatten the data for Excel
         excel_data = []
@@ -729,7 +302,7 @@ def save_results_to_excel(results, filename):
                 '本地图片路径': result['local_img_path'] or '',
                 '下载链接': '; '.join(result['magnet_links'])
             })
-        
+
         df = pd.DataFrame(excel_data)
         df.to_excel(excel_path, index=False, engine='openpyxl')
         print("Excel file generated successfully!")
@@ -737,15 +310,12 @@ def save_results_to_excel(results, filename):
         print(f"Failed to generate Excel file: {e}")
 
 if __name__ == '__main__':
-    import sys
-    
     # Check if a video code is provided as command line argument
     if len(sys.argv) > 1:
         video_code = sys.argv[1]
         print(f"Getting information for video: {video_code}")
         result = crawl_single_video(video_code)
         if result:
-            import json
             # Convert to JSON format
             json_result = {
                 'title': result['title'],
@@ -762,46 +332,28 @@ if __name__ == '__main__':
                 'magnet_links': result['magnet_links']
             }
             print(json.dumps(json_result, ensure_ascii=False, indent=2))
-        exit(0)
-    
-    # Original batch processing code
-    driver = setup_driver()
-    if not driver:
-        exit(1)
-    
-    # Check for login window
-    try:
-        if driver.find_elements(By.CSS_SELECTOR, 'input[type="email"], input[name="email"]'):
-            print("Login window detected, logging in automatically...")
-            handle_login(driver)
-            print("Waiting 30 seconds, please complete captcha input and login...")
-            time.sleep(30)
-            random_delay(2, 4)
-    except Exception as e:
-        print(f"Login process exception: {e}")
-    
-    try:
-        # Check if av_codes_list.txt exists
-        if os.path.exists('av_codes_list.txt'):
-            print("Found av_codes_list.txt, crawling videos by codes...")
-            video_codes = read_video_codes_from_file('av_codes_list.txt')
-            if video_codes:
-                results = crawl_by_video_codes(driver, video_codes)
-            else:
-                print("No video codes found in av_codes_list.txt")
-                results = []
         else:
-            print("av_codes_list.txt not found, crawling homepage videos...")
-            results = crawl_homepage_videos(driver, MAX_PAGES)
-        
-        if results:
-            # Save results
-            save_results_to_json(results, 'javdb_results.json')
-            save_results_to_excel(results, 'javdb_results.xlsx')
-            print(f"Crawling completed! Processed {len(results)} items in total.\nAll files saved to ./results/ directory")
+            print(json.dumps({"error": "Failed to crawl video information"}, ensure_ascii=False, indent=2))
+            sys.exit(1)
+        sys.exit(0)
+
+    # Batch processing
+    if os.path.exists('av_codes_list.txt'):
+        print("Found av_codes_list.txt, crawling videos by codes...")
+        video_codes = read_video_codes_from_file('av_codes_list.txt')
+        if video_codes:
+            results = crawl_by_video_codes(video_codes)
         else:
-            print("No results to save.")
-            
-    finally:
-        driver.quit()
-        print("Browser closed")
+            print("No video codes found in av_codes_list.txt")
+            results = []
+    else:
+        print("av_codes_list.txt not found, crawling homepage videos...")
+        results = crawl_homepage_videos(MAX_PAGES)
+
+    if results:
+        # Save results
+        save_results_to_json(results, 'javdb_results.json')
+        save_results_to_excel(results, 'javdb_results.xlsx')
+        print(f"Crawling completed! Processed {len(results)} items in total.\nAll files saved to ./results/ directory")
+    else:
+        print("No results to save.")

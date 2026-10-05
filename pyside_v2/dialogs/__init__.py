@@ -8,6 +8,9 @@ from .jav_info_dialog import JavInfoDialog
 from .actor_detail import ActorDetailWindow
 from .actor_browser import ActorBrowserDialog
 from .smart_update_dialog import SmartUpdateDialog
+from .settings import SettingsDialog
+from .duplicates import DuplicatesDialog
+from .stats import StatsDialog
 
 __all__ = [
     "ImportVideosDialog",
@@ -17,4 +20,7 @@ __all__ = [
     "ActorDetailWindow",
     "ActorBrowserDialog",
     "SmartUpdateDialog",
+    "SettingsDialog",
+    "DuplicatesDialog",
+    "StatsDialog",
 ]

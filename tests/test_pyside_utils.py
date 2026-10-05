@@ -12,7 +12,6 @@ from utils.maintenance import MaintenanceManager
 from utils.thumbnails import ThumbnailGenerator
 from javsp_integration import JavSPIntegration
 from javdb_crawler_single import get_attempt_configs, is_cloudflare_challenge_html
-from javdb_login_helper import get_login_attempts
 
 class TestUtils(unittest.TestCase):
     def setUp(self):
@@ -128,13 +127,13 @@ class TestUtils(unittest.TestCase):
             mock_manager.batch_search.assert_called_once_with(["SHKD-690"], use_parallel=True)
 
     def test_javdb_attempt_configs_proxy_default(self):
-        """对齐源码 get_attempt_configs(True)：先非 headless 再 headless，再带 proxy。"""
+        """对齐源码 get_attempt_configs(True)：代理优先（避免无代理遍历备用域名浪费时间）。"""
         configs = get_attempt_configs(True)
         self.assertGreaterEqual(len(configs), 4)  # proxy=True → 4 个配置
-        # 源码顺序：no-proxy+no-headless → no-proxy+headless → proxy+no-headless → proxy+headless
-        self.assertEqual(configs[0], {"use_proxy": False, "headless": False})
-        self.assertEqual(configs[1], {"use_proxy": False, "headless": True})
-        self.assertTrue(any(c["use_proxy"] for c in configs))
+        # 源码顺序：proxy+no-headless → proxy+headless → no-proxy+no-headless → no-proxy+headless
+        self.assertEqual(configs[0], {"use_proxy": True, "headless": False})
+        self.assertEqual(configs[1], {"use_proxy": True, "headless": True})
+        self.assertTrue(any(not c["use_proxy"] for c in configs))
 
     def test_javdb_attempt_configs_direct_default(self):
         """对齐源码 get_attempt_configs(False)：只有两个无代理配置。"""
@@ -165,11 +164,6 @@ class TestUtils(unittest.TestCase):
 
         # 场景 3：正常页面（无 cf 标记）→ False
         self.assertFalse(is_cloudflare_challenge_html("<html><title>正常页面</title></html>", "正常页面"))
-
-    def test_login_helper_attempts_no_proxy_first(self):
-        attempts = get_login_attempts(False)
-        self.assertGreaterEqual(len(attempts), 1)
-        self.assertFalse(attempts[0]["proxy"])
 
     def test_environment_detection(self):
         """验证跨系统环境自检能力（macOS / Windows / Linux 均可运行）。"""

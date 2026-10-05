@@ -125,11 +125,11 @@ python media_library_v2.py         # PySide6 v2（推荐·双主题·高性能�
 > macOS 用户也可用 Spotlight（`⌘ + 空格`）搜索 `Media Library` 启动 Tk 版，或 `Media Library v2` 启动 v2（双击对应的 `.app`）。
 
 ### 🕷️ 数据爬虫与登录
-- **`javdb_login_helper.py`**: **[基础组件]** JAVDB 登录助手。使用独立的浏览器用户数据目录（`~/.javdb_scraper/user_data` 或本地 `.edge_driver_user_data`）来持久化登录状态，只需登录一次即可供所有爬虫脚本使用。
+- **`javdb_login_helper.py`**: **[基础组件]** JAVDB 登录助手（Playwright 版）。委托 `javdb_crawler_single.py --login` 打开持久化会话浏览器完成手动登录，登录态保存在 `.playwright_user_data/` 供所有爬虫脚本复用。
 - **`javdb_crawler.py`**: 批量爬虫工具，支持自动遍历页面抓取视频信息。
 - **`javdb_crawler_single.py`**: 单视频抓取工具，用于精确获取指定番号的信息。
 - **`javdb_actor_all.py`**: 演员作品全量爬虫，支持抓取指定演员的所有作品、磁力链接，并支持断点续传。
-- **`actor_crawler_with_db.py`**: 演员资料爬虫，抓取演员头像及详细资料并存入数据库。
+- **`javdb_actor_profile_repair*.py` / `actor_crawler*.py`**: 旧版 Selenium 演员爬虫，已归档（本地 `obs/` 目录，不随仓库分发；由 `javdb_actor_all.py` 取代）。
 - **`javbus_crawler_single.py`**: JavBus 源的抓取工具，作为数据补充。
 - **`javsp_*.py` (JavSP 系统)**: **[三级回退备选]** 多源爬虫系统，集成了 JavBus、JavLibrary、AvSox、FC2 等多个数据源。当主爬虫无法获取完整信息时自动降级使用，通过 `javsp_integration.py` 与媒体库无缝集成。
 
@@ -142,8 +142,11 @@ python media_library_v2.py         # PySide6 v2（推荐·双主题·高性能�
 
 ### 🛠️ 辅助工具
 - **`video_integrity_checker.py`**: 坏档检测工具。批量检查视频文件是否完整、能否正常播放（基于 OpenCV）。
-- **`update_msedge_driver.py`**: 驱动更新工具。自动检测系统 Edge 浏览器版本并下载对应的 WebDriver，解决爬虫驱动不兼容问题。
 - **`init_database.py`**: 数据库初始化脚本，用于首次运行时创建必要的数据库表结构。
+- **`utils/secrets.py`**: 统一密钥读取（密钥集中存 OneDrive，仓库不存明文）。
+- **`nas_run.sh` / `nas_get.py` / `nas_put.py`**: NAS（DXP4800）运维三件套，SSH 执行/取/传文件，凭据运行时从配置读取。
+- **`nas_move_*.py` / `db_apply_*.py` / `merge_videos.py`**: NAS 媒体库迁移、转码/迁移结果回写数据库、视频重合比对。
+- **`magnet_health_check.py`**: 磁链健康检查与规则优选复制（支持 JavBus 回退）。
 
 ### 🔬 基于 AI 的视频内容分析（video_analyzer/）
 
@@ -500,7 +503,6 @@ python media_library.py
 - `python-magic` - 文件类型检测
 - `requests` - 网络请求
 - `beautifulsoup4` - HTML解析
-- `selenium` - 网页自动化
 - `PyYAML` - JavSP 配置解析
 - `cloudscraper` - JavSP CloudFlare 绕过
 - `lxml` - JavSP HTML 解析
@@ -538,12 +540,12 @@ python media_library.py
 - **用户手册**: `用户手册.exe` - HTML格式的详细使用手册
 - **辅助工具**: 20+ 个专用工具脚本（位于 `bin/tools/scripts/` 目录）
 - **配置文件**: GUI配置、JAVDB配置、标签词汇表等
-- **运行依赖**: FFmpeg、Edge WebDriver等必要工具
+- **运行依赖**: FFmpeg 等必要工具
 
 ##### 工具分类
 - 🕷️ **数据爬虫工具**: javdb_crawler_single.exe、javdb_actor_all.exe 等
 - 📦 **媒体库维护工具**: smart_video_updater.exe、fast_smart_media_updater.exe 等
-- 🔧 **系统工具**: video_integrity_checker.exe、update_msedge_driver.exe 等
+- 🔧 **系统工具**: video_integrity_checker.exe 等
 - 🤖 **AI分析工具**: video_multimodal_analyzer.exe、video_tagging.exe 等
 
 ##### 快捷启动脚本
@@ -730,18 +732,25 @@ media-library/
 #### 功能特点
 - 🌟 **优秀架构**：代码结构清晰，错误处理完善
 - 🧲 **磁力链接优先级**：-UC > -C > 其他版本
-- 🔄 **智能爬取**：支持演员全量爬取，自动分页
-- 🌐 **智能代理**：通过浏览器参数设置代理，避免全局修改
-- 🔐 **登录处理**：智能检测登录页面，支持手工登录和验证码
-- 🛡️ **多重尝试**：多种驱动启动方式，确保稳定性
+- 🔄 **智能爬取**：支持演员全量爬取，自动分页（连续两页无新链接判定末页）
+- 🎭 **Playwright 驱动**：持久化登录态（`.playwright_user_data/`），与 `javdb_crawler_single.py` 共用
+- 🌐 **智能代理**：`javdb.com` 主站自动走 SOCKS5，镜像域名默认直连
+- 🔐 **登录处理**：自动处理 Cloudflare 验证/年龄确认，支持手工登录与自动填充
+- 🛡️ **多重恢复**：Cloudflare 验证失败自动等待重试并恢复会话
 
 #### 使用方法
 ```bash
-# 演员全量爬取（推荐）
-python javdb_actor_all.py https://javdb.com/actors/yERr 美乃雀 10
+# 演员全量爬取（默认：单体+可下载，推荐）
+python javdb_actor_all.py https://javdb.com/actors/yERr
 
-# 爬取3页
+# 抓取全部单体作品并写入指定 CSV
+python javdb_actor_all.py https://javdb.com/actors/5Dya --filter s --csv results/javdb_5Dya_solo.csv
+
+# 兼容旧位置参数写法（演员名、最大页数）
 python javdb_actor_all.py https://javdb.com/actors/yERr 美乃雀 3
+
+# 首次使用：手动登录并保存登录态
+python javdb_actor_all.py --login
 ```
 
 #### 输出格式

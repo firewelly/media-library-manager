@@ -14,7 +14,12 @@ if ! command -v python3 &> /dev/null; then
         exit 1
     fi
 else
-    PYTHON_CMD="python3"
+    # 优先使用依赖完整的解释器（miniforge 环境含 requests/playwright/cv2/PySide6 等）
+    if [ -x "/opt/homebrew/Caskroom/miniforge/base/bin/python3" ]; then
+        PYTHON_CMD="/opt/homebrew/Caskroom/miniforge/base/bin/python3"
+    else
+        PYTHON_CMD="python3"
+    fi
 fi
 
 echo "使用 Python: $($PYTHON_CMD --version 2>&1)"

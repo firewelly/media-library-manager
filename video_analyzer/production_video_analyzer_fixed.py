@@ -25,6 +25,10 @@ from video_analyzer_pipeline import PipelineVideoAnalyzer
 
 class ProductionVideoAnalyzer:
     """Production版本视频分析器"""
+
+    # 首次均匀采样失败后的随机重采样次数（共 1 + RANDOM_RETRY_PASSES 遍，全部失败才视为无标签）
+    RANDOM_RETRY_PASSES = 2
+
     
     def __init__(self, db_path: str, output_dir: str = None, verbose: bool = True, 
                  api_key: str = None, use_pipeline: bool = False, max_workers: int = 3):
@@ -404,21 +408,45 @@ class ProductionVideoAnalyzer:
             
             if result.get('success', False):
                 analysis_text = result.get('analysis', '')
-                
+
                 tags = self.analyzer.extract_tags_from_analysis(analysis_text)
-                description = self.extract_description_from_analysis(analysis_text)
-                
-                self.log_message(f"分析成功，提取到 {len(tags)} 个标签: {', '.join(tags[:5])}{'...' if len(tags) > 5 else ''}")
-                
-                # 保存到数据库
-                self.save_tags_to_database(video_id, tags, description)
-                
-                # 保存到CSV
-                self.save_to_csv(video, tags, description, analysis_time)
-                
-                self.success_count += 1
-                return True
-                
+
+                # 首遍无标签 -> 30帧随机采样重试（共1+RANDOM_RETRY_PASSES遍，全部失败才视为无标签）
+                retry_attempt = 0
+                while not tags and retry_attempt < self.RANDOM_RETRY_PASSES:
+                    retry_attempt += 1
+                    self.log_message(f"首遍未生成标签，30帧随机采样重试（第{retry_attempt}次）...")
+                    frames_base64 = self.analyzer.extract_frames_random(video_path, num_frames=30)
+                    if not frames_base64:
+                        continue
+                    prompt = self.analyzer._generate_analysis_prompt_adult(video_path)
+                    retry_result = self.analyzer.analyze_frames_with_local_model(frames_base64, prompt)
+                    analysis_time = time.time() - start_time
+                    if retry_result.get('success', False):
+                        analysis_text = retry_result.get('analysis', '')
+                        tags = self.analyzer.extract_tags_from_analysis(analysis_text)
+
+                if tags:
+                    description = self.extract_description_from_analysis(analysis_text)
+
+                    self.log_message(f"分析成功，提取到 {len(tags)} 个标签: {', '.join(tags[:5])}{'...' if len(tags) > 5 else ''}")
+
+                    # 保存到数据库
+                    self.save_tags_to_database(video_id, tags, description)
+
+                    # 保存到CSV
+                    self.save_to_csv(video, tags, description, analysis_time)
+
+                    self.success_count += 1
+                    return True
+
+                # 全部采样遍历后仍无标签：不入库，CSV 记为无标签
+                error_msg = "多次采样均未生成标签(无标签)"
+                self.log_message(error_msg)
+                self.save_to_csv(video, [], "", analysis_time, error_msg)
+                self.error_count += 1
+                return False
+
             else:
                 error_msg = result.get('error', '未知错误')
                 self.log_message(f"分析失败: {error_msg}")
