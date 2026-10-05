@@ -155,3 +155,28 @@ merge.conf
 .migrate_av_remaining_plan.json
 .migrate_av_remaining_progress.json
 migrate_run.log
+
+# AI 助手项目记忆文件（本地配置，禁止提交）
+AGENTS.md
+CLAUDE.md
+
+# 个人媒体数据（路径/哈希/分析/词表，禁止提交）
+trash_check_result.txt
+vocabulary_tags.txt
+video_analyzer/vocabulary_tags.txt
+video_analyzer/analysis_log.txt
+video_analyzer/production_analysis_*.csv
+reports/analysis_out.csv
+reports/folder_reassociation_preview.csv
+reports/usr_untracked_*.txt
+black_jav_md5.csv
+black_jav_md5_index.json
+black_jav_migration_plan.json
+probe_result.tsv
+transcode_manifest.tsv
+usb_copy_ok.tsv
+gui_config_v2.json
+merge_folders5.py
+
+# 旧一次性脚本目录（保留本地）
+/obs/
